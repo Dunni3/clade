@@ -1,0 +1,6 @@
+[project]
+name = "terminal-spawner"
+version = "0.1.0"
+description = "MCP server for spawning terminal windows and connecting to brother Claude Code instances"
+requires-python = ">=3.10"
+dependencies = ["mcp[cli]"]
