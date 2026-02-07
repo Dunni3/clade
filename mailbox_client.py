@@ -1,0 +1,75 @@
+"""HTTP client for the brother mailbox API."""
+
+from __future__ import annotations
+
+import httpx
+
+
+class MailboxClient:
+    """Thin wrapper around the mailbox REST API."""
+
+    def __init__(self, base_url: str, api_key: str):
+        self.base_url = base_url.rstrip("/")
+        self.headers = {"Authorization": f"Bearer {api_key}"}
+
+    def _url(self, path: str) -> str:
+        return f"{self.base_url}/api/v1{path}"
+
+    async def send_message(
+        self, recipients: list[str], body: str, subject: str = ""
+    ) -> dict:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                self._url("/messages"),
+                json={"recipients": recipients, "body": body, "subject": subject},
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def check_mailbox(
+        self, unread_only: bool = True, limit: int = 20
+    ) -> list[dict]:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                self._url("/messages"),
+                params={"unread_only": unread_only, "limit": limit},
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def read_message(self, message_id: int) -> dict:
+        async with httpx.AsyncClient() as client:
+            # Get full message detail
+            resp = await client.get(
+                self._url(f"/messages/{message_id}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            msg = resp.json()
+
+            # Auto-mark as read (ignore 404 if already read)
+            try:
+                await client.post(
+                    self._url(f"/messages/{message_id}/read"),
+                    headers=self.headers,
+                    timeout=10,
+                )
+            except httpx.HTTPStatusError:
+                pass
+
+            return msg
+
+    async def unread_count(self) -> int:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                self._url("/unread"),
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()["unread"]

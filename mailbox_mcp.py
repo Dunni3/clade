@@ -1,15 +1,16 @@
+"""Lightweight MCP server for remote brothers (Oppy/Jerry).
+
+Only exposes mailbox tools — no terminal spawning (that's Doot's job).
+Requires env vars: MAILBOX_URL, MAILBOX_API_KEY, MAILBOX_NAME.
+"""
+
 import os
-from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
 
-from brothers import BROTHERS
 from mailbox_client import MailboxClient
-from terminal import generate_applescript, run_applescript
 
-mcp = FastMCP("terminal-spawner")
-
-# -- Mailbox configuration (optional — tools degrade gracefully) --
+mcp = FastMCP("brother-mailbox")
 
 _mailbox_url = os.environ.get("MAILBOX_URL")
 _mailbox_api_key = os.environ.get("MAILBOX_API_KEY")
@@ -18,49 +19,6 @@ _mailbox_name = os.environ.get("MAILBOX_NAME")
 _mailbox: MailboxClient | None = None
 if _mailbox_url and _mailbox_api_key:
     _mailbox = MailboxClient(_mailbox_url, _mailbox_api_key)
-
-
-@mcp.tool()
-def spawn_terminal(
-    command: str | None = None,
-    app: Literal["iterm2", "terminal"] = "terminal",
-) -> str:
-    """Open a new terminal window, optionally running a command in it.
-
-    Args:
-        command: Shell command to run in the new window. If omitted, opens an empty window.
-        app: Terminal application to use. Defaults to Terminal.app.
-    """
-    script = generate_applescript(command, app)
-    result = run_applescript(script)
-    if result != "OK":
-        return result
-    if command:
-        return f"Opened new {app} window and ran: {command}"
-    return f"Opened new {app} window"
-
-
-@mcp.tool()
-def connect_to_brother(name: Literal["jerry", "oppy"]) -> str:
-    """Open a terminal session to one of our brothers (other Claude Code instances).
-
-    Args:
-        name: Which brother to connect to — "jerry" (cluster) or "oppy" (masuda).
-    """
-    brother = BROTHERS.get(name)
-    if not brother:
-        return f"Unknown brother: {name}. Available: {', '.join(BROTHERS.keys())}"
-
-    script = generate_applescript(brother["command"], "terminal")
-    result = run_applescript(script)
-    if result != "OK":
-        return result
-    return f"Opened session with {brother['description']}"
-
-
-# ---------------------------------------------------------------------------
-# Mailbox tools
-# ---------------------------------------------------------------------------
 
 _NOT_CONFIGURED = "Mailbox not configured. Set MAILBOX_URL and MAILBOX_API_KEY env vars."
 
@@ -74,7 +32,7 @@ async def send_message(
     """Send a message to one or more brothers.
 
     Args:
-        recipients: List of brother names (e.g. ["oppy", "jerry"]).
+        recipients: List of brother names (e.g. ["doot", "jerry"]).
         body: The message body.
         subject: Optional subject line.
     """

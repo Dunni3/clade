@@ -1,7 +1,13 @@
 import subprocess
 
 
+def _escape_for_applescript(s: str) -> str:
+    """Escape a string for use inside an AppleScript double-quoted literal."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def generate_applescript(command: str | None = None, app: str = "iterm2") -> str:
+    escaped = _escape_for_applescript(command) if command else None
     if app == "iterm2":
         if command:
             return (
@@ -9,7 +15,7 @@ def generate_applescript(command: str | None = None, app: str = "iterm2") -> str
                 "    activate\n"
                 "    create window with default profile\n"
                 "    tell current session of current window\n"
-                f'        write text "{command}"\n'
+                f'        write text "{escaped}"\n'
                 "    end tell\n"
                 "end tell"
             )
@@ -25,7 +31,7 @@ def generate_applescript(command: str | None = None, app: str = "iterm2") -> str
             return (
                 'tell application "Terminal"\n'
                 "    activate\n"
-                f'    do script "{command}"\n'
+                f'    do script "{escaped}"\n'
                 "end tell"
             )
         else:

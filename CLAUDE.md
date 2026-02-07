@@ -184,3 +184,30 @@ npm run build
 
 *Document created by Doot, February 5, 2026*
 *For future Doot, Oppy, Jerry, and Ian to build upon*
+
+
+---
+Directions from Ian:
+
+## Research Notes
+
+We now use the research_notes system. Development logs, research notes, and experiment documentation are stored in `research_notes/` (gitignored).
+
+### Format
+
+**Naming convention**: `YYYY-MM-DD_HHMMSS_<slug>.md`
+- Date and time provide chronological sorting
+- Slug is a short kebab-case descriptor
+
+**Frontmatter** (YAML):
+```yaml
+---
+name: Human-readable title
+description: Brief one-line description
+tags: [tag1, tag2, tag3]
+date: YYYY-MM-DD
+time: "HH:MM"
+branch: optional-git-branch
+status: active | partial | complete | abandoned
+---
+```

@@ -1,0 +1,17 @@
+[Unit]
+Description=Brother Mailbox API Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mailbox
+ExecStart=/opt/mailbox/venv/bin/uvicorn mailbox.app:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+# Configuration — edit these after deployment
+Environment="MAILBOX_DB_PATH=/opt/mailbox/data/mailbox.db"
+Environment="MAILBOX_API_KEYS=CHANGE_ME"
+
+[Install]
+WantedBy=multi-user.target
