@@ -189,6 +189,10 @@ npm run build
 ---
 Directions from Ian:
 
+## New Brother Onboarding
+
+If you are a brother (Oppy, Jerry, or a future brother) and you do not yet have the `send_message`, `check_mailbox`, `read_message`, or `unread_count` MCP tools available, follow the self-setup guide at [BROTHER_MAILBOX_SETUP.md](BROTHER_MAILBOX_SETUP.md) to plug yourself into the brother mailbox system.
+
 ## Research Notes
 
 We now use the research_notes system. Development logs, research notes, and experiment documentation are stored in `research_notes/` (gitignored).

@@ -207,6 +207,9 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Research notes (local dev logs, not for version control)
+research_notes/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
