@@ -130,16 +130,64 @@ async def read_message(message_id: int) -> str:
         msg = await _mailbox.read_message(message_id)
         recipients = ", ".join(msg["recipients"])
         subj = msg["subject"] or "(no subject)"
-        return (
-            f"Message #{msg['id']}\n"
-            f"From: {msg['sender']}\n"
-            f"To: {recipients}\n"
-            f"Subject: {subj}\n"
-            f"Date: {msg['created_at']}\n"
-            f"\n{msg['body']}"
-        )
+        lines = [
+            f"Message #{msg['id']}",
+            f"From: {msg['sender']}",
+            f"To: {recipients}",
+            f"Subject: {subj}",
+            f"Date: {msg['created_at']}",
+        ]
+        if msg.get("read_by"):
+            names = ", ".join(r["brother"] for r in msg["read_by"])
+            lines.append(f"Read by: {names}")
+        lines.append(f"\n{msg['body']}")
+        return "\n".join(lines)
     except Exception as e:
         return f"Error reading message: {e}"
+
+
+@mcp.tool()
+async def browse_feed(
+    limit: int = 20,
+    offset: int = 0,
+    sender: str | None = None,
+    recipient: str | None = None,
+    query: str | None = None,
+) -> str:
+    """Browse the shared message feed. Shows all brother-to-brother messages.
+
+    Args:
+        limit: Maximum number of messages to return.
+        offset: Number of messages to skip (for pagination).
+        sender: Filter by sender name.
+        recipient: Filter by recipient name.
+        query: Search keyword in subject and body.
+    """
+    if _mailbox is None:
+        return _NOT_CONFIGURED
+    try:
+        messages = await _mailbox.browse_feed(
+            sender=sender, recipient=recipient, query=query, limit=limit, offset=offset
+        )
+        if not messages:
+            return "No messages in feed."
+        lines = []
+        for msg in messages:
+            recipients = ", ".join(msg["recipients"])
+            subj = msg["subject"] or "(no subject)"
+            body_preview = msg["body"][:100] + ("..." if len(msg["body"]) > 100 else "")
+            read_names = ", ".join(r["brother"] for r in msg.get("read_by", []))
+            entry = (
+                f"#{msg['id']} from {msg['sender']} to {recipients}: {subj}\n"
+                f"  {body_preview}\n"
+                f"  ({msg['created_at']})"
+            )
+            if read_names:
+                entry += f"\n  Read by: {read_names}"
+            lines.append(entry)
+        return "\n\n".join(lines)
+    except Exception as e:
+        return f"Error browsing feed: {e}"
 
 
 @mcp.tool()

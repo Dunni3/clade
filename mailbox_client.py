@@ -50,6 +50,11 @@ class MailboxClient:
                 headers=self.headers,
                 timeout=10,
             )
+
+            # If 404 (not a recipient), fall back to view endpoint
+            if resp.status_code == 404:
+                return await self.view_message(message_id)
+
             resp.raise_for_status()
             msg = resp.json()
 
@@ -64,6 +69,42 @@ class MailboxClient:
                 pass
 
             return msg
+
+    async def browse_feed(
+        self,
+        *,
+        sender: str | None = None,
+        recipient: str | None = None,
+        query: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        params: dict = {"limit": limit, "offset": offset}
+        if sender:
+            params["sender"] = sender
+        if recipient:
+            params["recipient"] = recipient
+        if query:
+            params["q"] = query
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url("/messages/feed"),
+                params=params,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def view_message(self, message_id: int) -> dict:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.post(
+                self._url(f"/messages/{message_id}/view"),
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
 
     async def unread_count(self) -> int:
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:

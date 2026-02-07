@@ -22,6 +22,13 @@ CREATE TABLE IF NOT EXISTS message_recipients (
     read_at     TEXT,
     PRIMARY KEY (message_id, recipient)
 );
+
+CREATE TABLE IF NOT EXISTS message_reads (
+    message_id  INTEGER NOT NULL REFERENCES messages(id),
+    brother     TEXT NOT NULL,
+    read_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    PRIMARY KEY (message_id, brother)
+);
 """
 
 
@@ -112,6 +119,47 @@ async def get_message(message_id: int, recipient: str) -> dict | None:
         )
         recipient_rows = await cursor.fetchall()
         msg["recipients"] = [r["recipient"] for r in recipient_rows]
+
+        # Get read_by info
+        cursor = await db.execute(
+            "SELECT brother, read_at FROM message_reads WHERE message_id = ?",
+            (message_id,),
+        )
+        read_rows = await cursor.fetchall()
+        msg["read_by"] = [{"brother": r["brother"], "read_at": r["read_at"]} for r in read_rows]
+
+        return msg
+    finally:
+        await db.close()
+
+
+async def get_message_any(message_id: int) -> dict | None:
+    """Get a message by ID without recipient scoping (for feed/view)."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT id, sender, subject, body, created_at FROM messages WHERE id = ?",
+            (message_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        msg = dict(row)
+
+        cursor = await db.execute(
+            "SELECT recipient FROM message_recipients WHERE message_id = ?",
+            (message_id,),
+        )
+        recipient_rows = await cursor.fetchall()
+        msg["recipients"] = [r["recipient"] for r in recipient_rows]
+
+        cursor = await db.execute(
+            "SELECT brother, read_at FROM message_reads WHERE message_id = ?",
+            (message_id,),
+        )
+        read_rows = await cursor.fetchall()
+        msg["read_by"] = [{"brother": r["brother"], "read_at": r["read_at"]} for r in read_rows]
+
         return msg
     finally:
         await db.close()
@@ -128,6 +176,11 @@ async def mark_read(message_id: int, recipient: str) -> bool:
             """,
             (message_id, recipient),
         )
+        if cursor.rowcount > 0:
+            await db.execute(
+                "INSERT OR IGNORE INTO message_reads (message_id, brother) VALUES (?, ?)",
+                (message_id, recipient),
+            )
         await db.commit()
         return cursor.rowcount > 0
     finally:
@@ -147,5 +200,96 @@ async def get_unread_count(recipient: str) -> int:
         )
         row = await cursor.fetchone()
         return row["cnt"]
+    finally:
+        await db.close()
+
+
+async def record_read(message_id: int, brother: str) -> None:
+    """Record that a brother has read/viewed a message. Idempotent."""
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO message_reads (message_id, brother) VALUES (?, ?)",
+            (message_id, brother),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_feed(
+    *,
+    sender: str | None = None,
+    recipient: str | None = None,
+    query: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """Return all messages with optional filters, including recipients and read_by."""
+    db = await get_db()
+    try:
+        where_clauses: list[str] = []
+        params: list = []
+
+        if sender:
+            where_clauses.append("m.sender = ?")
+            params.append(sender)
+
+        if recipient:
+            where_clauses.append(
+                "m.id IN (SELECT message_id FROM message_recipients WHERE recipient = ?)"
+            )
+            params.append(recipient)
+
+        if query:
+            where_clauses.append("(m.subject LIKE ? OR m.body LIKE ?)")
+            like_param = f"%{query}%"
+            params.extend([like_param, like_param])
+
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        sql = f"""
+            SELECT m.id, m.sender, m.subject, m.body, m.created_at
+            FROM messages m
+            {where_sql}
+            ORDER BY m.created_at DESC
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+
+        cursor = await db.execute(sql, params)
+        rows = await cursor.fetchall()
+        messages = [dict(row) for row in rows]
+
+        # Bulk-fetch recipients and read_by for all messages
+        if messages:
+            msg_ids = [m["id"] for m in messages]
+            placeholders = ",".join("?" * len(msg_ids))
+
+            cursor = await db.execute(
+                f"SELECT message_id, recipient FROM message_recipients WHERE message_id IN ({placeholders})",
+                msg_ids,
+            )
+            recip_rows = await cursor.fetchall()
+            recip_map: dict[int, list[str]] = {}
+            for r in recip_rows:
+                recip_map.setdefault(r["message_id"], []).append(r["recipient"])
+
+            cursor = await db.execute(
+                f"SELECT message_id, brother, read_at FROM message_reads WHERE message_id IN ({placeholders})",
+                msg_ids,
+            )
+            read_rows = await cursor.fetchall()
+            read_map: dict[int, list[dict]] = {}
+            for r in read_rows:
+                read_map.setdefault(r["message_id"], []).append(
+                    {"brother": r["brother"], "read_at": r["read_at"]}
+                )
+
+            for msg in messages:
+                msg["recipients"] = recip_map.get(msg["id"], [])
+                msg["read_by"] = read_map.get(msg["id"], [])
+
+        return messages
     finally:
         await db.close()

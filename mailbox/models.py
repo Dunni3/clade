@@ -28,6 +28,11 @@ class MessageSummary(BaseModel):
     is_read: bool
 
 
+class ReadByEntry(BaseModel):
+    brother: str
+    read_at: str
+
+
 class MessageDetail(BaseModel):
     id: int
     sender: str
@@ -36,6 +41,17 @@ class MessageDetail(BaseModel):
     created_at: str
     recipients: list[str]
     is_read: bool
+    read_by: list[ReadByEntry] = []
+
+
+class FeedMessage(BaseModel):
+    id: int
+    sender: str
+    subject: str
+    body: str
+    created_at: str
+    recipients: list[str]
+    read_by: list[ReadByEntry]
 
 
 class SendMessageResponse(BaseModel):

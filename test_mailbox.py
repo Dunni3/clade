@@ -663,6 +663,617 @@ class TestMCPToolsWithMock:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# db.py — read tracking and feed
+# ---------------------------------------------------------------------------
+
+
+class TestDatabaseReadTracking:
+    @pytest.mark.asyncio
+    async def test_record_read(self):
+        msg_id = await mailbox_db.insert_message(
+            sender="doot", subject="Test", body="Body", recipients=["oppy"]
+        )
+        await mailbox_db.record_read(msg_id, "doot")
+        msg = await mailbox_db.get_message_any(msg_id)
+        assert len(msg["read_by"]) == 1
+        assert msg["read_by"][0]["brother"] == "doot"
+
+    @pytest.mark.asyncio
+    async def test_record_read_idempotent(self):
+        msg_id = await mailbox_db.insert_message(
+            sender="doot", subject="Test", body="Body", recipients=["oppy"]
+        )
+        await mailbox_db.record_read(msg_id, "doot")
+        await mailbox_db.record_read(msg_id, "doot")
+        msg = await mailbox_db.get_message_any(msg_id)
+        assert len(msg["read_by"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_mark_read_inserts_into_message_reads(self):
+        msg_id = await mailbox_db.insert_message(
+            sender="doot", subject="Test", body="Body", recipients=["oppy"]
+        )
+        await mailbox_db.mark_read(msg_id, "oppy")
+        msg = await mailbox_db.get_message_any(msg_id)
+        brothers = [r["brother"] for r in msg["read_by"]]
+        assert "oppy" in brothers
+
+    @pytest.mark.asyncio
+    async def test_get_message_includes_read_by(self):
+        msg_id = await mailbox_db.insert_message(
+            sender="doot", subject="Test", body="Body", recipients=["oppy"]
+        )
+        await mailbox_db.record_read(msg_id, "jerry")
+        msg = await mailbox_db.get_message(msg_id, "oppy")
+        assert msg is not None
+        assert len(msg["read_by"]) == 1
+        assert msg["read_by"][0]["brother"] == "jerry"
+
+    @pytest.mark.asyncio
+    async def test_multiple_readers(self):
+        msg_id = await mailbox_db.insert_message(
+            sender="doot", subject="Test", body="Body", recipients=["oppy"]
+        )
+        await mailbox_db.record_read(msg_id, "oppy")
+        await mailbox_db.record_read(msg_id, "jerry")
+        await mailbox_db.record_read(msg_id, "doot")
+        msg = await mailbox_db.get_message_any(msg_id)
+        brothers = {r["brother"] for r in msg["read_by"]}
+        assert brothers == {"oppy", "jerry", "doot"}
+
+
+class TestDatabaseFeed:
+    @pytest.mark.asyncio
+    async def test_feed_returns_all_messages(self):
+        await mailbox_db.insert_message(
+            sender="doot", subject="A", body="First", recipients=["oppy"]
+        )
+        await mailbox_db.insert_message(
+            sender="jerry", subject="B", body="Second", recipients=["doot"]
+        )
+        feed = await mailbox_db.get_feed()
+        assert len(feed) == 2
+
+    @pytest.mark.asyncio
+    async def test_feed_sender_filter(self):
+        await mailbox_db.insert_message(
+            sender="doot", subject="A", body="First", recipients=["oppy"]
+        )
+        await mailbox_db.insert_message(
+            sender="jerry", subject="B", body="Second", recipients=["oppy"]
+        )
+        feed = await mailbox_db.get_feed(sender="doot")
+        assert len(feed) == 1
+        assert feed[0]["sender"] == "doot"
+
+    @pytest.mark.asyncio
+    async def test_feed_recipient_filter(self):
+        await mailbox_db.insert_message(
+            sender="doot", subject="A", body="For oppy", recipients=["oppy"]
+        )
+        await mailbox_db.insert_message(
+            sender="doot", subject="B", body="For jerry", recipients=["jerry"]
+        )
+        feed = await mailbox_db.get_feed(recipient="oppy")
+        assert len(feed) == 1
+        assert "oppy" in feed[0]["recipients"]
+
+    @pytest.mark.asyncio
+    async def test_feed_keyword_search_body(self):
+        await mailbox_db.insert_message(
+            sender="doot", subject="Greeting", body="Hello world", recipients=["oppy"]
+        )
+        await mailbox_db.insert_message(
+            sender="doot", subject="Other", body="Goodbye", recipients=["oppy"]
+        )
+        feed = await mailbox_db.get_feed(query="Hello")
+        assert len(feed) == 1
+        assert feed[0]["body"] == "Hello world"
+
+    @pytest.mark.asyncio
+    async def test_feed_keyword_search_subject(self):
+        await mailbox_db.insert_message(
+            sender="doot", subject="Architecture review", body="Body", recipients=["oppy"]
+        )
+        await mailbox_db.insert_message(
+            sender="doot", subject="Other", body="Body", recipients=["oppy"]
+        )
+        feed = await mailbox_db.get_feed(query="Architecture")
+        assert len(feed) == 1
+        assert feed[0]["subject"] == "Architecture review"
+
+    @pytest.mark.asyncio
+    async def test_feed_combined_filters(self):
+        await mailbox_db.insert_message(
+            sender="doot", subject="A", body="Hello", recipients=["oppy"]
+        )
+        await mailbox_db.insert_message(
+            sender="jerry", subject="B", body="Hello", recipients=["oppy"]
+        )
+        await mailbox_db.insert_message(
+            sender="doot", subject="C", body="Goodbye", recipients=["oppy"]
+        )
+        feed = await mailbox_db.get_feed(sender="doot", query="Hello")
+        assert len(feed) == 1
+        assert feed[0]["subject"] == "A"
+
+    @pytest.mark.asyncio
+    async def test_feed_pagination(self):
+        for i in range(5):
+            await mailbox_db.insert_message(
+                sender="doot", subject=f"Msg {i}", body=f"Body {i}", recipients=["oppy"]
+            )
+        feed = await mailbox_db.get_feed(limit=2, offset=0)
+        assert len(feed) == 2
+        feed2 = await mailbox_db.get_feed(limit=2, offset=2)
+        assert len(feed2) == 2
+        # No overlap
+        ids1 = {m["id"] for m in feed}
+        ids2 = {m["id"] for m in feed2}
+        assert ids1.isdisjoint(ids2)
+
+    @pytest.mark.asyncio
+    async def test_feed_includes_recipients(self):
+        await mailbox_db.insert_message(
+            sender="doot", subject="Group", body="Body", recipients=["oppy", "jerry"]
+        )
+        feed = await mailbox_db.get_feed()
+        assert len(feed) == 1
+        assert set(feed[0]["recipients"]) == {"oppy", "jerry"}
+
+    @pytest.mark.asyncio
+    async def test_feed_includes_read_by(self):
+        msg_id = await mailbox_db.insert_message(
+            sender="doot", subject="Test", body="Body", recipients=["oppy"]
+        )
+        await mailbox_db.record_read(msg_id, "oppy")
+        feed = await mailbox_db.get_feed()
+        assert len(feed[0]["read_by"]) == 1
+        assert feed[0]["read_by"][0]["brother"] == "oppy"
+
+    @pytest.mark.asyncio
+    async def test_feed_empty(self):
+        feed = await mailbox_db.get_feed()
+        assert feed == []
+
+
+class TestDatabaseGetMessageAny:
+    @pytest.mark.asyncio
+    async def test_get_message_any(self):
+        msg_id = await mailbox_db.insert_message(
+            sender="doot", subject="Test", body="Body", recipients=["oppy"]
+        )
+        msg = await mailbox_db.get_message_any(msg_id)
+        assert msg is not None
+        assert msg["sender"] == "doot"
+        assert "oppy" in msg["recipients"]
+
+    @pytest.mark.asyncio
+    async def test_get_message_any_non_recipient_can_view(self):
+        """Any brother can view any message via get_message_any."""
+        msg_id = await mailbox_db.insert_message(
+            sender="doot", subject="Private", body="For oppy only", recipients=["oppy"]
+        )
+        # Jerry is not a recipient, but get_message_any doesn't filter
+        msg = await mailbox_db.get_message_any(msg_id)
+        assert msg is not None
+        assert msg["body"] == "For oppy only"
+
+    @pytest.mark.asyncio
+    async def test_get_message_any_not_found(self):
+        msg = await mailbox_db.get_message_any(999)
+        assert msg is None
+
+
+# ---------------------------------------------------------------------------
+# FastAPI — feed and view endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestAPIFeed:
+    @pytest.mark.asyncio
+    async def test_feed_requires_auth(self, client):
+        resp = await client.get("/api/v1/messages/feed")
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_feed_returns_all_messages(self, client):
+        await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["oppy"], "body": "Hello Oppy"},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["jerry"], "body": "Hello Jerry"},
+            headers=DOOT_HEADERS,
+        )
+        # Oppy can see messages sent to Jerry
+        resp = await client.get("/api/v1/messages/feed", headers=OPPY_HEADERS)
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+
+    @pytest.mark.asyncio
+    async def test_feed_sender_filter(self, client):
+        await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["oppy"], "body": "From doot"},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["doot"], "body": "From oppy"},
+            headers=OPPY_HEADERS,
+        )
+        resp = await client.get(
+            "/api/v1/messages/feed", params={"sender": "doot"}, headers=JERRY_HEADERS
+        )
+        messages = resp.json()
+        assert len(messages) == 1
+        assert messages[0]["sender"] == "doot"
+
+    @pytest.mark.asyncio
+    async def test_feed_recipient_filter(self, client):
+        await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["oppy"], "body": "For oppy"},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["jerry"], "body": "For jerry"},
+            headers=DOOT_HEADERS,
+        )
+        resp = await client.get(
+            "/api/v1/messages/feed", params={"recipient": "oppy"}, headers=JERRY_HEADERS
+        )
+        messages = resp.json()
+        assert len(messages) == 1
+
+    @pytest.mark.asyncio
+    async def test_feed_keyword_search(self, client):
+        await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["oppy"], "body": "Architecture review", "subject": "Design"},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["oppy"], "body": "Training complete"},
+            headers=JERRY_HEADERS,
+        )
+        resp = await client.get(
+            "/api/v1/messages/feed", params={"q": "Architecture"}, headers=OPPY_HEADERS
+        )
+        messages = resp.json()
+        assert len(messages) == 1
+        assert "Architecture" in messages[0]["body"]
+
+    @pytest.mark.asyncio
+    async def test_feed_pagination(self, client):
+        for i in range(5):
+            await client.post(
+                "/api/v1/messages",
+                json={"recipients": ["oppy"], "body": f"Msg {i}"},
+                headers=DOOT_HEADERS,
+            )
+        resp = await client.get(
+            "/api/v1/messages/feed", params={"limit": 2, "offset": 0}, headers=OPPY_HEADERS
+        )
+        assert len(resp.json()) == 2
+        resp2 = await client.get(
+            "/api/v1/messages/feed", params={"limit": 2, "offset": 2}, headers=OPPY_HEADERS
+        )
+        assert len(resp2.json()) == 2
+
+    @pytest.mark.asyncio
+    async def test_feed_includes_read_by(self, client):
+        resp = await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["oppy"], "body": "Read tracking test"},
+            headers=DOOT_HEADERS,
+        )
+        msg_id = resp.json()["id"]
+        # Oppy reads the message
+        await client.post(f"/api/v1/messages/{msg_id}/read", headers=OPPY_HEADERS)
+        # Feed should show read_by
+        resp = await client.get("/api/v1/messages/feed", headers=JERRY_HEADERS)
+        messages = resp.json()
+        assert len(messages) == 1
+        brothers = [r["brother"] for r in messages[0]["read_by"]]
+        assert "oppy" in brothers
+
+
+class TestAPIView:
+    @pytest.mark.asyncio
+    async def test_view_records_read(self, client):
+        resp = await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["oppy"], "body": "View test"},
+            headers=DOOT_HEADERS,
+        )
+        msg_id = resp.json()["id"]
+        resp = await client.post(f"/api/v1/messages/{msg_id}/view", headers=JERRY_HEADERS)
+        assert resp.status_code == 200
+        data = resp.json()
+        brothers = [r["brother"] for r in data["read_by"]]
+        assert "jerry" in brothers
+
+    @pytest.mark.asyncio
+    async def test_view_returns_detail(self, client):
+        resp = await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["oppy", "jerry"], "body": "Detail test", "subject": "Subj"},
+            headers=DOOT_HEADERS,
+        )
+        msg_id = resp.json()["id"]
+        resp = await client.post(f"/api/v1/messages/{msg_id}/view", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["sender"] == "doot"
+        assert data["subject"] == "Subj"
+        assert set(data["recipients"]) == {"oppy", "jerry"}
+
+    @pytest.mark.asyncio
+    async def test_view_not_found(self, client):
+        resp = await client.post("/api/v1/messages/999/view", headers=DOOT_HEADERS)
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_view_non_recipient_can_view(self, client):
+        resp = await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["oppy"], "body": "For oppy only"},
+            headers=DOOT_HEADERS,
+        )
+        msg_id = resp.json()["id"]
+        # Jerry is not a recipient
+        resp = await client.post(f"/api/v1/messages/{msg_id}/view", headers=JERRY_HEADERS)
+        assert resp.status_code == 200
+        assert resp.json()["body"] == "For oppy only"
+
+    @pytest.mark.asyncio
+    async def test_view_idempotent(self, client):
+        resp = await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["oppy"], "body": "Idempotent test"},
+            headers=DOOT_HEADERS,
+        )
+        msg_id = resp.json()["id"]
+        await client.post(f"/api/v1/messages/{msg_id}/view", headers=JERRY_HEADERS)
+        resp = await client.post(f"/api/v1/messages/{msg_id}/view", headers=JERRY_HEADERS)
+        assert resp.status_code == 200
+        # Should still have exactly one read_by entry for jerry
+        jerry_reads = [r for r in resp.json()["read_by"] if r["brother"] == "jerry"]
+        assert len(jerry_reads) == 1
+
+
+# ---------------------------------------------------------------------------
+# MailboxClient — new methods
+# ---------------------------------------------------------------------------
+
+
+class TestMailboxClientFeedAndView:
+    def setup_method(self):
+        self.client = MailboxClient("http://localhost:8000", "test-key")
+
+    def _make_mock_resp(self, json_data, status_code=200):
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.json.return_value = json_data
+        resp.raise_for_status.return_value = None
+        return resp
+
+    def _make_async_client(self, get_resp=None, post_resp=None):
+        instance = AsyncMock()
+        if get_resp is not None:
+            instance.get.return_value = get_resp
+        if post_resp is not None:
+            instance.post.return_value = post_resp
+        instance.__aenter__ = AsyncMock(return_value=instance)
+        instance.__aexit__ = AsyncMock(return_value=False)
+        return instance
+
+    @pytest.mark.asyncio
+    async def test_browse_feed(self):
+        mock_resp = self._make_mock_resp([
+            {"id": 1, "sender": "doot", "subject": "Hi", "body": "Hello",
+             "created_at": "2026-02-07T00:00:00Z", "recipients": ["oppy"],
+             "read_by": []}
+        ])
+        with patch("mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(get_resp=mock_resp)
+            MockClient.return_value = instance
+            result = await self.client.browse_feed()
+            assert len(result) == 1
+            assert result[0]["sender"] == "doot"
+
+    @pytest.mark.asyncio
+    async def test_browse_feed_with_params(self):
+        mock_resp = self._make_mock_resp([])
+        with patch("mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(get_resp=mock_resp)
+            MockClient.return_value = instance
+            await self.client.browse_feed(sender="doot", recipient="oppy", query="hello", limit=10, offset=5)
+            call_kwargs = instance.get.call_args
+            params = call_kwargs.kwargs.get("params") or call_kwargs[1].get("params")
+            assert params["sender"] == "doot"
+            assert params["recipient"] == "oppy"
+            assert params["q"] == "hello"
+            assert params["limit"] == 10
+            assert params["offset"] == 5
+
+    @pytest.mark.asyncio
+    async def test_view_message(self):
+        mock_resp = self._make_mock_resp({
+            "id": 1, "sender": "doot", "subject": "Test", "body": "Body",
+            "created_at": "2026-02-07T00:00:00Z", "recipients": ["oppy"],
+            "read_by": [{"brother": "jerry", "read_at": "2026-02-07T00:00:00Z"}]
+        })
+        with patch("mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(post_resp=mock_resp)
+            MockClient.return_value = instance
+            result = await self.client.view_message(1)
+            assert result["id"] == 1
+            instance.post.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_read_message_fallback_to_view(self):
+        """When GET /messages/{id} returns 404, client falls back to POST /messages/{id}/view."""
+        mock_404_resp = MagicMock()
+        mock_404_resp.status_code = 404
+
+        mock_view_resp = self._make_mock_resp({
+            "id": 1, "sender": "doot", "subject": "Test", "body": "Body",
+            "created_at": "2026-02-07T00:00:00Z", "recipients": ["oppy"],
+            "read_by": []
+        })
+
+        with patch("mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = AsyncMock()
+            instance.get.return_value = mock_404_resp
+            instance.post.return_value = mock_view_resp
+            instance.__aenter__ = AsyncMock(return_value=instance)
+            instance.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = instance
+
+            result = await self.client.read_message(1)
+            assert result["id"] == 1
+            # Should have called post on /view
+            assert instance.post.called
+
+
+# ---------------------------------------------------------------------------
+# MCP tools — browse_feed and updated read_message
+# ---------------------------------------------------------------------------
+
+
+class TestMCPBrowseFeed:
+    @pytest.mark.asyncio
+    async def test_browse_feed_not_configured(self):
+        import server
+        original = server._mailbox
+        server._mailbox = None
+        try:
+            result = await server.browse_feed()
+            assert "not configured" in result.lower()
+        finally:
+            server._mailbox = original
+
+    @pytest.mark.asyncio
+    async def test_browse_feed_empty(self):
+        import server
+        mock_client = AsyncMock()
+        mock_client.browse_feed.return_value = []
+        original = server._mailbox
+        server._mailbox = mock_client
+        try:
+            result = await server.browse_feed()
+            assert "No messages" in result
+        finally:
+            server._mailbox = original
+
+    @pytest.mark.asyncio
+    async def test_browse_feed_with_messages(self):
+        import server
+        mock_client = AsyncMock()
+        mock_client.browse_feed.return_value = [
+            {
+                "id": 1, "sender": "doot", "subject": "Hello",
+                "body": "Test message", "created_at": "2026-02-07T00:00:00Z",
+                "recipients": ["oppy", "jerry"],
+                "read_by": [{"brother": "oppy", "read_at": "2026-02-07T01:00:00Z"}],
+            }
+        ]
+        original = server._mailbox
+        server._mailbox = mock_client
+        try:
+            result = await server.browse_feed()
+            assert "#1" in result
+            assert "doot" in result
+            assert "oppy, jerry" in result
+            assert "Hello" in result
+            assert "Read by: oppy" in result
+        finally:
+            server._mailbox = original
+
+    @pytest.mark.asyncio
+    async def test_browse_feed_no_read_by(self):
+        import server
+        mock_client = AsyncMock()
+        mock_client.browse_feed.return_value = [
+            {
+                "id": 1, "sender": "doot", "subject": "Hello",
+                "body": "Test", "created_at": "2026-02-07T00:00:00Z",
+                "recipients": ["oppy"], "read_by": [],
+            }
+        ]
+        original = server._mailbox
+        server._mailbox = mock_client
+        try:
+            result = await server.browse_feed()
+            assert "Read by" not in result
+        finally:
+            server._mailbox = original
+
+    @pytest.mark.asyncio
+    async def test_browse_feed_error(self):
+        import server
+        mock_client = AsyncMock()
+        mock_client.browse_feed.side_effect = Exception("Connection refused")
+        original = server._mailbox
+        server._mailbox = mock_client
+        try:
+            result = await server.browse_feed()
+            assert "Error" in result
+        finally:
+            server._mailbox = original
+
+
+class TestMCPReadMessageWithReadBy:
+    @pytest.mark.asyncio
+    async def test_read_message_shows_read_by(self):
+        import server
+        mock_client = AsyncMock()
+        mock_client.read_message.return_value = {
+            "id": 1, "sender": "oppy", "subject": "Design Review",
+            "body": "Please review.",
+            "created_at": "2026-02-07T10:00:00Z",
+            "recipients": ["doot", "jerry"], "is_read": False,
+            "read_by": [
+                {"brother": "doot", "read_at": "2026-02-07T11:00:00Z"},
+                {"brother": "jerry", "read_at": "2026-02-07T12:00:00Z"},
+            ],
+        }
+        original = server._mailbox
+        server._mailbox = mock_client
+        try:
+            result = await server.read_message(1)
+            assert "Read by: doot, jerry" in result
+        finally:
+            server._mailbox = original
+
+    @pytest.mark.asyncio
+    async def test_read_message_no_read_by(self):
+        import server
+        mock_client = AsyncMock()
+        mock_client.read_message.return_value = {
+            "id": 1, "sender": "oppy", "subject": "Test",
+            "body": "Body",
+            "created_at": "2026-02-07T10:00:00Z",
+            "recipients": ["doot"], "is_read": False,
+            "read_by": [],
+        }
+        original = server._mailbox
+        server._mailbox = mock_client
+        try:
+            result = await server.read_message(1)
+            assert "Read by" not in result
+        finally:
+            server._mailbox = original
+
+
 class TestIntegrationClientToServer:
     """Test the MailboxClient talking to the real FastAPI app via ASGI transport."""
 

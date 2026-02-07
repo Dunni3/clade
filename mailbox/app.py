@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from . import db
 from .auth import resolve_sender
 from .models import (
+    FeedMessage,
     MarkReadResponse,
     MessageDetail,
     MessageSummary,
@@ -51,6 +52,21 @@ async def list_messages(
     return messages
 
 
+@app.get("/api/v1/messages/feed", response_model=list[FeedMessage])
+async def get_feed(
+    sender: str | None = None,
+    recipient: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    _caller: str = Depends(resolve_sender),
+):
+    messages = await db.get_feed(
+        sender=sender, recipient=recipient, query=q, limit=limit, offset=offset
+    )
+    return messages
+
+
 @app.get("/api/v1/messages/{message_id}", response_model=MessageDetail)
 async def get_message(
     message_id: int,
@@ -59,6 +75,20 @@ async def get_message(
     msg = await db.get_message(message_id, recipient=sender)
     if msg is None:
         raise HTTPException(status_code=404, detail="Message not found")
+    return msg
+
+
+@app.post("/api/v1/messages/{message_id}/view", response_model=FeedMessage)
+async def view_message(
+    message_id: int,
+    caller: str = Depends(resolve_sender),
+):
+    msg = await db.get_message_any(message_id)
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    await db.record_read(message_id, caller)
+    # Re-fetch to include the just-recorded read
+    msg = await db.get_message_any(message_id)
     return msg
 
 
