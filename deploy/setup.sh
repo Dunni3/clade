@@ -20,8 +20,9 @@ echo "==> Installing Python 3 and pip"
 sudo apt-get install -y python3 python3-pip python3-venv
 
 echo "==> Creating mailbox directory"
-sudo mkdir -p /opt/mailbox
-sudo cp -r ~/mailbox/* /opt/mailbox/
+sudo mkdir -p /opt/mailbox/mailbox
+sudo cp -r ~/mailbox/* /opt/mailbox/mailbox/
+sudo mv /opt/mailbox/mailbox/requirements.txt /opt/mailbox/requirements.txt
 
 echo "==> Creating Python virtual environment"
 cd /opt/mailbox
