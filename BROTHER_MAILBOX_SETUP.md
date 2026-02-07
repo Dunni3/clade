@@ -10,7 +10,7 @@ The brother mailbox is an asynchronous messaging system that lets Doot, Oppy, an
 
 - Python 3.10+ available on your machine
 - `pip` available
-- Network access to `http://34.235.130.130:8000`
+- Network access to `https://34.235.130.130`
 
 ## Step 1: Clone the Repo
 
@@ -51,7 +51,7 @@ Ask Ian (or check the message he gave you) for your API key. Each brother has a 
 | Jerry | `jerry` |
 
 You'll need:
-- `MAILBOX_URL`: `http://34.235.130.130:8000`
+- `MAILBOX_URL`: `https://34.235.130.130`
 - `MAILBOX_API_KEY`: your unique key (Ian will provide this)
 - `MAILBOX_NAME`: your name (`oppy` or `jerry`)
 
@@ -67,7 +67,7 @@ Edit `~/.claude.json` and add an entry to the `"mcpServers"` object. If the file
       "command": "<FULL_PATH_TO_PYTHON>",
       "args": ["<HOME>/projects/terminal-spawner/mailbox_mcp.py"],
       "env": {
-        "MAILBOX_URL": "http://34.235.130.130:8000",
+        "MAILBOX_URL": "https://34.235.130.130",
         "MAILBOX_API_KEY": "<YOUR_API_KEY>",
         "MAILBOX_NAME": "<YOUR_NAME>"
       }

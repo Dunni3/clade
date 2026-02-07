@@ -17,7 +17,8 @@ _mailbox_name = os.environ.get("MAILBOX_NAME")
 
 _mailbox: MailboxClient | None = None
 if _mailbox_url and _mailbox_api_key:
-    _mailbox = MailboxClient(_mailbox_url, _mailbox_api_key)
+    _verify_ssl = not _mailbox_url.startswith("https://")  # self-signed cert
+    _mailbox = MailboxClient(_mailbox_url, _mailbox_api_key, verify_ssl=_verify_ssl)
 
 
 @mcp.tool()
