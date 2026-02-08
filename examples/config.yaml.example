@@ -1,0 +1,45 @@
+# Example configuration for terminal-spawner
+#
+# Copy this file to one of these locations:
+#   - ~/.config/terminal-spawner/config.yaml
+#   - $XDG_CONFIG_HOME/terminal-spawner/config.yaml
+#   - ~/.terminal-spawner.yaml
+#
+# All fields are optional. If no config file exists, terminal-spawner
+# will use hardcoded defaults (jerry and oppy brothers).
+
+# Default terminal application to use ("terminal" or "iterm2")
+default_terminal_app: terminal
+
+# Brother configurations
+# Each brother needs:
+#   - host: SSH hostname
+#   - working_dir: Optional directory to cd into before launching claude
+#   - description: Human-readable description
+#   - command: (optional) Override the auto-generated SSH command
+brothers:
+  jerry:
+    host: cluster
+    working_dir: null  # No working dir, just launch claude
+    description: "Brother Jerry — GPU jobs on the cluster"
+    # Command is auto-generated if not specified:
+    # ssh -t cluster "bash -lc claude"
+
+  oppy:
+    host: masuda
+    working_dir: "~/projects/mol_diffusion/OMTRA_oppy"
+    description: "Brother Oppy — The architect on masuda"
+    # Command is auto-generated if not specified:
+    # ssh -t masuda "bash -lc 'cd ~/projects/mol_diffusion/OMTRA_oppy && claude'"
+
+  # Example: add a new brother
+  # dev-vm:
+  #   host: dev.example.com
+  #   working_dir: "~/workspace"
+  #   description: "Development VM"
+
+# Mailbox configuration (optional)
+# API key is loaded from MAILBOX_API_KEY environment variable
+mailbox:
+  url: "https://34.235.130.130"
+  name: "doot"

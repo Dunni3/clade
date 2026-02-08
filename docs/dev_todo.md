@@ -1,0 +1,4 @@
+- we have hard-coded brother configs specific to OG clade (Ian, Doot, Jerry, Oppy). Will have to relax this constrint
+- webapp interface
+- ability to trigger a claude code instance remotely, maybe with just -p command line arg
+- server-structured heartbeat for status reporting? 

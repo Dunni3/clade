@@ -1,6 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "terminal-spawner"
-version = "0.1.0"
-description = "MCP server for spawning terminal windows and connecting to brother Claude Code instances"
+version = "0.2.0"
+description = "MCP server for spawning terminals and inter-instance communication"
+authors = [{name = "Ian Dunn", email = "ian@iandunn.io"}]
+readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["mcp[cli]"]
+dependencies = [
+    "mcp[cli]>=0.1.0",
+    "httpx>=0.27.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "aiosqlite>=0.20.0",
+]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.24.0",
+]
+
+[project.scripts]
+terminal-spawner = "terminal_spawner.mcp.server_full:main"
+terminal-spawner-lite = "terminal_spawner.mcp.server_lite:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
