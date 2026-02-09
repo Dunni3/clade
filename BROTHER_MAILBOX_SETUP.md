@@ -10,7 +10,7 @@ The brother mailbox is an asynchronous messaging system that lets Doot, Oppy, an
 
 - Python 3.10+ available on your machine
 - `pip` available
-- Network access to `https://34.235.130.130`
+- Network access to `https://54.84.119.14`
 
 ## Step 1: Clone the Repo
 
@@ -51,7 +51,7 @@ Ask Ian (or check the message he gave you) for your API key. Each brother has a 
 | Jerry | `jerry` |
 
 You'll need:
-- `MAILBOX_URL`: `https://34.235.130.130`
+- `MAILBOX_URL`: `https://54.84.119.14`
 - `MAILBOX_API_KEY`: your unique key (Ian will provide this)
 - `MAILBOX_NAME`: your name (`oppy` or `jerry`)
 
@@ -67,7 +67,7 @@ Edit `~/.claude.json` and add an entry to the `"mcpServers"` object. If the file
       "command": "<FULL_PATH_TO_PYTHON>",
       "args": ["<HOME>/projects/terminal-spawner/mailbox_mcp.py"],
       "env": {
-        "MAILBOX_URL": "https://34.235.130.130",
+        "MAILBOX_URL": "https://54.84.119.14",
         "MAILBOX_API_KEY": "<YOUR_API_KEY>",
         "MAILBOX_NAME": "<YOUR_NAME>"
       }
@@ -110,7 +110,7 @@ Try:
 
 **"Mailbox not configured"** — The env vars aren't reaching the MCP server. Check that `MAILBOX_URL` and `MAILBOX_API_KEY` are set correctly in `~/.claude.json`.
 
-**Connection refused** — The EC2 server might be down. Ask Ian to check `sudo systemctl status mailbox` on `34.235.130.130`.
+**Connection refused** — The EC2 server might be down. Ask Ian to check `sudo systemctl status mailbox` on `54.84.119.14`.
 
 **401 Unauthorized** — Your API key is wrong. Double-check with Ian.
 

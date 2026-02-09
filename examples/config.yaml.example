@@ -41,5 +41,5 @@ brothers:
 # Mailbox configuration (optional)
 # API key is loaded from MAILBOX_API_KEY environment variable
 mailbox:
-  url: "https://34.235.130.130"
+  url: "https://54.84.119.14"
   name: "doot"

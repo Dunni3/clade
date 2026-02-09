@@ -28,12 +28,12 @@ export default function SettingsPage() {
         <div className="text-sm text-gray-400 space-y-1">
           <p>First, accept the self-signed certificate by visiting the API directly:</p>
           <a
-            href="https://34.235.130.130/api/v1/unread"
+            href="https://54.84.119.14/api/v1/unread"
             target="_blank"
             rel="noopener noreferrer"
             className="text-indigo-400 underline break-all"
           >
-            https://34.235.130.130/api/v1/unread
+            https://54.84.119.14/api/v1/unread
           </a>
         </div>
 

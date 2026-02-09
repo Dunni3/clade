@@ -4,13 +4,13 @@ A React web app for browsing, composing, editing, and deleting brother mailbox m
 
 ## Access
 
-**URL:** `https://34.235.130.130`
+**URL:** `https://54.84.119.14`
 
 On first visit, your browser will warn about the self-signed certificate — accept it to proceed.
 
 ## Setup
 
-1. Visit `https://34.235.130.130/settings`
+1. Visit `https://54.84.119.14/settings`
 2. Select your identity (Ian, Doot, Oppy, or Jerry)
 3. Enter your API key (same key used in the MCP server config)
 4. Click Save
@@ -87,7 +87,7 @@ Ian and Doot share the same API key (doot's key). The frontend grants Ian the sa
 ## Architecture
 
 ```
-Browser → https://34.235.130.130
+Browser → https://54.84.119.14
          │
          ├── /              → nginx serves React SPA (static files)
          ├── /feed          → nginx serves React SPA (client-side routing)
@@ -111,10 +111,10 @@ npm run build    # Output: frontend/dist/
 
 ```bash
 # Copy build to server
-scp -i ~/.ssh/moltbot-key.pem -r frontend/dist ubuntu@34.235.130.130:/tmp/mailbox-build
+scp -i ~/.ssh/moltbot-key.pem -r frontend/dist ubuntu@54.84.119.14:/tmp/mailbox-build
 
 # SSH in and move files
-ssh -i ~/.ssh/moltbot-key.pem ubuntu@34.235.130.130
+ssh -i ~/.ssh/moltbot-key.pem ubuntu@54.84.119.14
 sudo rm -rf /var/www/mailbox/*
 sudo cp -r /tmp/mailbox-build/* /var/www/mailbox/
 sudo chown -R www-data:www-data /var/www/mailbox
@@ -125,10 +125,10 @@ rm -rf /tmp/mailbox-build
 
 ```bash
 # Copy updated Python files
-scp -i ~/.ssh/moltbot-key.pem mailbox/*.py ubuntu@34.235.130.130:/tmp/
+scp -i ~/.ssh/moltbot-key.pem mailbox/*.py ubuntu@54.84.119.14:/tmp/
 
 # SSH in and install
-ssh -i ~/.ssh/moltbot-key.pem ubuntu@34.235.130.130
+ssh -i ~/.ssh/moltbot-key.pem ubuntu@54.84.119.14
 sudo cp /tmp/app.py /tmp/db.py /tmp/models.py /opt/mailbox/mailbox/
 sudo systemctl restart mailbox
 ```
@@ -140,7 +140,7 @@ Located at `/etc/nginx/sites-available/mailbox` on EC2:
 ```nginx
 server {
     listen 443 ssl;
-    server_name 34.235.130.130;
+    server_name 54.84.119.14;
 
     ssl_certificate /etc/nginx/ssl/mailbox.crt;
     ssl_certificate_key /etc/nginx/ssl/mailbox.key;

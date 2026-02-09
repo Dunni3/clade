@@ -19,7 +19,7 @@ There are two types of brothers:
 ### For All Brothers
 - Python 3.10+
 - Claude Code installed
-- Access to mailbox server (https://34.235.130.130)
+- Access to mailbox server (https://54.84.119.14)
 - API key for the brother (ask Doot/Ian for key)
 
 ### For Doot Only
@@ -85,7 +85,7 @@ Edit `~/.claude.json` on the brother's machine.
     "terminal-spawner": {
       "command": "terminal-spawner",
       "env": {
-        "MAILBOX_URL": "https://34.235.130.130",
+        "MAILBOX_URL": "https://54.84.119.14",
         "MAILBOX_API_KEY": "your-doot-api-key-here",
         "MAILBOX_NAME": "doot"
       }
@@ -103,7 +103,7 @@ Or using the full path:
       "command": "python",
       "args": ["-m", "terminal_spawner.mcp.server_full"],
       "env": {
-        "MAILBOX_URL": "https://34.235.130.130",
+        "MAILBOX_URL": "https://54.84.119.14",
         "MAILBOX_API_KEY": "your-doot-api-key-here",
         "MAILBOX_NAME": "doot"
       }
@@ -120,7 +120,7 @@ Or using the full path:
     "brother-mailbox": {
       "command": "terminal-spawner-lite",
       "env": {
-        "MAILBOX_URL": "https://34.235.130.130",
+        "MAILBOX_URL": "https://54.84.119.14",
         "MAILBOX_API_KEY": "your-oppy-or-jerry-api-key-here",
         "MAILBOX_NAME": "oppy"
       }
@@ -138,7 +138,7 @@ Or using the full path with venv:
       "command": "/home/username/projects/terminal-spawner/venv/bin/python",
       "args": ["-m", "terminal_spawner.mcp.server_lite"],
       "env": {
-        "MAILBOX_URL": "https://34.235.130.130",
+        "MAILBOX_URL": "https://54.84.119.14",
         "MAILBOX_API_KEY": "your-oppy-or-jerry-api-key-here",
         "MAILBOX_NAME": "oppy"
       }
@@ -226,7 +226,7 @@ terminal-spawner  # Should start and wait for stdio input (Ctrl+C to exit)
 **Diagnosis:**
 ```bash
 # Test mailbox server from brother machine
-curl -H "Authorization: Bearer YOUR_API_KEY" https://34.235.130.130/api/v1/unread
+curl -H "Authorization: Bearer YOUR_API_KEY" https://54.84.119.14/api/v1/unread
 ```
 
 **Solutions:**
@@ -254,7 +254,7 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://34.235.130.130/api/v1/unrea
 
 **Solution 2:** If still failing, accept certificate manually:
 ```bash
-curl -k https://34.235.130.130/api/v1/unread  # -k to ignore cert
+curl -k https://54.84.119.14/api/v1/unread  # -k to ignore cert
 ```
 
 Then try the MCP tools again.
@@ -287,7 +287,7 @@ print(secrets.token_urlsafe(32))
 ### 2. Add to Mailbox Server
 
 ```bash
-ssh -i ~/.ssh/moltbot-key.pem ubuntu@34.235.130.130
+ssh -i ~/.ssh/moltbot-key.pem ubuntu@54.84.119.14
 sudo systemctl edit mailbox
 ```
 

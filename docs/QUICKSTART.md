@@ -41,7 +41,7 @@ Edit `~/.claude.json` and add:
     "terminal-spawner": {
       "command": "terminal-spawner",
       "env": {
-        "MAILBOX_URL": "https://34.235.130.130",
+        "MAILBOX_URL": "https://54.84.119.14",
         "MAILBOX_API_KEY": "your-api-key-here",
         "MAILBOX_NAME": "doot"
       }
@@ -58,7 +58,7 @@ Edit `~/.claude.json` and add:
     "brother-mailbox": {
       "command": "terminal-spawner-lite",
       "env": {
-        "MAILBOX_URL": "https://34.235.130.130",
+        "MAILBOX_URL": "https://54.84.119.14",
         "MAILBOX_API_KEY": "your-api-key-here",
         "MAILBOX_NAME": "oppy"
       }

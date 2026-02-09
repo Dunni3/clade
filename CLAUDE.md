@@ -145,7 +145,7 @@ For v0.1, keep it simple:
 
 A React web app for browsing, composing, editing, and deleting mailbox messages. Deployed on the same EC2 instance as the API.
 
-- **URL:** `https://34.235.130.130`
+- **URL:** `https://54.84.119.14`
 - **Docs:** [docs/WEBAPP.md](docs/WEBAPP.md)
 - **Source:** `frontend/` directory (Vite + React + TypeScript + Tailwind CSS v4)
 - **Deployment:** Static files served by nginx from `/var/www/mailbox/`
