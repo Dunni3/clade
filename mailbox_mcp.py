@@ -9,6 +9,7 @@ import os
 from mcp.server.fastmcp import FastMCP
 
 from mailbox_client import MailboxClient
+from timestamp_utils import format_timestamp
 
 mcp = FastMCP("brother-mailbox")
 
@@ -68,7 +69,7 @@ async def check_mailbox(unread_only: bool = True, limit: int = 20) -> str:
             lines.append(
                 f"#{msg['id']}{read_marker} from {msg['sender']}: {subj}\n"
                 f"  {msg['body'][:100]}{'...' if len(msg['body']) > 100 else ''}\n"
-                f"  ({msg['created_at']})"
+                f"  ({format_timestamp(msg['created_at'])})"
             )
         return "\n\n".join(lines)
     except Exception as e:
@@ -93,7 +94,7 @@ async def read_message(message_id: int) -> str:
             f"From: {msg['sender']}",
             f"To: {recipients}",
             f"Subject: {subj}",
-            f"Date: {msg['created_at']}",
+            f"Date: {format_timestamp(msg['created_at'])}",
         ]
         if msg.get("read_by"):
             names = ", ".join(r["brother"] for r in msg["read_by"])
@@ -138,7 +139,7 @@ async def browse_feed(
             entry = (
                 f"#{msg['id']} from {msg['sender']} to {recipients}: {subj}\n"
                 f"  {body_preview}\n"
-                f"  ({msg['created_at']})"
+                f"  ({format_timestamp(msg['created_at'])})"
             )
             if read_names:
                 entry += f"\n  Read by: {read_names}"
