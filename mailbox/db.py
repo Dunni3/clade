@@ -204,6 +204,35 @@ async def get_unread_count(recipient: str) -> int:
         await db.close()
 
 
+async def mark_unread(message_id: int, brother: str) -> bool:
+    """Mark a message as unread for a brother. Returns True if anything changed."""
+    db = await get_db()
+    try:
+        changed = False
+        # Reset is_read in message_recipients if they are a recipient
+        cursor = await db.execute(
+            """
+            UPDATE message_recipients
+            SET is_read = 0, read_at = NULL
+            WHERE message_id = ? AND recipient = ? AND is_read = 1
+            """,
+            (message_id, brother),
+        )
+        if cursor.rowcount > 0:
+            changed = True
+        # Remove from message_reads
+        cursor = await db.execute(
+            "DELETE FROM message_reads WHERE message_id = ? AND brother = ?",
+            (message_id, brother),
+        )
+        if cursor.rowcount > 0:
+            changed = True
+        await db.commit()
+        return changed
+    finally:
+        await db.close()
+
+
 async def record_read(message_id: int, brother: str) -> None:
     """Record that a brother has read/viewed a message. Idempotent."""
     db = await get_db()
@@ -213,6 +242,53 @@ async def record_read(message_id: int, brother: str) -> None:
             (message_id, brother),
         )
         await db.commit()
+    finally:
+        await db.close()
+
+
+async def update_message(
+    message_id: int,
+    subject: str | None = None,
+    body: str | None = None,
+) -> dict | None:
+    """Update message subject/body. Returns updated message dict or None if not found."""
+    db = await get_db()
+    try:
+        updates = []
+        params: list = []
+
+        if subject is not None:
+            updates.append("subject = ?")
+            params.append(subject)
+        if body is not None:
+            updates.append("body = ?")
+            params.append(body)
+
+        if updates:
+            params.append(message_id)
+            query = f"UPDATE messages SET {', '.join(updates)} WHERE id = ?"
+            await db.execute(query, params)
+            await db.commit()
+
+        return await get_message_any(message_id)
+    finally:
+        await db.close()
+
+
+async def delete_message(message_id: int) -> bool:
+    """Delete a message and its recipients/reads. Returns True if deleted."""
+    db = await get_db()
+    try:
+        # Delete related rows first
+        await db.execute(
+            "DELETE FROM message_recipients WHERE message_id = ?", (message_id,)
+        )
+        await db.execute(
+            "DELETE FROM message_reads WHERE message_id = ?", (message_id,)
+        )
+        cursor = await db.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+        await db.commit()
+        return cursor.rowcount > 0
     finally:
         await db.close()
 

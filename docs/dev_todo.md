@@ -1,4 +1,11 @@
 - we have hard-coded brother configs specific to OG clade (Ian, Doot, Jerry, Oppy). Will have to relax this constrint
-- webapp interface
+- ~~webapp interface~~ (done — see docs/WEBAPP.md)
 - ability to trigger a claude code instance remotely, maybe with just -p command line arg
 - server-structured heartbeat for status reporting? 
+- ~~build capability to delete messages from the mailbox~~ (done — PATCH/DELETE endpoints + web UI)
+- ~~webapp can be my mailbox viewer and manager; allow me to delete messages from there~~ (done)
+- brothers can have different date/time settings which makes message interpretation. maybe we make all of their messages timestamp by the date/time provided by the central server, so that we have a consistent timeline of events across all brothers.
+
+so the mailbox is nice because it allows brothers to communicate. the downside is that right now i manually have to open a claude code session on the remote machine, tell the brother to check his messages and execute on them. it would be nice if i could just trigger a claude code instance remotely, maybe with just -p command line arg, and then the brother can check his messages and execute on them. this would allow for more seamless communication and execution of tasks without needing manual intervention. moving towards a system where, for example, WHEN oppy completes building a feature, he can trigger jerry to test it or start a training run or whatever, without me having to manually intervene and tell them to check their messages. this would make the workflow much smoother and more efficient.
+
+now we can achieve this by using ssh, and via ssh sending a command like `claude --dangerously-skip-permissions -p "instructions"`. easy pz. however this requires having ssh connections pre-configured along whichever channel you want. this is a good option to have, but perhaps it would be smoother if every brother had his own server, waiting for commands to execute. then he can kick off his own claude code instance with the permission skipping and relevant instructions. i think once these capabilities are in place we reach an entirely new level of interactivity and efficiency in how the brothers can work together and execute tasks without needing constant manual oversight. it would be like having a team of assistants who can communicate and coordinate with each other seamlessly, allowing for much more complex and dynamic workflows.

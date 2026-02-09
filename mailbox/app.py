@@ -3,14 +3,18 @@
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 from . import db
 from .auth import resolve_sender
 from .models import (
+    EditMessageRequest,
     FeedMessage,
     MarkReadResponse,
     MessageDetail,
     MessageSummary,
+    ReadByEntry,
     SendMessageRequest,
     SendMessageResponse,
     UnreadCountResponse,
@@ -24,6 +28,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Brother Mailbox", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.post("/api/v1/messages", response_model=SendMessageResponse)
@@ -103,6 +115,67 @@ async def mark_read(
             status_code=404, detail="Message not found or already read"
         )
     return MarkReadResponse()
+
+
+@app.post("/api/v1/messages/{message_id}/unread", response_model=MarkReadResponse)
+async def mark_unread(
+    message_id: int,
+    caller: str = Depends(resolve_sender),
+):
+    """Mark a message as unread for the caller."""
+    msg = await db.get_message_any(message_id)
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    await db.mark_unread(message_id, caller)
+    return MarkReadResponse(message="Marked as unread")
+
+
+@app.patch("/api/v1/messages/{message_id}", response_model=FeedMessage)
+async def edit_message(
+    message_id: int,
+    edit_request: EditMessageRequest,
+    caller: str = Depends(resolve_sender),
+):
+    """Edit a message (sender or Ian/doot only)."""
+    msg = await db.get_message_any(message_id)
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if msg["sender"] != caller and caller not in ("doot", "ian"):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the sender or Ian can edit this message",
+        )
+
+    updated = await db.update_message(
+        message_id,
+        subject=edit_request.subject,
+        body=edit_request.body,
+    )
+    return updated
+
+
+@app.delete("/api/v1/messages/{message_id}", status_code=204)
+async def delete_message(
+    message_id: int,
+    caller: str = Depends(resolve_sender),
+):
+    """Delete a message (sender or Ian/doot only)."""
+    msg = await db.get_message_any(message_id)
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if msg["sender"] != caller and caller not in ("doot", "ian"):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the sender or Ian can delete this message",
+        )
+
+    deleted = await db.delete_message(message_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    return Response(status_code=204)
 
 
 @app.get("/api/v1/unread", response_model=UnreadCountResponse)

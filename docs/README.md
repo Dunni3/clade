@@ -23,9 +23,16 @@ Welcome to the terminal-spawner documentation! This directory contains comprehen
   - Adding new brothers
   - Troubleshooting
 
+### Web Interface
+- **[WEBAPP.md](WEBAPP.md)** - Mailbox web interface
+  - Access and setup
+  - Features (inbox, feed, compose, edit/delete)
+  - Authorization model
+  - Deployment guide
+  - Architecture and file structure
+
 ### Reference
 - **[FUTURE.md](FUTURE.md)** - Planned features and roadmap
-  - Web interface
   - Additional protocols
   - Cross-platform support
   - Plugin system

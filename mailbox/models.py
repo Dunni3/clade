@@ -16,6 +16,11 @@ class SendMessageRequest(BaseModel):
     body: str
 
 
+class EditMessageRequest(BaseModel):
+    subject: str | None = None
+    body: str | None = None
+
+
 # -- Responses --
 
 

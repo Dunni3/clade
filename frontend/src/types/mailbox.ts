@@ -1,0 +1,54 @@
+export interface MessageSummary {
+  id: number;
+  sender: string;
+  subject: string;
+  body: string;
+  created_at: string;
+  is_read: boolean;
+}
+
+export interface ReadByEntry {
+  brother: string;
+  read_at: string;
+}
+
+export interface MessageDetail {
+  id: number;
+  sender: string;
+  subject: string;
+  body: string;
+  created_at: string;
+  recipients: string[];
+  is_read: boolean;
+  read_by: ReadByEntry[];
+}
+
+export interface FeedMessage {
+  id: number;
+  sender: string;
+  subject: string;
+  body: string;
+  created_at: string;
+  recipients: string[];
+  read_by: ReadByEntry[];
+}
+
+export interface SendMessageRequest {
+  recipients: string[];
+  subject: string;
+  body: string;
+}
+
+export interface EditMessageRequest {
+  subject?: string;
+  body?: string;
+}
+
+export interface SendMessageResponse {
+  id: number;
+  message: string;
+}
+
+export interface UnreadCountResponse {
+  unread: number;
+}
