@@ -1,211 +1,118 @@
 # Terminal Spawner MCP Server
 
-## Vision
+An MCP server that lets Doot (Claude Code on Ian's local macOS laptop) spawn terminal windows, connect to brothers, communicate via a shared mailbox, and delegate tasks to remote Claude Code instances.
 
-An MCP tool that lets Doot (Claude Code on Ian's local macOS laptop) spawn new terminal windows, particularly to connect with Brother Oppy (masuda) and Brother Jerry (cluster).
-
-The goal: Ian says "hey Doot, I need to talk to Jerry" and a terminal window pops up with an SSH session to cluster running Claude Code.
-
-## The Problem
-
-Claude Code's Bash tool runs commands and returns output, but can't create interactive sessions that Ian can take over. We need a bridge between Doot's world (non-interactive command execution) and Ian's world (interactive terminal sessions).
-
-## Core Functionality
-
-### 1. Spawn Terminal Window
-Open a new terminal window (Terminal.app or iTerm2) and optionally run a command in it.
-
-```
-spawn_terminal(command?: string, app?: "terminal" | "iterm2")
-```
-
-### 2. Connect to Family Members
-Predefined shortcuts for connecting to other Claude Code instances:
-
-```
-connect_to_brother(name: "jerry" | "oppy", initial_prompt?: string)
-```
-
-**Jerry (cluster):**
-```bash
-ssh -t cluster "claude"
-```
-
-**Oppy (masuda):**
-```bash
-ssh -t masuda "cd ~/projects/mol_diffusion/OMTRA_oppy && claude"
-```
-
-### 3. Delegate Task (Stretch Goal)
-Spawn a session AND send an initial prompt/task. This is trickier - might need to:
-- Use `claude -p "prompt"` for non-interactive single tasks
-- Or figure out how to send keystrokes to the new window
-
-## Technical Approach
-
-### AppleScript Core
-macOS lets us script terminal apps via AppleScript:
-
-**Terminal.app:**
-```applescript
-tell application "Terminal"
-    activate
-    do script "ssh -t cluster 'claude'"
-end tell
-```
-
-**iTerm2:**
-```applescript
-tell application "iTerm2"
-    create window with default profile
-    tell current session of current window
-        write text "ssh -t cluster 'claude'"
-    end tell
-end tell
-```
-
-### MCP Server Structure
+## Project Structure
 
 ```
 terminal-spawner/
-├── CLAUDE.md           # This file
-├── package.json
-├── src/
-│   ├── index.ts        # MCP server entry point
-│   ├── terminal.ts     # AppleScript execution logic
-│   └── brothers.ts     # Family member configurations
-└── dist/               # Compiled output
+├── server.py                  # Doot's MCP server (terminal + mailbox + task tools)
+├── mailbox_mcp.py             # Brothers' MCP server (mailbox + task tools only)
+├── brothers.py                # Brother definitions (host, working_dir, description)
+├── terminal.py                # AppleScript terminal spawning logic
+├── ssh_task.py                # SSH + tmux task delegation (build_remote_script, initiate_task)
+├── mailbox_client.py          # HTTP client for mailbox API
+├── timestamp_utils.py         # Timezone-aware timestamp formatting
+├── mailbox/                   # Mailbox API server (FastAPI + SQLite, deployed on EC2)
+│   ├── app.py                 # FastAPI routes (/api/v1/messages, /api/v1/tasks, etc.)
+│   ├── db.py                  # SQLite database (messages + tasks tables)
+│   ├── auth.py                # API key authentication
+│   ├── models.py              # Pydantic request/response models
+│   └── config.py              # Server configuration
+├── src/terminal_spawner/      # Packaged module (v0.2 refactoring)
+│   ├── core/                  # Config, types
+│   ├── terminal/              # AppleScript execution
+│   ├── communication/         # Mailbox client (packaged version)
+│   ├── mcp/
+│   │   ├── server_full.py     # Full MCP server (Doot — terminal + mailbox)
+│   │   ├── server_lite.py     # Lite MCP server (brothers — mailbox only)
+│   │   └── tools/
+│   │       ├── terminal_tools.py   # spawn_terminal, connect_to_brother
+│   │       └── mailbox_tools.py    # send/check/read/browse/unread + task tools
+│   └── web/                   # Web app backend (unused currently)
+├── frontend/                  # Mailbox web UI (Vite + React + TypeScript + Tailwind v4)
+├── deploy/                    # EC2 deployment scripts
+│   ├── setup.sh               # Server provisioning
+│   └── ec2.sh                 # Instance management (start/stop/status/ssh)
+├── tests/                     # Packaged module tests
+├── test_terminal_spawner.py   # Top-level terminal spawner tests (38 tests)
+├── test_mailbox.py            # Top-level mailbox tests (89 tests)
+├── test_ssh_task.py           # SSH task delegation tests
+├── research_notes/            # Development logs and research (gitignored)
+├── docs/                      # Documentation
+└── BROTHER_MAILBOX_SETUP.md   # Self-setup guide for brothers
 ```
 
-### Configuration
+**Two server variants exist:**
+- `server.py` — Doot's full MCP server: terminal spawning + mailbox + task delegation
+- `mailbox_mcp.py` — Brothers' lite MCP server: mailbox + task visibility/updates only
+- `src/terminal_spawner/mcp/server_lite.py` — Packaged version of the lite server (what brothers actually run via their `~/.claude.json`)
 
-The server should be configurable. Store brother definitions in a config:
+## MCP Tools
 
-```json
-{
-  "terminal_app": "iterm2",
-  "brothers": {
-    "jerry": {
-      "host": "cluster",
-      "working_dir": null,
-      "description": "Brother Jerry - GPU jobs and real results"
-    },
-    "oppy": {
-      "host": "masuda",
-      "working_dir": "~/projects/mol_diffusion/OMTRA_oppy",
-      "description": "Brother Oppy - The architect"
-    }
-  }
-}
-```
+### Doot's tools (server.py)
+- `spawn_terminal(command?, app?)` — Open Terminal.app window, optionally run a command
+- `connect_to_brother(name)` — SSH + Claude Code session to oppy or jerry
+- `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
+- `initiate_ssh_task(brother, prompt, subject?, max_turns?, auto_pull?)` — Delegate a task via SSH + tmux
+- `list_tasks(assignee?, status?, limit?)` — Browse tasks
 
-## Open Questions
+### Brothers' tools (mailbox_mcp.py / server_lite)
+- `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
+- `list_tasks`, `get_task`, `update_task` — Task visibility and status updates
 
-1. **TypeScript or Python?**
-   - TS is more common for MCP servers, better ecosystem support
-   - Python might be simpler, Ian is more familiar with it
-   - Leaning TS for alignment with MCP conventions
+## Task Delegation System
 
-2. **How to handle initial prompts?**
-   - `claude -p "prompt"` runs non-interactively and exits
-   - Could paste text into terminal after spawning, but timing is tricky
-   - Maybe a two-step flow: spawn, then "send message to window"?
+Doot can delegate tasks to brothers via SSH. The flow:
 
-3. **Window management?**
-   - Should we track spawned windows?
-   - Could assign names/IDs to reference them later
-   - "Send this to the Jerry window I opened earlier"
+1. Doot calls `initiate_ssh_task(brother, prompt)`
+2. Task is created in the mailbox database (status: `pending`)
+3. Doot SSHes to the brother's host, launches a detached tmux session
+4. The tmux session runs `claude -p "<prompt>"` with `--dangerously-skip-permissions`
+5. The brother reads the prompt, does the work, reports back via mailbox, and updates task status
 
-4. **Error handling?**
-   - What if SSH fails?
-   - What if the terminal app isn't installed?
-   - Doot won't see the terminal output, so errors are invisible
+**Shell escaping strategy** (avoids all quoting nightmares):
+- Prompt is base64-encoded before sending
+- Bash script is piped to `ssh host bash -s` via stdin
+- A runner script is written to a temp file (avoids tmux quoting)
+- The heredoc uses an **unquoted** delimiter so `$PROMPT_FILE` and `$RUNNER` expand at write time
+- `$(cat ...)` is escaped as `\$(cat ...)` so it runs at runner execution time
 
-5. **Security considerations?**
-   - Executing arbitrary commands in new terminals
-   - Should we restrict to predefined commands/hosts?
+**Task lifecycle:** `pending` -> `launched` -> `in_progress` -> `completed` / `failed`
 
-## MVP Scope
+Key file: `ssh_task.py` — contains `build_remote_script()`, `wrap_prompt()`, `initiate_task()`
 
-For v0.1, keep it simple:
+## Mailbox System
 
-1. Single tool: `spawn_terminal`
-   - Takes optional `command` string
-   - Takes optional `app` preference (default to user's preferred terminal)
+- **API server:** FastAPI + SQLite on EC2 (`54.84.119.14`, HTTPS on 443)
+- **Web UI:** React SPA at `https://54.84.119.14` (source in `frontend/`)
+- **4 members:** ian, doot, oppy, jerry — each with their own API key
+- **Admins:** ian and doot can edit/delete any message; others only their own
 
-2. Single tool: `connect_to_brother`
-   - Takes `name` (jerry or oppy)
-   - Opens SSH + Claude Code session
-
-3. Hardcoded config (no external config file yet)
-
-4. No window tracking, no message passing, no delegation
-
-## Mailbox Web Interface
-
-A React web app for browsing, composing, editing, and deleting mailbox messages. Deployed on the same EC2 instance as the API.
-
-- **URL:** `https://54.84.119.14`
-- **Docs:** [docs/WEBAPP.md](docs/WEBAPP.md)
-- **Source:** `frontend/` directory (Vite + React + TypeScript + Tailwind CSS v4)
-- **Deployment:** Static files served by nginx from `/var/www/mailbox/`
-
-### Members
-
-The mailbox has four members, each with their own API key:
-
-| Name | Role | Interface |
-|------|------|-----------|
-| **ian** | Father of The Clade. Admin authority. | Web app only |
-| **doot** | Coordinator on local macOS. Admin authority. | MCP tools |
-| **oppy** | Architect on masuda. | MCP tools |
-| **jerry** | Front lines on cluster. | MCP tools |
-
-Admin authority means ian and doot can edit/delete any message. Others can only edit/delete their own.
-
-## Future Ideas
-
-- **Status checking**: Query if a brother's session is still active
-- **Task queue**: Doot queues up tasks, Jerry picks them up when ready
-- **Shared context**: Sync relevant context between instances
-
-## Installation (Future)
+## Testing
 
 ```bash
-# In this directory
-npm install
-npm run build
-
-# Register with Claude Code
-# Add to ~/.claude/mcp.json:
-{
-  "mcpServers": {
-    "terminal-spawner": {
-      "command": "node",
-      "args": ["/Users/iandunn/projects/terminal-spawner/dist/index.js"]
-    }
-  }
-}
+# Run all tests (from project root, in terminal-spawner conda env)
+python -m pytest tests/ test_terminal_spawner.py test_mailbox.py test_ssh_task.py -q
 ```
 
-## Usage Examples (Future)
+137 tests total across all files.
 
-**Ian:** "Doot, open a terminal to Jerry"
-**Doot:** *calls connect_to_brother("jerry")*
-*New iTerm2 window opens with SSH to cluster + Claude Code*
+**Important:** When mocking httpx responses in tests, use `MagicMock` (not `AsyncMock`) since `.json()` and `.raise_for_status()` are sync methods.
 
-**Ian:** "Doot, I need Oppy to review the training script"
-**Doot:** *calls connect_to_brother("oppy")*
-"I've opened a session with Brother Oppy. You can ask him to review the training script."
+## Deployment
 
-**Ian:** "Spawn me a terminal on masuda, I need to check something manually"
-**Doot:** *calls spawn_terminal("ssh masuda")*
+- **EC2 host:** `54.84.119.14` (Elastic IP, instance `i-049a5a49e7068655b`)
+- **Management:** `deploy/ec2.sh {start|stop|status|ssh}`
+- **Service:** `sudo systemctl restart mailbox` on EC2
+- **Web UI deploy:** `frontend/` -> `npm run build` -> SCP `dist/` to `/var/www/mailbox/` on EC2
 
----
+## Key Gotchas
 
-*Document created by Doot, February 5, 2026*
-*For future Doot, Oppy, Jerry, and Ian to build upon*
-
+- **MCP server is a subprocess** — code changes require Claude Code restart to take effect
+- **Two module systems coexist:** Top-level files (`server.py`, `mailbox_mcp.py`) and packaged modules (`src/terminal_spawner/`). Brothers run `server_lite` which imports from the packaged modules — new tools must be added to **both** places
+- **Heredoc quoting:** Unquoted delimiter = variable expansion ON. The runner script heredoc must be unquoted so temp file paths expand, but `$(...)` must be escaped
+- **Default terminal:** Terminal.app (iTerm2 is NOT installed on this machine)
 
 ---
 Directions from Ian:
