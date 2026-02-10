@@ -470,12 +470,18 @@ async def get_task(task_id: int) -> dict | None:
             return None
         task = dict(row)
 
-        # Get linked messages
+        # Get linked messages (explicit task_id OR mentions "task #N" / "task N")
+        task_id_str = str(task_id)
+        pattern_hash = f"%task #{task_id_str}%"
+        pattern_space = f"%task {task_id_str}%"
         cursor = await db.execute(
-            """SELECT m.id, m.sender, m.subject, m.body, m.created_at
-               FROM messages m WHERE m.task_id = ?
+            """SELECT DISTINCT m.id, m.sender, m.subject, m.body, m.created_at
+               FROM messages m
+               WHERE m.task_id = ?
+                  OR m.subject LIKE ? OR m.body LIKE ?
+                  OR m.subject LIKE ? OR m.body LIKE ?
                ORDER BY m.created_at ASC""",
-            (task_id,),
+            (task_id, pattern_hash, pattern_hash, pattern_space, pattern_space),
         )
         msg_rows = await cursor.fetchall()
         messages = [dict(r) for r in msg_rows]

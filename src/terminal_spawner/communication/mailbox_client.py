@@ -17,12 +17,19 @@ class MailboxClient:
         return f"{self.base_url}/api/v1{path}"
 
     async def send_message(
-        self, recipients: list[str], body: str, subject: str = ""
+        self,
+        recipients: list[str],
+        body: str,
+        subject: str = "",
+        task_id: int | None = None,
     ) -> dict:
+        payload: dict = {"recipients": recipients, "body": body, "subject": subject}
+        if task_id is not None:
+            payload["task_id"] = task_id
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.post(
                 self._url("/messages"),
-                json={"recipients": recipients, "body": body, "subject": subject},
+                json=payload,
                 headers=self.headers,
                 timeout=10,
             )

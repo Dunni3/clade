@@ -75,6 +75,7 @@ async def send_message(
     recipients: list[str],
     body: str,
     subject: str = "",
+    task_id: int | None = None,
 ) -> str:
     """Send a message to one or more brothers.
 
@@ -82,11 +83,12 @@ async def send_message(
         recipients: List of brother names (e.g. ["oppy", "jerry"]).
         body: The message body.
         subject: Optional subject line.
+        task_id: Optional task ID to link this message to.
     """
     if _mailbox is None:
         return _NOT_CONFIGURED
     try:
-        result = await _mailbox.send_message(recipients, body, subject)
+        result = await _mailbox.send_message(recipients, body, subject, task_id=task_id)
         names = ", ".join(recipients)
         return f"Message sent to {names} (id: {result['id']})"
     except Exception as e:
