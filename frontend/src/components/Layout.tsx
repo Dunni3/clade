@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/authStore';
 const navItems = [
   { to: '/', label: 'Inbox' },
   { to: '/feed', label: 'Feed' },
+  { to: '/tasks', label: 'Tasks' },
   { to: '/compose', label: 'Compose' },
   { to: '/settings', label: 'Settings' },
 ];

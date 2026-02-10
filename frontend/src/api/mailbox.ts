@@ -7,6 +7,8 @@ import type {
   SendMessageResponse,
   EditMessageRequest,
   UnreadCountResponse,
+  TaskSummary,
+  TaskDetail,
 } from '../types/mailbox';
 
 export async function getInbox(unreadOnly = false, limit = 50): Promise<MessageSummary[]> {
@@ -62,4 +64,19 @@ export async function markUnread(id: number): Promise<void> {
 export async function getUnreadCount(): Promise<number> {
   const { data } = await apiClient.get<UnreadCountResponse>('/unread');
   return data.unread;
+}
+
+export async function getTasks(params: {
+  assignee?: string;
+  status?: string;
+  creator?: string;
+  limit?: number;
+} = {}): Promise<TaskSummary[]> {
+  const { data } = await apiClient.get<TaskSummary[]>('/tasks', { params });
+  return data;
+}
+
+export async function getTask(id: number): Promise<TaskDetail> {
+  const { data } = await apiClient.get<TaskDetail>(`/tasks/${id}`);
+  return data;
 }

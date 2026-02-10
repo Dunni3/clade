@@ -52,3 +52,23 @@ export interface SendMessageResponse {
 export interface UnreadCountResponse {
   unread: number;
 }
+
+export interface TaskSummary {
+  id: number;
+  creator: string;
+  assignee: string;
+  subject: string;
+  status: string;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface TaskDetail extends TaskSummary {
+  prompt: string;
+  session_name: string | null;
+  host: string | null;
+  working_dir: string | null;
+  output: string | null;
+  messages: FeedMessage[];
+}

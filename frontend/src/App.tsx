@@ -4,6 +4,8 @@ import InboxPage from './pages/InboxPage';
 import FeedPage from './pages/FeedPage';
 import MessageDetailPage from './pages/MessageDetailPage';
 import ComposePage from './pages/ComposePage';
+import TasksPage from './pages/TasksPage';
+import TaskDetailPage from './pages/TaskDetailPage';
 import SettingsPage from './pages/SettingsPage';
 import { useAuthStore } from './store/authStore';
 
@@ -40,6 +42,22 @@ export default function App() {
             element={
               <RequireAuth>
                 <MessageDetailPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/tasks"
+            element={
+              <RequireAuth>
+                <TasksPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/tasks/:id"
+            element={
+              <RequireAuth>
+                <TaskDetailPage />
               </RequireAuth>
             }
           />
