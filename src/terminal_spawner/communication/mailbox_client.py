@@ -115,3 +115,58 @@ class MailboxClient:
             )
             resp.raise_for_status()
             return resp.json()["unread"]
+
+    async def get_tasks(
+        self,
+        assignee: str | None = None,
+        status: str | None = None,
+        creator: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        params: dict = {"limit": limit}
+        if assignee:
+            params["assignee"] = assignee
+        if status:
+            params["status"] = status
+        if creator:
+            params["creator"] = creator
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url("/tasks"),
+                params=params,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_task(self, task_id: int) -> dict:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url(f"/tasks/{task_id}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def update_task(
+        self,
+        task_id: int,
+        status: str | None = None,
+        output: str | None = None,
+    ) -> dict:
+        payload: dict = {}
+        if status is not None:
+            payload["status"] = status
+        if output is not None:
+            payload["output"] = output
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.patch(
+                self._url(f"/tasks/{task_id}"),
+                json=payload,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()

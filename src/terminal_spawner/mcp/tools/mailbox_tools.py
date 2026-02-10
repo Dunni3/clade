@@ -154,3 +154,97 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> None:
             return f"{count} unread message{'s' if count != 1 else ''}."
         except Exception as e:
             return f"Error checking unread count: {e}"
+
+    @mcp.tool()
+    async def list_tasks(
+        assignee: str | None = None,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> str:
+        """List tasks from the mailbox task tracker.
+
+        Args:
+            assignee: Filter by assignee (e.g. "oppy", "jerry").
+            status: Filter by status (e.g. "pending", "launched", "in_progress", "completed", "failed").
+            limit: Maximum number of tasks to return.
+        """
+        if mailbox is None:
+            return _NOT_CONFIGURED
+        try:
+            tasks = await mailbox.get_tasks(assignee=assignee, status=status, limit=limit)
+            if not tasks:
+                return "No tasks found."
+            lines = []
+            for t in tasks:
+                line = (
+                    f"#{t['id']} [{t['status']}] {t['subject'] or '(no subject)'}\n"
+                    f"  Assignee: {t['assignee']} | Creator: {t['creator']}\n"
+                    f"  Created: {t['created_at']}"
+                )
+                if t.get("completed_at"):
+                    line += f"\n  Completed: {t['completed_at']}"
+                lines.append(line)
+            return "\n\n".join(lines)
+        except Exception as e:
+            return f"Error listing tasks: {e}"
+
+    @mcp.tool()
+    async def get_task(task_id: int) -> str:
+        """Get full details of a specific task by ID.
+
+        Args:
+            task_id: The task ID to fetch.
+        """
+        if mailbox is None:
+            return _NOT_CONFIGURED
+        try:
+            t = await mailbox.get_task(task_id)
+            lines = [
+                f"Task #{t['id']}",
+                f"Status: {t['status']}",
+                f"Subject: {t['subject'] or '(no subject)'}",
+                f"Assignee: {t['assignee']}",
+                f"Creator: {t['creator']}",
+                f"Created: {t['created_at']}",
+            ]
+            if t.get("completed_at"):
+                lines.append(f"Completed: {t['completed_at']}")
+            if t.get("host"):
+                lines.append(f"Host: {t['host']}")
+            if t.get("session_name"):
+                lines.append(f"Session: {t['session_name']}")
+            if t.get("working_dir"):
+                lines.append(f"Working dir: {t['working_dir']}")
+            if t.get("output"):
+                lines.append(f"\nOutput: {t['output']}")
+            lines.append(f"\nPrompt:\n{t['prompt']}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Error fetching task: {e}"
+
+    @mcp.tool()
+    async def update_task(
+        task_id: int,
+        status: str | None = None,
+        output: str | None = None,
+    ) -> str:
+        """Update a task's status and/or output summary.
+
+        Use this to mark tasks as in_progress, completed, or failed.
+
+        Args:
+            task_id: The task ID to update.
+            status: New status (e.g. "in_progress", "completed", "failed").
+            output: Output summary describing what was done or what went wrong.
+        """
+        if mailbox is None:
+            return _NOT_CONFIGURED
+        try:
+            result = await mailbox.update_task(task_id, status=status, output=output)
+            return (
+                f"Task #{result['id']} updated.\n"
+                f"  Status: {result['status']}\n"
+                f"  Assignee: {result['assignee']}"
+            )
+        except Exception as e:
+            return f"Error updating task: {e}"
