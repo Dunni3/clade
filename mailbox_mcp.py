@@ -169,6 +169,75 @@ async def unread_count() -> str:
 
 
 @mcp.tool()
+async def list_tasks(
+    assignee: str | None = None,
+    status: str | None = None,
+    limit: int = 20,
+) -> str:
+    """List tasks from the mailbox task tracker.
+
+    Args:
+        assignee: Filter by assignee (e.g. "oppy", "jerry").
+        status: Filter by status (e.g. "pending", "launched", "in_progress", "completed", "failed").
+        limit: Maximum number of tasks to return.
+    """
+    if _mailbox is None:
+        return _NOT_CONFIGURED
+    try:
+        tasks = await _mailbox.get_tasks(assignee=assignee, status=status, limit=limit)
+        if not tasks:
+            return "No tasks found."
+        lines = []
+        for t in tasks:
+            line = (
+                f"#{t['id']} [{t['status']}] {t['subject'] or '(no subject)'}\n"
+                f"  Assignee: {t['assignee']} | Creator: {t['creator']}\n"
+                f"  Created: {format_timestamp(t['created_at'])}"
+            )
+            if t.get("completed_at"):
+                line += f"\n  Completed: {format_timestamp(t['completed_at'])}"
+            lines.append(line)
+        return "\n\n".join(lines)
+    except Exception as e:
+        return f"Error listing tasks: {e}"
+
+
+@mcp.tool()
+async def get_task(task_id: int) -> str:
+    """Get full details of a specific task by ID.
+
+    Args:
+        task_id: The task ID to fetch.
+    """
+    if _mailbox is None:
+        return _NOT_CONFIGURED
+    try:
+        t = await _mailbox.get_task(task_id)
+        lines = [
+            f"Task #{t['id']}",
+            f"Status: {t['status']}",
+            f"Subject: {t['subject'] or '(no subject)'}",
+            f"Assignee: {t['assignee']}",
+            f"Creator: {t['creator']}",
+            f"Created: {format_timestamp(t['created_at'])}",
+        ]
+        if t.get("completed_at"):
+            lines.append(f"Completed: {format_timestamp(t['completed_at'])}")
+        if t.get("host"):
+            lines.append(f"Host: {t['host']}")
+        if t.get("session_name"):
+            lines.append(f"Session: {t['session_name']}")
+        if t.get("working_dir"):
+            lines.append(f"Working dir: {t['working_dir']}")
+        if t.get("output"):
+            lines.append(f"\nOutput: {t['output']}")
+        lines.append(f"\nPrompt:\n{t['prompt']}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error fetching task: {e}"
+
+
+@mcp.tool()
 async def update_task(
     task_id: int,
     status: str | None = None,

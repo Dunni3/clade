@@ -81,19 +81,33 @@ def build_remote_script(
     working_dir: str | None,
     prompt_b64: str,
     max_turns: int = 50,
+    auto_pull: bool = False,
 ) -> str:
     """Build a bash script to run on the remote host via `ssh host bash -s`.
 
     The script:
-    1. Decodes the base64 prompt into a temp file
-    2. Writes a runner script that cd's and calls claude -p
-    3. Launches the runner in a detached tmux session
-    4. Prints TASK_LAUNCHED on success
+    1. Optionally pulls latest MCP server code (discovered from ~/.claude.json)
+    2. Decodes the base64 prompt into a temp file
+    3. Writes a runner script that cd's and calls claude -p
+    4. Launches the runner in a detached tmux session
+    5. Prints TASK_LAUNCHED on success
     """
     cd_cmd = f'cd {working_dir} || exit 1' if working_dir else ":"
+    if auto_pull:
+        pull_block = """\
+# Discover MCP repo from ~/.claude.json and pull latest
+MCP_SCRIPT=$(sed -n 's/.*"\\([^"]*mailbox_mcp\\.py\\)".*/\\1/p' ~/.claude.json 2>/dev/null | head -1)
+if [ -n "$MCP_SCRIPT" ]; then
+    MCP_REPO=$(dirname "$MCP_SCRIPT")
+    git -C "$MCP_REPO" pull --ff-only 2>&1 || true
+fi"""
+    else:
+        pull_block = ""
     return f"""\
 #!/bin/bash
 set -e
+
+{pull_block}
 
 # Decode prompt from base64 into temp file
 PROMPT_FILE=$(mktemp /tmp/claude_task_XXXXXX.txt)
@@ -123,13 +137,14 @@ def initiate_task(
     session_name: str,
     max_turns: int = 50,
     ssh_timeout: int = 30,
+    auto_pull: bool = False,
 ) -> TaskResult:
     """SSH into host and launch a Claude task in a detached tmux session.
 
     Returns a TaskResult indicating success or failure.
     """
     prompt_b64 = base64.b64encode(prompt.encode()).decode()
-    script = build_remote_script(session_name, working_dir, prompt_b64, max_turns)
+    script = build_remote_script(session_name, working_dir, prompt_b64, max_turns, auto_pull)
 
     try:
         result = subprocess.run(

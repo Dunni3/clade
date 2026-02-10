@@ -139,6 +139,17 @@ class TestBuildRemoteScript:
         script = build_remote_script("sess", None, "dGVzdA==")
         assert 'rm -f "$PROMPT_FILE" "$RUNNER"' in script
 
+    def test_auto_pull_discovers_repo(self):
+        script = build_remote_script("sess", None, "dGVzdA==", auto_pull=True)
+        assert "mailbox_mcp" in script
+        assert ".claude.json" in script
+        assert "git -C" in script
+        assert "pull --ff-only" in script
+
+    def test_no_auto_pull_no_git(self):
+        script = build_remote_script("sess", None, "dGVzdA==")
+        assert "git" not in script
+
 
 # ---------------------------------------------------------------------------
 # initiate_task
@@ -235,6 +246,22 @@ class TestInitiateTask:
             ssh_timeout=60,
         )
         assert mock_run.call_args.kwargs["timeout"] == 60
+
+    @patch("ssh_task.subprocess.run")
+    def test_auto_pull_passed_to_script(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="TASK_LAUNCHED\n", stderr=""
+        )
+        initiate_task(
+            host="masuda",
+            working_dir=None,
+            prompt="test",
+            session_name="sess",
+            auto_pull=True,
+        )
+        script_input = mock_run.call_args.kwargs["input"]
+        assert "git -C" in script_input
+        assert "pull --ff-only" in script_input
 
 
 # ---------------------------------------------------------------------------
@@ -427,3 +454,138 @@ class TestListTasksTool:
             assert "Error" in result
         finally:
             server._mailbox = original
+
+
+# ---------------------------------------------------------------------------
+# mailbox_mcp: list_tasks and get_task tools
+# ---------------------------------------------------------------------------
+
+
+class TestMailboxMCPListTasks:
+    @pytest.mark.asyncio
+    async def test_not_configured(self):
+        import mailbox_mcp
+
+        original = mailbox_mcp._mailbox
+        mailbox_mcp._mailbox = None
+        try:
+            result = await mailbox_mcp.list_tasks()
+            assert "not configured" in result.lower()
+        finally:
+            mailbox_mcp._mailbox = original
+
+    @pytest.mark.asyncio
+    async def test_no_tasks(self):
+        import mailbox_mcp
+
+        mock_client = AsyncMock()
+        mock_client.get_tasks.return_value = []
+        original = mailbox_mcp._mailbox
+        mailbox_mcp._mailbox = mock_client
+        try:
+            result = await mailbox_mcp.list_tasks()
+            assert "No tasks" in result
+        finally:
+            mailbox_mcp._mailbox = original
+
+    @pytest.mark.asyncio
+    async def test_with_tasks(self):
+        import mailbox_mcp
+
+        mock_client = AsyncMock()
+        mock_client.get_tasks.return_value = [
+            {
+                "id": 1,
+                "creator": "doot",
+                "assignee": "oppy",
+                "subject": "Review code",
+                "status": "completed",
+                "created_at": "2026-02-09T10:00:00Z",
+                "completed_at": "2026-02-09T10:30:00Z",
+            },
+        ]
+        original = mailbox_mcp._mailbox
+        mailbox_mcp._mailbox = mock_client
+        try:
+            result = await mailbox_mcp.list_tasks()
+            assert "#1" in result
+            assert "oppy" in result
+            assert "completed" in result
+            assert "Review code" in result
+        finally:
+            mailbox_mcp._mailbox = original
+
+    @pytest.mark.asyncio
+    async def test_passes_filters(self):
+        import mailbox_mcp
+
+        mock_client = AsyncMock()
+        mock_client.get_tasks.return_value = []
+        original = mailbox_mcp._mailbox
+        mailbox_mcp._mailbox = mock_client
+        try:
+            await mailbox_mcp.list_tasks(assignee="oppy", status="launched", limit=5)
+            mock_client.get_tasks.assert_called_once_with(
+                assignee="oppy", status="launched", limit=5
+            )
+        finally:
+            mailbox_mcp._mailbox = original
+
+
+class TestMailboxMCPGetTask:
+    @pytest.mark.asyncio
+    async def test_not_configured(self):
+        import mailbox_mcp
+
+        original = mailbox_mcp._mailbox
+        mailbox_mcp._mailbox = None
+        try:
+            result = await mailbox_mcp.get_task(1)
+            assert "not configured" in result.lower()
+        finally:
+            mailbox_mcp._mailbox = original
+
+    @pytest.mark.asyncio
+    async def test_success(self):
+        import mailbox_mcp
+
+        mock_client = AsyncMock()
+        mock_client.get_task.return_value = {
+            "id": 3,
+            "creator": "doot",
+            "assignee": "oppy",
+            "subject": "Live test #2",
+            "status": "launched",
+            "prompt": "Acknowledge receipt",
+            "created_at": "2026-02-10T04:55:00Z",
+            "completed_at": None,
+            "host": "masuda",
+            "session_name": "task-oppy-live-test-123",
+            "working_dir": "~/projects/mol_diffusion/OMTRA_oppy",
+            "output": None,
+        }
+        original = mailbox_mcp._mailbox
+        mailbox_mcp._mailbox = mock_client
+        try:
+            result = await mailbox_mcp.get_task(3)
+            assert "Task #3" in result
+            assert "oppy" in result
+            assert "launched" in result
+            assert "masuda" in result
+            assert "Acknowledge receipt" in result
+        finally:
+            mailbox_mcp._mailbox = original
+
+    @pytest.mark.asyncio
+    async def test_error(self):
+        import mailbox_mcp
+
+        mock_client = AsyncMock()
+        mock_client.get_task.side_effect = Exception("Not found")
+        original = mailbox_mcp._mailbox
+        mailbox_mcp._mailbox = mock_client
+        try:
+            result = await mailbox_mcp.get_task(999)
+            assert "Error" in result
+        finally:
+            mailbox_mcp._mailbox = original

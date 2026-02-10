@@ -220,6 +220,7 @@ async def initiate_ssh_task(
     subject: str = "",
     working_dir: str | None = None,
     max_turns: int = 50,
+    auto_pull: bool = False,
 ) -> str:
     """Send a task to a brother via SSH. Launches Claude Code in a detached tmux session.
 
@@ -237,6 +238,7 @@ async def initiate_ssh_task(
         subject: Short description of the task.
         working_dir: Override the brother's default working directory.
         max_turns: Maximum Claude turns for the task (default 50). Lower for simple tasks.
+        auto_pull: If true, git pull the MCP server repo on the remote host before launching. Default true.
     """
     if _mailbox is None:
         return _NOT_CONFIGURED
@@ -274,6 +276,7 @@ async def initiate_ssh_task(
         prompt=full_prompt,
         session_name=session_name,
         max_turns=max_turns,
+        auto_pull=auto_pull,
     )
 
     # 4. Update task status based on result
