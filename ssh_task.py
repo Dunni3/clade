@@ -115,10 +115,10 @@ echo '{prompt_b64}' | base64 -d > "$PROMPT_FILE"
 
 # Write a runner script (avoids all tmux quoting issues)
 RUNNER=$(mktemp /tmp/claude_runner_XXXXXX.sh)
-cat > "$RUNNER" << 'RUNNEREOF'
+cat > "$RUNNER" << RUNNEREOF
 #!/bin/bash
 {cd_cmd}
-claude -p "$(cat $PROMPT_FILE)" --dangerously-skip-permissions --max-turns {max_turns}
+claude -p "\\$(cat $PROMPT_FILE)" --dangerously-skip-permissions --max-turns {max_turns}
 rm -f "$PROMPT_FILE" "$RUNNER"
 RUNNEREOF
 chmod +x "$RUNNER"
