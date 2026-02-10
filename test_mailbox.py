@@ -1406,3 +1406,516 @@ class TestFormatTimestamp:
             "2026-02-08T15:30:00Z", now=self._now("2026-02-08T15:30:00Z")
         )
         assert "Feb 8" in result
+
+
+# ---------------------------------------------------------------------------
+# Tasks — database layer
+# ---------------------------------------------------------------------------
+
+
+class TestDatabaseTasks:
+    @pytest.mark.asyncio
+    async def test_insert_and_get_task(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot",
+            assignee="oppy",
+            prompt="Review the code",
+            subject="Code review",
+            session_name="task-oppy-review-123",
+            host="masuda",
+            working_dir="~/projects/test",
+        )
+        assert task_id > 0
+
+        task = await mailbox_db.get_task(task_id)
+        assert task is not None
+        assert task["creator"] == "doot"
+        assert task["assignee"] == "oppy"
+        assert task["prompt"] == "Review the code"
+        assert task["subject"] == "Code review"
+        assert task["status"] == "pending"
+        assert task["session_name"] == "task-oppy-review-123"
+        assert task["host"] == "masuda"
+        assert task["working_dir"] == "~/projects/test"
+        assert task["messages"] == []
+
+    @pytest.mark.asyncio
+    async def test_get_task_not_found(self):
+        task = await mailbox_db.get_task(999)
+        assert task is None
+
+    @pytest.mark.asyncio
+    async def test_get_tasks_all(self):
+        await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Task 1"
+        )
+        await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="Task 2"
+        )
+        tasks = await mailbox_db.get_tasks()
+        assert len(tasks) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_tasks_filter_assignee(self):
+        await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Task 1"
+        )
+        await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="Task 2"
+        )
+        tasks = await mailbox_db.get_tasks(assignee="oppy")
+        assert len(tasks) == 1
+        assert tasks[0]["assignee"] == "oppy"
+
+    @pytest.mark.asyncio
+    async def test_get_tasks_filter_status(self):
+        t1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Task 1"
+        )
+        await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="Task 2"
+        )
+        await mailbox_db.update_task(t1, status="completed")
+        tasks = await mailbox_db.get_tasks(status="pending")
+        assert len(tasks) == 1
+        assert tasks[0]["assignee"] == "jerry"
+
+    @pytest.mark.asyncio
+    async def test_get_tasks_filter_creator(self):
+        await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Task 1"
+        )
+        await mailbox_db.insert_task(
+            creator="ian", assignee="oppy", prompt="Task 2"
+        )
+        tasks = await mailbox_db.get_tasks(creator="ian")
+        assert len(tasks) == 1
+        assert tasks[0]["creator"] == "ian"
+
+    @pytest.mark.asyncio
+    async def test_get_tasks_limit(self):
+        for i in range(5):
+            await mailbox_db.insert_task(
+                creator="doot", assignee="oppy", prompt=f"Task {i}"
+            )
+        tasks = await mailbox_db.get_tasks(limit=3)
+        assert len(tasks) == 3
+
+    @pytest.mark.asyncio
+    async def test_update_task_status(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Test"
+        )
+        updated = await mailbox_db.update_task(task_id, status="in_progress")
+        assert updated is not None
+        assert updated["status"] == "in_progress"
+
+    @pytest.mark.asyncio
+    async def test_update_task_output(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Test"
+        )
+        updated = await mailbox_db.update_task(
+            task_id, status="completed", output="All done"
+        )
+        assert updated["status"] == "completed"
+        assert updated["output"] == "All done"
+
+    @pytest.mark.asyncio
+    async def test_update_task_not_found(self):
+        result = await mailbox_db.update_task(999, status="completed")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_update_task_timestamps(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Test"
+        )
+        updated = await mailbox_db.update_task(
+            task_id,
+            status="completed",
+            started_at="2026-02-09T10:00:00Z",
+            completed_at="2026-02-09T10:30:00Z",
+        )
+        assert updated["started_at"] == "2026-02-09T10:00:00Z"
+        assert updated["completed_at"] == "2026-02-09T10:30:00Z"
+
+
+class TestDatabaseTaskLinkedMessages:
+    @pytest.mark.asyncio
+    async def test_message_with_task_id(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Do stuff"
+        )
+        msg_id = await mailbox_db.insert_message(
+            sender="oppy",
+            subject="Task received",
+            body="I got it",
+            recipients=["doot"],
+            task_id=task_id,
+        )
+        task = await mailbox_db.get_task(task_id)
+        assert len(task["messages"]) == 1
+        assert task["messages"][0]["id"] == msg_id
+        assert task["messages"][0]["body"] == "I got it"
+
+    @pytest.mark.asyncio
+    async def test_multiple_linked_messages(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Do stuff"
+        )
+        await mailbox_db.insert_message(
+            sender="oppy", subject="Started", body="Working on it",
+            recipients=["doot"], task_id=task_id,
+        )
+        await mailbox_db.insert_message(
+            sender="oppy", subject="Done", body="All finished",
+            recipients=["doot"], task_id=task_id,
+        )
+        task = await mailbox_db.get_task(task_id)
+        assert len(task["messages"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_message_without_task_id(self):
+        msg_id = await mailbox_db.insert_message(
+            sender="doot", subject="Hi", body="Hello", recipients=["oppy"]
+        )
+        assert msg_id > 0
+        # Regular message still works without task_id
+
+    @pytest.mark.asyncio
+    async def test_linked_messages_include_recipients(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Do stuff"
+        )
+        await mailbox_db.insert_message(
+            sender="oppy", subject="Status", body="Update",
+            recipients=["doot", "jerry"], task_id=task_id,
+        )
+        task = await mailbox_db.get_task(task_id)
+        assert set(task["messages"][0]["recipients"]) == {"doot", "jerry"}
+
+
+# ---------------------------------------------------------------------------
+# Tasks — API endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestAPITasks:
+    @pytest.mark.asyncio
+    async def test_create_task(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Review the code",
+                "subject": "Code review",
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "id" in data
+        assert data["message"] == "Task created"
+
+    @pytest.mark.asyncio
+    async def test_create_task_no_auth(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Test"},
+        )
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_list_tasks(self, client):
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Task 1", "subject": "First"},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "jerry", "prompt": "Task 2", "subject": "Second"},
+            headers=DOOT_HEADERS,
+        )
+        resp = await client.get("/api/v1/tasks", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        tasks = resp.json()
+        assert len(tasks) == 2
+
+    @pytest.mark.asyncio
+    async def test_list_tasks_filter_assignee(self, client):
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Task 1"},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "jerry", "prompt": "Task 2"},
+            headers=DOOT_HEADERS,
+        )
+        resp = await client.get(
+            "/api/v1/tasks", params={"assignee": "oppy"}, headers=DOOT_HEADERS
+        )
+        tasks = resp.json()
+        assert len(tasks) == 1
+        assert tasks[0]["assignee"] == "oppy"
+
+    @pytest.mark.asyncio
+    async def test_list_tasks_filter_status(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Task 1"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "jerry", "prompt": "Task 2"},
+            headers=DOOT_HEADERS,
+        )
+        # Mark first task completed
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "completed"},
+            headers=DOOT_HEADERS,
+        )
+        resp = await client.get(
+            "/api/v1/tasks", params={"status": "pending"}, headers=DOOT_HEADERS
+        )
+        tasks = resp.json()
+        assert len(tasks) == 1
+        assert tasks[0]["assignee"] == "jerry"
+
+    @pytest.mark.asyncio
+    async def test_get_task_detail(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Do the thing",
+                "subject": "Test task",
+                "session_name": "task-oppy-test-123",
+                "host": "masuda",
+                "working_dir": "~/projects/test",
+            },
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.get(f"/api/v1/tasks/{task_id}", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["creator"] == "doot"
+        assert data["assignee"] == "oppy"
+        assert data["prompt"] == "Do the thing"
+        assert data["session_name"] == "task-oppy-test-123"
+        assert data["messages"] == []
+
+    @pytest.mark.asyncio
+    async def test_get_task_not_found(self, client):
+        resp = await client.get("/api/v1/tasks/999", headers=DOOT_HEADERS)
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_update_task_status(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,  # assignee can update
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "in_progress"
+        assert resp.json()["started_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_update_task_completed_sets_timestamp(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "completed", "output": "All done"},
+            headers=OPPY_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "completed"
+        assert data["completed_at"] is not None
+        assert data["output"] == "All done"
+
+    @pytest.mark.asyncio
+    async def test_update_task_forbidden(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        # Jerry can't update a task assigned to oppy (and created by doot)
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "completed"},
+            headers=JERRY_HEADERS,
+        )
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_update_task_creator_can_update(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "cancelled"},
+            headers=DOOT_HEADERS,  # creator can update
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_task_with_linked_messages(self, client):
+        # Create task
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        # Send message linked to task
+        await client.post(
+            "/api/v1/messages",
+            json={
+                "recipients": ["doot"],
+                "body": "Task received",
+                "subject": "Ack",
+                "task_id": task_id,
+            },
+            headers=OPPY_HEADERS,
+        )
+
+        # Get task detail - should include linked message
+        resp = await client.get(f"/api/v1/tasks/{task_id}", headers=DOOT_HEADERS)
+        data = resp.json()
+        assert len(data["messages"]) == 1
+        assert data["messages"][0]["body"] == "Task received"
+
+
+# ---------------------------------------------------------------------------
+# MailboxClient — task methods
+# ---------------------------------------------------------------------------
+
+
+class TestMailboxClientTasks:
+    def setup_method(self):
+        self.client = MailboxClient("http://localhost:8000", "test-key")
+
+    def _make_mock_resp(self, json_data, status_code=200):
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.json.return_value = json_data
+        resp.raise_for_status.return_value = None
+        return resp
+
+    def _make_async_client(self, get_resp=None, post_resp=None, patch_resp=None):
+        instance = AsyncMock()
+        if get_resp is not None:
+            instance.get.return_value = get_resp
+        if post_resp is not None:
+            instance.post.return_value = post_resp
+        if patch_resp is not None:
+            instance.patch.return_value = patch_resp
+        instance.__aenter__ = AsyncMock(return_value=instance)
+        instance.__aexit__ = AsyncMock(return_value=False)
+        return instance
+
+    @pytest.mark.asyncio
+    async def test_create_task(self):
+        mock_resp = self._make_mock_resp({"id": 1, "message": "Task created"})
+        with patch("mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(post_resp=mock_resp)
+            MockClient.return_value = instance
+            result = await self.client.create_task("oppy", "Do stuff", subject="Test")
+            assert result["id"] == 1
+            instance.post.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_tasks(self):
+        mock_resp = self._make_mock_resp([
+            {"id": 1, "creator": "doot", "assignee": "oppy", "subject": "Test",
+             "status": "pending", "created_at": "2026-02-09T10:00:00Z",
+             "started_at": None, "completed_at": None}
+        ])
+        with patch("mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(get_resp=mock_resp)
+            MockClient.return_value = instance
+            result = await self.client.get_tasks(assignee="oppy")
+            assert len(result) == 1
+            assert result[0]["assignee"] == "oppy"
+
+    @pytest.mark.asyncio
+    async def test_get_task(self):
+        mock_resp = self._make_mock_resp({
+            "id": 1, "creator": "doot", "assignee": "oppy", "subject": "Test",
+            "prompt": "Do stuff", "status": "pending",
+            "created_at": "2026-02-09T10:00:00Z",
+            "started_at": None, "completed_at": None,
+            "session_name": None, "host": None, "working_dir": None,
+            "output": None, "messages": [],
+        })
+        with patch("mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(get_resp=mock_resp)
+            MockClient.return_value = instance
+            result = await self.client.get_task(1)
+            assert result["id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_update_task(self):
+        mock_resp = self._make_mock_resp({
+            "id": 1, "creator": "doot", "assignee": "oppy", "subject": "Test",
+            "prompt": "Do stuff", "status": "completed",
+            "created_at": "2026-02-09T10:00:00Z",
+            "started_at": "2026-02-09T10:01:00Z",
+            "completed_at": "2026-02-09T10:30:00Z",
+            "session_name": None, "host": None, "working_dir": None,
+            "output": "All done", "messages": [],
+        })
+        with patch("mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(patch_resp=mock_resp)
+            MockClient.return_value = instance
+            result = await self.client.update_task(1, status="completed", output="All done")
+            assert result["status"] == "completed"
+            instance.patch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_send_message_with_task_id(self):
+        mock_resp = self._make_mock_resp({"id": 5, "message": "Message sent"})
+        with patch("mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(post_resp=mock_resp)
+            MockClient.return_value = instance
+            result = await self.client.send_message(
+                ["doot"], "Task done", subject="Done", task_id=3
+            )
+            assert result["id"] == 5
+            # Verify task_id was included in payload
+            call_kwargs = instance.post.call_args
+            payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
+            assert payload["task_id"] == 3

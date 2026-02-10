@@ -9,6 +9,8 @@ from fastapi.responses import Response
 from . import db
 from .auth import resolve_sender
 from .models import (
+    CreateTaskRequest,
+    CreateTaskResponse,
     EditMessageRequest,
     FeedMessage,
     MarkReadResponse,
@@ -17,7 +19,10 @@ from .models import (
     ReadByEntry,
     SendMessageRequest,
     SendMessageResponse,
+    TaskDetail,
+    TaskSummary,
     UnreadCountResponse,
+    UpdateTaskRequest,
 )
 
 
@@ -48,6 +53,7 @@ async def send_message(
         subject=req.subject,
         body=req.body,
         recipients=req.recipients,
+        task_id=req.task_id,
     )
     return SendMessageResponse(id=message_id)
 
@@ -184,3 +190,90 @@ async def unread_count(
 ):
     count = await db.get_unread_count(recipient=sender)
     return UnreadCountResponse(unread=count)
+
+
+# ---------------------------------------------------------------------------
+# Task endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/v1/tasks", response_model=CreateTaskResponse)
+async def create_task(
+    req: CreateTaskRequest,
+    caller: str = Depends(resolve_sender),
+):
+    task_id = await db.insert_task(
+        creator=caller,
+        assignee=req.assignee,
+        subject=req.subject,
+        prompt=req.prompt,
+        session_name=req.session_name,
+        host=req.host,
+        working_dir=req.working_dir,
+    )
+    return CreateTaskResponse(id=task_id)
+
+
+@app.get("/api/v1/tasks", response_model=list[TaskSummary])
+async def list_tasks(
+    assignee: str | None = None,
+    status: str | None = None,
+    creator: str | None = None,
+    limit: int = 50,
+    _caller: str = Depends(resolve_sender),
+):
+    tasks = await db.get_tasks(
+        assignee=assignee, status=status, creator=creator, limit=limit
+    )
+    return tasks
+
+
+@app.get("/api/v1/tasks/{task_id}", response_model=TaskDetail)
+async def get_task(
+    task_id: int,
+    _caller: str = Depends(resolve_sender),
+):
+    task = await db.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+
+@app.patch("/api/v1/tasks/{task_id}", response_model=TaskDetail)
+async def update_task(
+    task_id: int,
+    req: UpdateTaskRequest,
+    caller: str = Depends(resolve_sender),
+):
+    task = await db.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Only assignee, creator, or admins can update
+    if caller not in (task["assignee"], task["creator"], "doot", "ian"):
+        raise HTTPException(
+            status_code=403, detail="Only assignee, creator, or admin can update"
+        )
+
+    kwargs: dict = {}
+    if req.status is not None:
+        kwargs["status"] = req.status
+        if req.status == "in_progress" and task["started_at"] is None:
+            from datetime import datetime, timezone
+
+            kwargs["started_at"] = datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+        if req.status in ("completed", "failed"):
+            from datetime import datetime, timezone
+
+            kwargs["completed_at"] = datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+    if req.output is not None:
+        kwargs["output"] = req.output
+
+    updated = await db.update_task(task_id, **kwargs)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return updated

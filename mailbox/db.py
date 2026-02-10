@@ -29,6 +29,22 @@ CREATE TABLE IF NOT EXISTS message_reads (
     read_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     PRIMARY KEY (message_id, brother)
 );
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    creator      TEXT NOT NULL,
+    assignee     TEXT NOT NULL,
+    subject      TEXT NOT NULL DEFAULT '',
+    prompt       TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    session_name TEXT,
+    host         TEXT,
+    working_dir  TEXT,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    started_at   TEXT,
+    completed_at TEXT,
+    output       TEXT
+);
 """
 
 
@@ -44,19 +60,30 @@ async def init_db() -> None:
     db = await get_db()
     try:
         await db.executescript(SCHEMA)
+        # Migration: add task_id to messages (idempotent — SQLite errors if column exists)
+        try:
+            await db.execute(
+                "ALTER TABLE messages ADD COLUMN task_id INTEGER REFERENCES tasks(id)"
+            )
+        except Exception:
+            pass  # Column already exists
         await db.commit()
     finally:
         await db.close()
 
 
 async def insert_message(
-    sender: str, subject: str, body: str, recipients: list[str]
+    sender: str,
+    subject: str,
+    body: str,
+    recipients: list[str],
+    task_id: int | None = None,
 ) -> int:
     db = await get_db()
     try:
         cursor = await db.execute(
-            "INSERT INTO messages (sender, subject, body) VALUES (?, ?, ?)",
-            (sender, subject, body),
+            "INSERT INTO messages (sender, subject, body, task_id) VALUES (?, ?, ?, ?)",
+            (sender, subject, body, task_id),
         )
         message_id = cursor.lastrowid
         for recipient in recipients:
@@ -367,5 +394,159 @@ async def get_feed(
                 msg["read_by"] = read_map.get(msg["id"], [])
 
         return messages
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# Tasks
+# ---------------------------------------------------------------------------
+
+
+async def insert_task(
+    creator: str,
+    assignee: str,
+    prompt: str,
+    subject: str = "",
+    session_name: str | None = None,
+    host: str | None = None,
+    working_dir: str | None = None,
+) -> int:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (creator, assignee, subject, prompt, session_name, host, working_dir),
+        )
+        await db.commit()
+        return cursor.lastrowid
+    finally:
+        await db.close()
+
+
+async def get_tasks(
+    *,
+    assignee: str | None = None,
+    status: str | None = None,
+    creator: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    db = await get_db()
+    try:
+        where_clauses: list[str] = []
+        params: list = []
+        if assignee:
+            where_clauses.append("assignee = ?")
+            params.append(assignee)
+        if status:
+            where_clauses.append("status = ?")
+            params.append(status)
+        if creator:
+            where_clauses.append("creator = ?")
+            params.append(creator)
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        sql = f"""
+            SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at
+            FROM tasks
+            {where_sql}
+            ORDER BY created_at DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        cursor = await db.execute(sql, params)
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+async def get_task(task_id: int) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        task = dict(row)
+
+        # Get linked messages
+        cursor = await db.execute(
+            """SELECT m.id, m.sender, m.subject, m.body, m.created_at
+               FROM messages m WHERE m.task_id = ?
+               ORDER BY m.created_at ASC""",
+            (task_id,),
+        )
+        msg_rows = await cursor.fetchall()
+        messages = [dict(r) for r in msg_rows]
+
+        if messages:
+            msg_ids = [m["id"] for m in messages]
+            placeholders = ",".join("?" * len(msg_ids))
+
+            cursor = await db.execute(
+                f"SELECT message_id, recipient FROM message_recipients WHERE message_id IN ({placeholders})",
+                msg_ids,
+            )
+            recip_rows = await cursor.fetchall()
+            recip_map: dict[int, list[str]] = {}
+            for r in recip_rows:
+                recip_map.setdefault(r["message_id"], []).append(r["recipient"])
+
+            cursor = await db.execute(
+                f"SELECT message_id, brother, read_at FROM message_reads WHERE message_id IN ({placeholders})",
+                msg_ids,
+            )
+            read_rows = await cursor.fetchall()
+            read_map: dict[int, list[dict]] = {}
+            for r in read_rows:
+                read_map.setdefault(r["message_id"], []).append(
+                    {"brother": r["brother"], "read_at": r["read_at"]}
+                )
+
+            for msg in messages:
+                msg["recipients"] = recip_map.get(msg["id"], [])
+                msg["read_by"] = read_map.get(msg["id"], [])
+
+        task["messages"] = messages
+        return task
+    finally:
+        await db.close()
+
+
+async def update_task(
+    task_id: int,
+    *,
+    status: str | None = None,
+    output: str | None = None,
+    started_at: str | None = None,
+    completed_at: str | None = None,
+) -> dict | None:
+    db = await get_db()
+    try:
+        updates: list[str] = []
+        params: list = []
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+        if output is not None:
+            updates.append("output = ?")
+            params.append(output)
+        if started_at is not None:
+            updates.append("started_at = ?")
+            params.append(started_at)
+        if completed_at is not None:
+            updates.append("completed_at = ?")
+            params.append(completed_at)
+
+        if updates:
+            params.append(task_id)
+            query = f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?"
+            cursor = await db.execute(query, params)
+            if cursor.rowcount == 0:
+                return None
+            await db.commit()
+
+        return await get_task(task_id)
     finally:
         await db.close()

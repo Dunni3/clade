@@ -210,6 +210,9 @@ cython_debug/
 # Research notes (local dev logs, not for version control)
 research_notes/
 
+# Credentials (secrets, not for version control)
+CREDENTIALS.md
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

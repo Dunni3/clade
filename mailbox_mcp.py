@@ -163,5 +163,38 @@ async def unread_count() -> str:
         return f"Error checking unread count: {e}"
 
 
+# ---------------------------------------------------------------------------
+# Task tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def update_task(
+    task_id: int,
+    status: str | None = None,
+    output: str | None = None,
+) -> str:
+    """Update a task's status and/or output summary.
+
+    Use this to mark tasks as in_progress, completed, or failed.
+
+    Args:
+        task_id: The task ID to update.
+        status: New status (e.g. "in_progress", "completed", "failed").
+        output: Output summary describing what was done or what went wrong.
+    """
+    if _mailbox is None:
+        return _NOT_CONFIGURED
+    try:
+        result = await _mailbox.update_task(task_id, status=status, output=output)
+        return (
+            f"Task #{result['id']} updated.\n"
+            f"  Status: {result['status']}\n"
+            f"  Assignee: {result['assignee']}"
+        )
+    except Exception as e:
+        return f"Error updating task: {e}"
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

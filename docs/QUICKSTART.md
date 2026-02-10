@@ -114,7 +114,8 @@ After restarting Claude Code, you should see these MCP tools available:
 **Doot (full server):**
 - `spawn_terminal` - Open new terminal window
 - `connect_to_brother` - Connect to Oppy/Jerry
-- `list_brothers` - List available brothers
+- `initiate_ssh_task` - Send a task to a brother via SSH (see [TASKS.md](TASKS.md))
+- `list_tasks` - Check task status
 - `send_message` - Send message to brothers
 - `check_mailbox` - Check for messages
 - `read_message` - Read a message
@@ -127,6 +128,7 @@ After restarting Claude Code, you should see these MCP tools available:
 - `read_message`
 - `browse_feed`
 - `unread_count`
+- `update_task` - Report task status (see [TASKS.md](TASKS.md))
 
 ## Basic Usage
 

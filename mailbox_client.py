@@ -17,12 +17,19 @@ class MailboxClient:
         return f"{self.base_url}/api/v1{path}"
 
     async def send_message(
-        self, recipients: list[str], body: str, subject: str = ""
+        self,
+        recipients: list[str],
+        body: str,
+        subject: str = "",
+        task_id: int | None = None,
     ) -> dict:
+        payload: dict = {"recipients": recipients, "body": body, "subject": subject}
+        if task_id is not None:
+            payload["task_id"] = task_id
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.post(
                 self._url("/messages"),
-                json={"recipients": recipients, "body": body, "subject": subject},
+                json=payload,
                 headers=self.headers,
                 timeout=10,
             )
@@ -115,3 +122,86 @@ class MailboxClient:
             )
             resp.raise_for_status()
             return resp.json()["unread"]
+
+    # -- Tasks --
+
+    async def create_task(
+        self,
+        assignee: str,
+        prompt: str,
+        subject: str = "",
+        session_name: str | None = None,
+        host: str | None = None,
+        working_dir: str | None = None,
+    ) -> dict:
+        payload: dict = {"assignee": assignee, "prompt": prompt, "subject": subject}
+        if session_name is not None:
+            payload["session_name"] = session_name
+        if host is not None:
+            payload["host"] = host
+        if working_dir is not None:
+            payload["working_dir"] = working_dir
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.post(
+                self._url("/tasks"),
+                json=payload,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_tasks(
+        self,
+        assignee: str | None = None,
+        status: str | None = None,
+        creator: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        params: dict = {"limit": limit}
+        if assignee:
+            params["assignee"] = assignee
+        if status:
+            params["status"] = status
+        if creator:
+            params["creator"] = creator
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url("/tasks"),
+                params=params,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_task(self, task_id: int) -> dict:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url(f"/tasks/{task_id}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def update_task(
+        self,
+        task_id: int,
+        status: str | None = None,
+        output: str | None = None,
+    ) -> dict:
+        payload: dict = {}
+        if status is not None:
+            payload["status"] = status
+        if output is not None:
+            payload["output"] = output
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.patch(
+                self._url(f"/tasks/{task_id}"),
+                json=payload,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()

@@ -23,6 +23,14 @@ Welcome to the terminal-spawner documentation! This directory contains comprehen
   - Adding new brothers
   - Troubleshooting
 
+### Task Delegation
+- **[TASKS.md](TASKS.md)** - Remote task delegation via SSH
+  - `initiate_ssh_task` — launch tasks on brothers
+  - `list_tasks` — track task status
+  - `update_task` — brothers report completion
+  - Task-linked messages
+  - API reference
+
 ### Web Interface
 - **[WEBAPP.md](WEBAPP.md)** - Mailbox web interface
   - Access and setup
@@ -43,6 +51,7 @@ Welcome to the terminal-spawner documentation! This directory contains comprehen
 1. Start with [QUICKSTART.md](QUICKSTART.md)
 2. If setting up mailbox server: [MAILBOX_SETUP.md](MAILBOX_SETUP.md)
 3. If adding a new brother: [BROTHER_SETUP.md](BROTHER_SETUP.md)
+4. For remote task delegation: [TASKS.md](TASKS.md)
 
 ### For Maintenance
 - Managing mailbox server → [MAILBOX_SETUP.md](MAILBOX_SETUP.md)

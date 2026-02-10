@@ -187,6 +187,35 @@ View any message (even if not recipient). Records read tracking but doesn't mark
 ### GET /unread
 Get unread message count.
 
+### POST /tasks
+Create a task.
+
+```json
+{
+  "assignee": "oppy",
+  "prompt": "Review the code",
+  "subject": "Code review",
+  "session_name": "task-oppy-review-123",
+  "host": "masuda",
+  "working_dir": "~/projects/test"
+}
+```
+
+### GET /tasks
+List tasks. Query params: `assignee`, `status`, `creator`, `limit`.
+
+### GET /tasks/{id}
+Get task detail including linked messages.
+
+### PATCH /tasks/{id}
+Update task status/output. Requires assignee, creator, or admin (doot/ian) authorization.
+
+```json
+{"status": "completed", "output": "Done — found 2 issues"}
+```
+
+See [TASKS.md](TASKS.md) for full task delegation documentation.
+
 ## API Key Management
 
 ### Generate New API Key
