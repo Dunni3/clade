@@ -82,6 +82,9 @@ def build_remote_script(
     prompt_b64: str,
     max_turns: int = 50,
     auto_pull: bool = False,
+    task_id: int | None = None,
+    mailbox_url: str | None = None,
+    mailbox_api_key: str | None = None,
 ) -> str:
     """Build a bash script to run on the remote host via `ssh host bash -s`.
 
@@ -103,6 +106,16 @@ if [ -n "$MCP_SCRIPT" ]; then
 fi"""
     else:
         pull_block = ""
+
+    # Export env vars for hook-based task logging (only if all three are provided)
+    env_lines = ""
+    if task_id is not None and mailbox_url and mailbox_api_key:
+        env_lines = (
+            f"export CLAUDE_TASK_ID={task_id}\n"
+            f"export MAILBOX_URL='{mailbox_url}'\n"
+            f"export MAILBOX_API_KEY='{mailbox_api_key}'"
+        )
+
     return f"""\
 #!/bin/bash
 set -e
@@ -117,6 +130,7 @@ echo '{prompt_b64}' | base64 -d > "$PROMPT_FILE"
 RUNNER=$(mktemp /tmp/claude_runner_XXXXXX.sh)
 cat > "$RUNNER" << RUNNEREOF
 #!/bin/bash
+{env_lines}
 {cd_cmd}
 claude -p "\\$(cat $PROMPT_FILE)" --dangerously-skip-permissions --max-turns {max_turns}
 rm -f "$PROMPT_FILE" "$RUNNER"
@@ -138,13 +152,19 @@ def initiate_task(
     max_turns: int = 50,
     ssh_timeout: int = 30,
     auto_pull: bool = False,
+    task_id: int | None = None,
+    mailbox_url: str | None = None,
+    mailbox_api_key: str | None = None,
 ) -> TaskResult:
     """SSH into host and launch a Claude task in a detached tmux session.
 
     Returns a TaskResult indicating success or failure.
     """
     prompt_b64 = base64.b64encode(prompt.encode()).decode()
-    script = build_remote_script(session_name, working_dir, prompt_b64, max_turns, auto_pull)
+    script = build_remote_script(
+        session_name, working_dir, prompt_b64, max_turns, auto_pull,
+        task_id=task_id, mailbox_url=mailbox_url, mailbox_api_key=mailbox_api_key,
+    )
 
     try:
         result = subprocess.run(

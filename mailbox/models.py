@@ -108,8 +108,27 @@ class TaskDetail(TaskSummary):
     working_dir: str | None = None
     output: str | None = None
     messages: list[FeedMessage] = []
+    events: list["TaskEvent"] = []
 
 
 class CreateTaskResponse(BaseModel):
     id: int
     message: str = "Task created"
+
+
+# -- Task Events --
+
+
+class CreateTaskEventRequest(BaseModel):
+    event_type: str
+    tool_name: str | None = None
+    summary: str
+
+
+class TaskEvent(BaseModel):
+    id: int
+    task_id: int
+    event_type: str
+    tool_name: str | None = None
+    summary: str
+    created_at: str

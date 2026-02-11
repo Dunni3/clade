@@ -1919,3 +1919,190 @@ class TestMailboxClientTasks:
             call_kwargs = instance.post.call_args
             payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
             assert payload["task_id"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Task Events — database layer
+# ---------------------------------------------------------------------------
+
+
+class TestDatabaseTaskEvents:
+    @pytest.mark.asyncio
+    async def test_insert_and_get_events(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Do stuff"
+        )
+        ev1 = await mailbox_db.insert_task_event(
+            task_id, event_type="PostToolUse", summary="ran: npm test", tool_name="Bash"
+        )
+        ev2 = await mailbox_db.insert_task_event(
+            task_id, event_type="PostToolUse", summary="edited: src/main.py", tool_name="Edit"
+        )
+        assert ev1 > 0
+        assert ev2 > ev1
+
+        events = await mailbox_db.get_task_events(task_id)
+        assert len(events) == 2
+        assert events[0]["event_type"] == "PostToolUse"
+        assert events[0]["tool_name"] == "Bash"
+        assert events[0]["summary"] == "ran: npm test"
+        assert events[1]["tool_name"] == "Edit"
+
+    @pytest.mark.asyncio
+    async def test_events_empty_for_new_task(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Do stuff"
+        )
+        events = await mailbox_db.get_task_events(task_id)
+        assert events == []
+
+    @pytest.mark.asyncio
+    async def test_events_included_in_get_task(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Do stuff"
+        )
+        await mailbox_db.insert_task_event(
+            task_id, event_type="PostToolUse", summary="ran: ls", tool_name="Bash"
+        )
+        await mailbox_db.insert_task_event(
+            task_id, event_type="Stop", summary="Session ended"
+        )
+        task = await mailbox_db.get_task(task_id)
+        assert "events" in task
+        assert len(task["events"]) == 2
+        assert task["events"][0]["summary"] == "ran: ls"
+        assert task["events"][1]["event_type"] == "Stop"
+        assert task["events"][1]["tool_name"] is None
+
+    @pytest.mark.asyncio
+    async def test_event_null_tool_name(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Do stuff"
+        )
+        ev_id = await mailbox_db.insert_task_event(
+            task_id, event_type="Stop", summary="Session ended", tool_name=None
+        )
+        events = await mailbox_db.get_task_events(task_id)
+        assert len(events) == 1
+        assert events[0]["tool_name"] is None
+
+
+# ---------------------------------------------------------------------------
+# Task Events — API endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestAPITaskEvents:
+    @pytest.mark.asyncio
+    async def test_log_event(self, client):
+        # Create a task first
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff", "subject": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        # Log an event
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/log",
+            json={
+                "event_type": "PostToolUse",
+                "tool_name": "Bash",
+                "summary": "ran: pytest tests/",
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["event_type"] == "PostToolUse"
+        assert data["tool_name"] == "Bash"
+        assert data["summary"] == "ran: pytest tests/"
+        assert data["task_id"] == task_id
+
+    @pytest.mark.asyncio
+    async def test_log_event_no_tool_name(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/log",
+            json={"event_type": "Stop", "summary": "Session ended"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["tool_name"] is None
+
+    @pytest.mark.asyncio
+    async def test_log_event_task_not_found(self, client):
+        resp = await client.post(
+            "/api/v1/tasks/9999/log",
+            json={"event_type": "Stop", "summary": "Session ended"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_log_event_no_auth(self, client):
+        resp = await client.post(
+            "/api/v1/tasks/1/log",
+            json={"event_type": "Stop", "summary": "Session ended"},
+        )
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_events_in_task_detail(self, client):
+        # Create task
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff", "subject": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        # Log events
+        await client.post(
+            f"/api/v1/tasks/{task_id}/log",
+            json={"event_type": "PostToolUse", "tool_name": "Bash", "summary": "ran: ls"},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            f"/api/v1/tasks/{task_id}/log",
+            json={"event_type": "PostToolUse", "tool_name": "Edit", "summary": "edited: main.py"},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            f"/api/v1/tasks/{task_id}/log",
+            json={"event_type": "Stop", "summary": "Session ended"},
+            headers=DOOT_HEADERS,
+        )
+
+        # Get task detail — should include events
+        resp = await client.get(f"/api/v1/tasks/{task_id}", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        task = resp.json()
+        assert len(task["events"]) == 3
+        assert task["events"][0]["tool_name"] == "Bash"
+        assert task["events"][2]["event_type"] == "Stop"
+
+    @pytest.mark.asyncio
+    async def test_log_event_validation(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        # Missing required fields
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/log",
+            json={"event_type": "PostToolUse"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 422

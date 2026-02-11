@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getTask } from '../api/mailbox';
-import type { TaskDetail, FeedMessage } from '../types/mailbox';
+import type { TaskDetail, FeedMessage, TaskEvent } from '../types/mailbox';
+
+const POLL_INTERVAL_MS = 5000;
+const ACTIVE_STATUSES = new Set(['pending', 'launched', 'in_progress']);
 
 const statusColors: Record<string, string> = {
   pending: 'bg-gray-500/20 text-gray-300',
@@ -18,15 +21,27 @@ const senderColors: Record<string, string> = {
   jerry: 'bg-amber-500/20 text-amber-300',
 };
 
+const toolIcons: Record<string, string> = {
+  Bash: '$ ',
+  Edit: '~ ',
+  Write: '+ ',
+  Task: '> ',
+};
+
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString();
 }
 
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 interface TimelineItem {
-  type: 'event' | 'message';
+  type: 'event' | 'message' | 'tool';
   timestamp: string;
   label?: string;
   message?: FeedMessage;
+  toolEvent?: TaskEvent;
 }
 
 function buildTimeline(task: TaskDetail): TimelineItem[] {
@@ -45,6 +60,10 @@ function buildTimeline(task: TaskDetail): TimelineItem[] {
     items.push({ type: 'message', timestamp: msg.created_at, message: msg });
   }
 
+  for (const ev of (task.events || [])) {
+    items.push({ type: 'tool', timestamp: ev.created_at, toolEvent: ev });
+  }
+
   items.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   return items;
 }
@@ -57,15 +76,37 @@ export default function TaskDetailPage() {
   const [error, setError] = useState('');
   const [newestFirst, setNewestFirst] = useState(false);
   const [promptExpanded, setPromptExpanded] = useState(false);
+  const [eventsCollapsed, setEventsCollapsed] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
+  const fetchTask = useCallback(async () => {
     if (!id) return;
-    setLoading(true);
-    getTask(Number(id))
-      .then(setTask)
-      .catch((e) => setError(e.response?.data?.detail || e.message))
-      .finally(() => setLoading(false));
+    try {
+      const data = await getTask(Number(id));
+      setTask(data);
+    } catch (e: any) {
+      setError(e.response?.data?.detail || e.message);
+    }
   }, [id]);
+
+  // Initial load
+  useEffect(() => {
+    setLoading(true);
+    fetchTask().finally(() => setLoading(false));
+  }, [fetchTask]);
+
+  // Auto-poll while task is active
+  useEffect(() => {
+    if (task && ACTIVE_STATUSES.has(task.status)) {
+      intervalRef.current = setInterval(fetchTask, POLL_INTERVAL_MS);
+    }
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [task?.status, fetchTask]);
 
   if (loading) return <p className="text-gray-500">Loading...</p>;
   if (error) return <p className="text-red-400">{error}</p>;
@@ -73,6 +114,9 @@ export default function TaskDetailPage() {
 
   const timeline = buildTimeline(task);
   if (newestFirst) timeline.reverse();
+
+  const isActive = ACTIVE_STATUSES.has(task.status);
+  const eventCount = (task.events || []).length;
 
   return (
     <div>
@@ -85,9 +129,16 @@ export default function TaskDetailPage() {
         <div className="flex items-start justify-between mb-3">
           <div>
             <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-mono text-gray-500">#{task.id}</span>
               <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${statusColors[task.status] || 'bg-gray-700 text-gray-300'}`}>
                 {task.status}
               </span>
+              {isActive && (
+                <span className="inline-flex items-center gap-1 text-xs text-blue-400">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+                  live
+                </span>
+              )}
               <span className="text-xs text-gray-500">
                 {task.creator} &rarr; {task.assignee}
               </span>
@@ -129,31 +180,64 @@ export default function TaskDetailPage() {
       {/* Timeline */}
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-200">Timeline</h2>
-        <button
-          onClick={() => setNewestFirst(!newestFirst)}
-          className="text-xs text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-2 py-1 transition-colors"
-        >
-          {newestFirst ? 'Newest first' : 'Oldest first'}
-        </button>
+        <div className="flex items-center gap-2">
+          {eventCount > 0 && (
+            <button
+              onClick={() => setEventsCollapsed(!eventsCollapsed)}
+              className="text-xs text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-2 py-1 transition-colors"
+            >
+              {eventsCollapsed ? 'Show' : 'Hide'} tool events ({eventCount})
+            </button>
+          )}
+          <button
+            onClick={() => setNewestFirst(!newestFirst)}
+            className="text-xs text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-2 py-1 transition-colors"
+          >
+            {newestFirst ? 'Newest first' : 'Oldest first'}
+          </button>
+        </div>
       </div>
 
-      <div className="space-y-3">
-        {timeline.map((item, i) => (
-          <div key={i}>
-            {item.type === 'event' ? (
-              <div className="flex items-center gap-3 py-2">
+      <div className="space-y-1">
+        {timeline.map((item, i) => {
+          // Skip tool events if collapsed
+          if (item.type === 'tool' && eventsCollapsed) return null;
+
+          if (item.type === 'event') {
+            return (
+              <div key={`ev-${i}`} className="flex items-center gap-3 py-2">
                 <div className="h-2 w-2 rounded-full bg-gray-600 shrink-0" />
                 <span className="text-sm text-gray-400">{item.label}</span>
                 <span className="text-xs text-gray-600">{formatDate(item.timestamp)}</span>
               </div>
-            ) : item.message ? (
+            );
+          }
+
+          if (item.type === 'tool' && item.toolEvent) {
+            const ev = item.toolEvent;
+            const icon = (ev.tool_name && toolIcons[ev.tool_name]) || '';
+            return (
+              <div key={`tool-${ev.id}`} className="flex items-center gap-3 py-1 pl-1">
+                <div className="h-1.5 w-1.5 rounded-full bg-cyan-700 shrink-0" />
+                <span className="text-xs font-mono text-cyan-600">
+                  {icon}{ev.summary}
+                </span>
+                <span className="text-xs text-gray-700">{formatTime(ev.created_at)}</span>
+              </div>
+            );
+          }
+
+          if (item.type === 'message' && item.message) {
+            return (
               <Link
+                key={`msg-${item.message.id}`}
                 to={`/messages/${item.message.id}`}
                 className="block rounded-lg border border-gray-800 p-4 transition-colors hover:bg-gray-800/50"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-mono text-gray-500">#{item.message.id}</span>
                       <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${senderColors[item.message.sender] || 'bg-gray-700 text-gray-300'}`}>
                         {item.message.sender}
                       </span>
@@ -169,9 +253,11 @@ export default function TaskDetailPage() {
                   <span className="text-xs text-gray-500 whitespace-nowrap">{formatDate(item.message.created_at)}</span>
                 </div>
               </Link>
-            ) : null}
-          </div>
-        ))}
+            );
+          }
+
+          return null;
+        })}
         {timeline.length === 0 && (
           <p className="text-gray-500 text-sm">No timeline events.</p>
         )}

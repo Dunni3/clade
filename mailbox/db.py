@@ -45,6 +45,15 @@ CREATE TABLE IF NOT EXISTS tasks (
     completed_at TEXT,
     output       TEXT
 );
+
+CREATE TABLE IF NOT EXISTS task_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id    INTEGER NOT NULL REFERENCES tasks(id),
+    event_type TEXT NOT NULL,
+    tool_name  TEXT,
+    summary    TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
 """
 
 
@@ -266,6 +275,15 @@ async def record_read(message_id: int, brother: str) -> None:
     try:
         await db.execute(
             "INSERT OR IGNORE INTO message_reads (message_id, brother) VALUES (?, ?)",
+            (message_id, brother),
+        )
+        # Also mark as read in message_recipients (used by inbox/unread count)
+        await db.execute(
+            """
+            UPDATE message_recipients
+            SET is_read = 1, read_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+            WHERE message_id = ? AND recipient = ? AND is_read = 0
+            """,
             (message_id, brother),
         )
         await db.commit()
@@ -515,7 +533,47 @@ async def get_task(task_id: int) -> dict | None:
                 msg["read_by"] = read_map.get(msg["id"], [])
 
         task["messages"] = messages
+
+        # Get task events
+        cursor = await db.execute(
+            "SELECT id, task_id, event_type, tool_name, summary, created_at FROM task_events WHERE task_id = ? ORDER BY created_at ASC",
+            (task_id,),
+        )
+        event_rows = await cursor.fetchall()
+        task["events"] = [dict(r) for r in event_rows]
+
         return task
+    finally:
+        await db.close()
+
+
+async def insert_task_event(
+    task_id: int,
+    event_type: str,
+    summary: str,
+    tool_name: str | None = None,
+) -> int:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "INSERT INTO task_events (task_id, event_type, tool_name, summary) VALUES (?, ?, ?, ?)",
+            (task_id, event_type, tool_name, summary),
+        )
+        await db.commit()
+        return cursor.lastrowid
+    finally:
+        await db.close()
+
+
+async def get_task_events(task_id: int) -> list[dict]:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT id, task_id, event_type, tool_name, summary, created_at FROM task_events WHERE task_id = ? ORDER BY created_at ASC",
+            (task_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
     finally:
         await db.close()
 

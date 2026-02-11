@@ -271,7 +271,7 @@ async def initiate_ssh_task(
     sender = _mailbox_name or "doot"
     full_prompt = wrap_prompt(prompt, brother, subject, task_id, sender)
 
-    # 3. Launch via SSH
+    # 3. Launch via SSH (pass mailbox credentials for hook-based task logging)
     result: TaskResult = initiate_task(
         host=host,
         working_dir=wd,
@@ -279,6 +279,9 @@ async def initiate_ssh_task(
         session_name=session_name,
         max_turns=max_turns,
         auto_pull=auto_pull,
+        task_id=task_id,
+        mailbox_url=_mailbox_url,
+        mailbox_api_key=_mailbox_api_key,
     )
 
     # 4. Update task status based on result

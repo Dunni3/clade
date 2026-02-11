@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from . import db
 from .auth import resolve_sender
 from .models import (
+    CreateTaskEventRequest,
     CreateTaskRequest,
     CreateTaskResponse,
     EditMessageRequest,
@@ -20,6 +21,7 @@ from .models import (
     SendMessageRequest,
     SendMessageResponse,
     TaskDetail,
+    TaskEvent,
     TaskSummary,
     UnreadCountResponse,
     UpdateTaskRequest,
@@ -237,6 +239,32 @@ async def get_task(
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
+
+
+@app.post("/api/v1/tasks/{task_id}/log", response_model=TaskEvent)
+async def log_task_event(
+    task_id: int,
+    req: CreateTaskEventRequest,
+    _caller: str = Depends(resolve_sender),
+):
+    task = await db.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    event_id = await db.insert_task_event(
+        task_id=task_id,
+        event_type=req.event_type,
+        summary=req.summary,
+        tool_name=req.tool_name,
+    )
+    events = await db.get_task_events(task_id)
+    # Return the just-inserted event
+    for ev in events:
+        if ev["id"] == event_id:
+            return ev
+    # Fallback (shouldn't happen)
+    return {"id": event_id, "task_id": task_id, "event_type": req.event_type,
+            "tool_name": req.tool_name, "summary": req.summary, "created_at": ""}
 
 
 @app.patch("/api/v1/tasks/{task_id}", response_model=TaskDetail)
