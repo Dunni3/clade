@@ -6,58 +6,60 @@ An MCP server that lets Doot (Claude Code on Ian's local macOS laptop) spawn ter
 
 ```
 terminal-spawner/
-├── server.py                  # Doot's MCP server (terminal + mailbox + task tools)
-├── mailbox_mcp.py             # Brothers' MCP server (mailbox + task tools only)
-├── brothers.py                # Brother definitions (host, working_dir, description)
-├── terminal.py                # AppleScript terminal spawning logic
-├── ssh_task.py                # SSH + tmux task delegation (build_remote_script, initiate_task)
-├── mailbox_client.py          # HTTP client for mailbox API
-├── timestamp_utils.py         # Timezone-aware timestamp formatting
+├── src/terminal_spawner/      # Main package (single source of truth)
+│   ├── core/                  # Config (brothers, types), YAML loader
+│   │   ├── config.py          # load_config(), FALLBACK_CONFIG with brother defs
+│   │   ├── brothers.py        # BROTHERS dict (host, working_dir, description)
+│   │   └── types.py           # Type definitions
+│   ├── terminal/              # AppleScript terminal spawning
+│   │   ├── applescript.py     # AppleScript generation (quote escaping, etc.)
+│   │   └── executor.py        # osascript execution
+│   ├── communication/         # Mailbox HTTP client
+│   │   └── mailbox_client.py  # MailboxClient (messages + tasks API)
+│   ├── tasks/                 # SSH task delegation
+│   │   └── ssh_task.py        # build_remote_script, wrap_prompt, initiate_task
+│   ├── utils/                 # Shared utilities
+│   │   └── timestamp.py       # format_timestamp (timezone-aware, human-friendly)
+│   ├── mcp/                   # MCP server definitions
+│   │   ├── server_full.py     # Doot's server (terminal + mailbox + tasks)
+│   │   ├── server_lite.py     # Brothers' server (mailbox + task visibility only)
+│   │   └── tools/
+│   │       ├── terminal_tools.py   # spawn_terminal, connect_to_brother
+│   │       ├── mailbox_tools.py    # send/check/read/browse/unread + task list/get/update
+│   │       └── task_tools.py       # initiate_ssh_task (Doot only)
+│   └── web/                   # Web app backend (unused currently)
 ├── mailbox/                   # Mailbox API server (FastAPI + SQLite, deployed on EC2)
 │   ├── app.py                 # FastAPI routes (/api/v1/messages, /api/v1/tasks, etc.)
 │   ├── db.py                  # SQLite database (messages + tasks tables)
 │   ├── auth.py                # API key authentication
 │   ├── models.py              # Pydantic request/response models
 │   └── config.py              # Server configuration
-├── src/terminal_spawner/      # Packaged module (v0.2 refactoring)
-│   ├── core/                  # Config, types
-│   ├── terminal/              # AppleScript execution
-│   ├── communication/         # Mailbox client (packaged version)
-│   ├── mcp/
-│   │   ├── server_full.py     # Full MCP server (Doot — terminal + mailbox)
-│   │   ├── server_lite.py     # Lite MCP server (brothers — mailbox only)
-│   │   └── tools/
-│   │       ├── terminal_tools.py   # spawn_terminal, connect_to_brother
-│   │       └── mailbox_tools.py    # send/check/read/browse/unread + task tools
-│   └── web/                   # Web app backend (unused currently)
+├── tests/                     # All tests
+│   ├── unit/                  # Fast, no network (config, applescript, client, ssh, timestamp)
+│   └── integration/           # MCP tool + mailbox server integration tests
 ├── frontend/                  # Mailbox web UI (Vite + React + TypeScript + Tailwind v4)
 ├── deploy/                    # EC2 deployment scripts
 │   ├── setup.sh               # Server provisioning
 │   └── ec2.sh                 # Instance management (start/stop/status/ssh)
-├── tests/                     # Packaged module tests
-├── test_terminal_spawner.py   # Top-level terminal spawner tests (38 tests)
-├── test_mailbox.py            # Top-level mailbox tests (89 tests)
-├── test_ssh_task.py           # SSH task delegation tests
 ├── research_notes/            # Development logs and research (gitignored)
 ├── docs/                      # Documentation
 └── BROTHER_MAILBOX_SETUP.md   # Self-setup guide for brothers
 ```
 
-**Two server variants exist:**
-- `server.py` — Doot's full MCP server: terminal spawning + mailbox + task delegation
-- `mailbox_mcp.py` — Brothers' lite MCP server: mailbox + task visibility/updates only
-- `src/terminal_spawner/mcp/server_lite.py` — Packaged version of the lite server (what brothers actually run via their `~/.claude.json`)
+**Two MCP server variants:**
+- `server_full` — Doot's server: terminal spawning + mailbox + task delegation
+- `server_lite` — Brothers' server: mailbox communication + task visibility/updates only
 
 ## MCP Tools
 
-### Doot's tools (server.py)
+### Doot's tools (server_full)
 - `spawn_terminal(command?, app?)` — Open Terminal.app window, optionally run a command
 - `connect_to_brother(name)` — SSH + Claude Code session to oppy or jerry
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
 - `initiate_ssh_task(brother, prompt, subject?, max_turns?, auto_pull?)` — Delegate a task via SSH + tmux
 - `list_tasks(assignee?, status?, limit?)` — Browse tasks
 
-### Brothers' tools (mailbox_mcp.py / server_lite)
+### Brothers' tools (server_lite)
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
 - `list_tasks`, `get_task`, `update_task` — Task visibility and status updates
 
@@ -80,7 +82,7 @@ Doot can delegate tasks to brothers via SSH. The flow:
 
 **Task lifecycle:** `pending` -> `launched` -> `in_progress` -> `completed` / `failed`
 
-Key file: `ssh_task.py` — contains `build_remote_script()`, `wrap_prompt()`, `initiate_task()`
+Key file: `src/terminal_spawner/tasks/ssh_task.py` — contains `build_remote_script()`, `wrap_prompt()`, `initiate_task()`
 
 ## Mailbox System
 
@@ -93,10 +95,10 @@ Key file: `ssh_task.py` — contains `build_remote_script()`, `wrap_prompt()`, `
 
 ```bash
 # Run all tests (from project root, in terminal-spawner conda env)
-python -m pytest tests/ test_terminal_spawner.py test_mailbox.py test_ssh_task.py -q
+python -m pytest tests/ -q
 ```
 
-137 tests total across all files.
+217 tests total.
 
 **Important:** When mocking httpx responses in tests, use `MagicMock` (not `AsyncMock`) since `.json()` and `.raise_for_status()` are sync methods.
 
@@ -110,7 +112,6 @@ python -m pytest tests/ test_terminal_spawner.py test_mailbox.py test_ssh_task.p
 ## Key Gotchas
 
 - **MCP server is a subprocess** — code changes require Claude Code restart to take effect
-- **Two module systems coexist:** Top-level files (`server.py`, `mailbox_mcp.py`) and packaged modules (`src/terminal_spawner/`). Brothers run `server_lite` which imports from the packaged modules — new tools must be added to **both** places
 - **Heredoc quoting:** Unquoted delimiter = variable expansion ON. The runner script heredoc must be unquoted so temp file paths expand, but `$(...)` must be escaped
 - **Default terminal:** Terminal.app (iTerm2 is NOT installed on this machine)
 

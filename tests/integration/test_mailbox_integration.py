@@ -14,12 +14,16 @@ import pytest_asyncio
 os.environ["MAILBOX_API_KEYS"] = "test-key-doot:doot,test-key-oppy:oppy,test-key-jerry:jerry"
 
 from httpx import ASGITransport, AsyncClient
+from mcp.server.fastmcp import FastMCP
 
 from mailbox.app import app
 from mailbox import db as mailbox_db
 from mailbox.config import parse_api_keys
 from mailbox.auth import resolve_sender
 from terminal_spawner.communication.mailbox_client import MailboxClient
+from terminal_spawner.mcp.tools.mailbox_tools import create_mailbox_tools
+from terminal_spawner.mcp.tools.task_tools import create_task_tools
+from terminal_spawner.tasks.ssh_task import TaskResult
 
 
 # ---------------------------------------------------------------------------
@@ -484,52 +488,38 @@ class TestMailboxClient:
 # ---------------------------------------------------------------------------
 
 
+def _make_tools(mailbox):
+    """Create mailbox tools with the given mailbox client (or None)."""
+    mcp = FastMCP("test")
+    return create_mailbox_tools(mcp, mailbox)
+
+
 class TestMCPToolsNotConfigured:
-    """When mailbox env vars aren't set, tools should return a friendly message."""
+    """When mailbox is None, tools should return a friendly message."""
 
     @pytest.mark.asyncio
     async def test_send_message_not_configured(self):
-        import server
-        original = server._mailbox
-        server._mailbox = None
-        try:
-            result = await server.send_message(["oppy"], "hello")
-            assert "not configured" in result.lower()
-        finally:
-            server._mailbox = original
+        tools = _make_tools(None)
+        result = await tools["send_message"](["oppy"], "hello")
+        assert "not configured" in result.lower()
 
     @pytest.mark.asyncio
     async def test_check_mailbox_not_configured(self):
-        import server
-        original = server._mailbox
-        server._mailbox = None
-        try:
-            result = await server.check_mailbox()
-            assert "not configured" in result.lower()
-        finally:
-            server._mailbox = original
+        tools = _make_tools(None)
+        result = await tools["check_mailbox"]()
+        assert "not configured" in result.lower()
 
     @pytest.mark.asyncio
     async def test_read_message_not_configured(self):
-        import server
-        original = server._mailbox
-        server._mailbox = None
-        try:
-            result = await server.read_message(1)
-            assert "not configured" in result.lower()
-        finally:
-            server._mailbox = original
+        tools = _make_tools(None)
+        result = await tools["read_message"](1)
+        assert "not configured" in result.lower()
 
     @pytest.mark.asyncio
     async def test_unread_count_not_configured(self):
-        import server
-        original = server._mailbox
-        server._mailbox = None
-        try:
-            result = await server.unread_count()
-            assert "not configured" in result.lower()
-        finally:
-            server._mailbox = original
+        tools = _make_tools(None)
+        result = await tools["unread_count"]()
+        assert "not configured" in result.lower()
 
 
 class TestMCPToolsWithMock:
@@ -537,68 +527,47 @@ class TestMCPToolsWithMock:
 
     @pytest.mark.asyncio
     async def test_send_message_success(self):
-        import server
         mock_client = AsyncMock()
         mock_client.send_message.return_value = {"id": 42, "message": "Message sent"}
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.send_message(["oppy", "jerry"], "Hello brothers", "Greetings")
-            assert "oppy, jerry" in result
-            assert "42" in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["send_message"](["oppy", "jerry"], "Hello brothers", "Greetings")
+        assert "oppy, jerry" in result
+        assert "42" in result
 
     @pytest.mark.asyncio
     async def test_send_message_error(self):
-        import server
         mock_client = AsyncMock()
         mock_client.send_message.side_effect = Exception("Connection refused")
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.send_message(["oppy"], "Hello")
-            assert "Error" in result
-            assert "Connection refused" in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["send_message"](["oppy"], "Hello")
+        assert "Error" in result
+        assert "Connection refused" in result
 
     @pytest.mark.asyncio
     async def test_check_mailbox_with_messages(self):
-        import server
         mock_client = AsyncMock()
         mock_client.check_mailbox.return_value = [
             {"id": 1, "sender": "oppy", "subject": "Architecture", "body": "Let's discuss the design", "created_at": "2026-02-07T10:00:00Z", "is_read": False},
             {"id": 2, "sender": "jerry", "subject": "", "body": "Training done", "created_at": "2026-02-07T11:00:00Z", "is_read": True},
         ]
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.check_mailbox()
-            assert "[NEW]" in result
-            assert "oppy" in result
-            assert "jerry" in result
-            assert "Architecture" in result
-            assert "(no subject)" in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["check_mailbox"]()
+        assert "[NEW]" in result
+        assert "oppy" in result
+        assert "jerry" in result
+        assert "Architecture" in result
+        assert "(no subject)" in result
 
     @pytest.mark.asyncio
     async def test_check_mailbox_empty(self):
-        import server
         mock_client = AsyncMock()
         mock_client.check_mailbox.return_value = []
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.check_mailbox(unread_only=True)
-            assert "No unread messages" in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["check_mailbox"](unread_only=True)
+        assert "No unread messages" in result
 
     @pytest.mark.asyncio
     async def test_read_message_formatted(self):
-        import server
         mock_client = AsyncMock()
         mock_client.read_message.return_value = {
             "id": 1, "sender": "oppy", "subject": "Design Review",
@@ -606,56 +575,37 @@ class TestMCPToolsWithMock:
             "created_at": "2026-02-07T10:00:00Z",
             "recipients": ["doot", "jerry"], "is_read": False,
         }
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.read_message(1)
-            assert "Message #1" in result
-            assert "From: oppy" in result
-            assert "To: doot, jerry" in result
-            assert "Subject: Design Review" in result
-            assert "Please review" in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["read_message"](1)
+        assert "Message #1" in result
+        assert "From: oppy" in result
+        assert "To: doot, jerry" in result
+        assert "Subject: Design Review" in result
+        assert "Please review" in result
 
     @pytest.mark.asyncio
     async def test_unread_count_zero(self):
-        import server
         mock_client = AsyncMock()
         mock_client.unread_count.return_value = 0
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.unread_count()
-            assert "No unread" in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["unread_count"]()
+        assert "No unread" in result
 
     @pytest.mark.asyncio
     async def test_unread_count_singular(self):
-        import server
         mock_client = AsyncMock()
         mock_client.unread_count.return_value = 1
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.unread_count()
-            assert "1 unread message." in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["unread_count"]()
+        assert "1 unread message." in result
 
     @pytest.mark.asyncio
     async def test_unread_count_plural(self):
-        import server
         mock_client = AsyncMock()
         mock_client.unread_count.return_value = 5
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.unread_count()
-            assert "5 unread messages." in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["unread_count"]()
+        assert "5 unread messages." in result
 
 
 # ---------------------------------------------------------------------------
@@ -1152,31 +1102,20 @@ class TestMailboxClientFeedAndView:
 class TestMCPBrowseFeed:
     @pytest.mark.asyncio
     async def test_browse_feed_not_configured(self):
-        import server
-        original = server._mailbox
-        server._mailbox = None
-        try:
-            result = await server.browse_feed()
-            assert "not configured" in result.lower()
-        finally:
-            server._mailbox = original
+        tools = _make_tools(None)
+        result = await tools["browse_feed"]()
+        assert "not configured" in result.lower()
 
     @pytest.mark.asyncio
     async def test_browse_feed_empty(self):
-        import server
         mock_client = AsyncMock()
         mock_client.browse_feed.return_value = []
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.browse_feed()
-            assert "No messages" in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["browse_feed"]()
+        assert "No messages" in result
 
     @pytest.mark.asyncio
     async def test_browse_feed_with_messages(self):
-        import server
         mock_client = AsyncMock()
         mock_client.browse_feed.return_value = [
             {
@@ -1186,21 +1125,16 @@ class TestMCPBrowseFeed:
                 "read_by": [{"brother": "oppy", "read_at": "2026-02-07T01:00:00Z"}],
             }
         ]
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.browse_feed()
-            assert "#1" in result
-            assert "doot" in result
-            assert "oppy, jerry" in result
-            assert "Hello" in result
-            assert "Read by: oppy" in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["browse_feed"]()
+        assert "#1" in result
+        assert "doot" in result
+        assert "oppy, jerry" in result
+        assert "Hello" in result
+        assert "Read by: oppy" in result
 
     @pytest.mark.asyncio
     async def test_browse_feed_no_read_by(self):
-        import server
         mock_client = AsyncMock()
         mock_client.browse_feed.return_value = [
             {
@@ -1209,32 +1143,22 @@ class TestMCPBrowseFeed:
                 "recipients": ["oppy"], "read_by": [],
             }
         ]
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.browse_feed()
-            assert "Read by" not in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["browse_feed"]()
+        assert "Read by" not in result
 
     @pytest.mark.asyncio
     async def test_browse_feed_error(self):
-        import server
         mock_client = AsyncMock()
         mock_client.browse_feed.side_effect = Exception("Connection refused")
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.browse_feed()
-            assert "Error" in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["browse_feed"]()
+        assert "Error" in result
 
 
 class TestMCPReadMessageWithReadBy:
     @pytest.mark.asyncio
     async def test_read_message_shows_read_by(self):
-        import server
         mock_client = AsyncMock()
         mock_client.read_message.return_value = {
             "id": 1, "sender": "oppy", "subject": "Design Review",
@@ -1246,17 +1170,12 @@ class TestMCPReadMessageWithReadBy:
                 {"brother": "jerry", "read_at": "2026-02-07T12:00:00Z"},
             ],
         }
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.read_message(1)
-            assert "Read by: doot, jerry" in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["read_message"](1)
+        assert "Read by: doot, jerry" in result
 
     @pytest.mark.asyncio
     async def test_read_message_no_read_by(self):
-        import server
         mock_client = AsyncMock()
         mock_client.read_message.return_value = {
             "id": 1, "sender": "oppy", "subject": "Test",
@@ -1265,13 +1184,9 @@ class TestMCPReadMessageWithReadBy:
             "recipients": ["doot"], "is_read": False,
             "read_by": [],
         }
-        original = server._mailbox
-        server._mailbox = mock_client
-        try:
-            result = await server.read_message(1)
-            assert "Read by" not in result
-        finally:
-            server._mailbox = original
+        tools = _make_tools(mock_client)
+        result = await tools["read_message"](1)
+        assert "Read by" not in result
 
 
 class TestIntegrationClientToServer:

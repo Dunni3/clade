@@ -123,6 +123,32 @@ class MailboxClient:
             resp.raise_for_status()
             return resp.json()["unread"]
 
+    async def create_task(
+        self,
+        assignee: str,
+        prompt: str,
+        subject: str = "",
+        session_name: str | None = None,
+        host: str | None = None,
+        working_dir: str | None = None,
+    ) -> dict:
+        payload: dict = {"assignee": assignee, "prompt": prompt, "subject": subject}
+        if session_name is not None:
+            payload["session_name"] = session_name
+        if host is not None:
+            payload["host"] = host
+        if working_dir is not None:
+            payload["working_dir"] = working_dir
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.post(
+                self._url("/tasks"),
+                json=payload,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
     async def get_tasks(
         self,
         assignee: str | None = None,

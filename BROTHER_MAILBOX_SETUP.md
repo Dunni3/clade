@@ -26,19 +26,19 @@ cd ~/projects/terminal-spawner && git pull
 
 ## Step 2: Install Dependencies
 
-You need `mcp[cli]` which includes `httpx` (the HTTP client used by the mailbox).
+Install the package in development mode from the repo root:
 
 ```bash
-pip install "mcp[cli]"
+cd ~/projects/terminal-spawner && pip install -e .
 ```
 
 Verify it worked:
 
 ```bash
-python -c "import mcp; import httpx; print('OK')"
+python -c "from terminal_spawner.mcp.server_lite import mcp; print('OK')"
 ```
 
-Note: use whichever `python`/`pip` is appropriate for your environment. If you use conda, activate the right environment first. The important thing is that the Python you register in step 3 has `mcp[cli]` installed.
+Note: use whichever `python`/`pip` is appropriate for your environment. If you use conda, activate the right environment first. The important thing is that the Python you register in step 3 has the package installed.
 
 ## Step 3: Get Your API Key
 
@@ -65,7 +65,7 @@ Edit `~/.claude.json` and add an entry to the `"mcpServers"` object. If the file
     "brother-mailbox": {
       "type": "stdio",
       "command": "<FULL_PATH_TO_PYTHON>",
-      "args": ["<HOME>/projects/terminal-spawner/mailbox_mcp.py"],
+      "args": ["-m", "terminal_spawner.mcp.server_lite"],
       "env": {
         "MAILBOX_URL": "https://54.84.119.14",
         "MAILBOX_API_KEY": "<YOUR_API_KEY>",

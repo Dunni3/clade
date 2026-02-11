@@ -1,21 +1,23 @@
 """Shared mailbox MCP tool definitions."""
 
-from typing import Any, Callable
-
 from mcp.server.fastmcp import FastMCP
 
 from ...communication.mailbox_client import MailboxClient
+from ...utils.timestamp import format_timestamp
 
 
 _NOT_CONFIGURED = "Mailbox not configured. Set MAILBOX_URL and MAILBOX_API_KEY env vars."
 
 
-def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> None:
+def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
     """Register mailbox tools with an MCP server.
 
     Args:
         mcp: FastMCP server instance to register tools with
         mailbox: MailboxClient instance, or None if not configured
+
+    Returns:
+        Dict mapping tool names to their callable functions (for testing).
 
     Note:
         If mailbox is None, tools will be registered but will return
@@ -67,7 +69,7 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> None:
                 lines.append(
                     f"#{msg['id']}{read_marker} from {msg['sender']}: {subj}\n"
                     f"  {msg['body'][:100]}{'...' if len(msg['body']) > 100 else ''}\n"
-                    f"  ({msg['created_at']})"
+                    f"  ({format_timestamp(msg['created_at'])})"
                 )
             return "\n\n".join(lines)
         except Exception as e:
@@ -91,7 +93,7 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> None:
                 f"From: {msg['sender']}",
                 f"To: {recipients}",
                 f"Subject: {subj}",
-                f"Date: {msg['created_at']}",
+                f"Date: {format_timestamp(msg['created_at'])}",
             ]
             if msg.get("read_by"):
                 names = ", ".join(r["brother"] for r in msg["read_by"])
@@ -135,7 +137,7 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> None:
                 entry = (
                     f"#{msg['id']} from {msg['sender']} to {recipients}: {subj}\n"
                     f"  {body_preview}\n"
-                    f"  ({msg['created_at']})"
+                    f"  ({format_timestamp(msg['created_at'])})"
                 )
                 if read_names:
                     entry += f"\n  Read by: {read_names}"
@@ -181,10 +183,10 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> None:
                 line = (
                     f"#{t['id']} [{t['status']}] {t['subject'] or '(no subject)'}\n"
                     f"  Assignee: {t['assignee']} | Creator: {t['creator']}\n"
-                    f"  Created: {t['created_at']}"
+                    f"  Created: {format_timestamp(t['created_at'])}"
                 )
                 if t.get("completed_at"):
-                    line += f"\n  Completed: {t['completed_at']}"
+                    line += f"\n  Completed: {format_timestamp(t['completed_at'])}"
                 lines.append(line)
             return "\n\n".join(lines)
         except Exception as e:
@@ -207,10 +209,10 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> None:
                 f"Subject: {t['subject'] or '(no subject)'}",
                 f"Assignee: {t['assignee']}",
                 f"Creator: {t['creator']}",
-                f"Created: {t['created_at']}",
+                f"Created: {format_timestamp(t['created_at'])}",
             ]
             if t.get("completed_at"):
-                lines.append(f"Completed: {t['completed_at']}")
+                lines.append(f"Completed: {format_timestamp(t['completed_at'])}")
             if t.get("host"):
                 lines.append(f"Host: {t['host']}")
             if t.get("session_name"):
@@ -250,3 +252,14 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> None:
             )
         except Exception as e:
             return f"Error updating task: {e}"
+
+    return {
+        "send_message": send_message,
+        "check_mailbox": check_mailbox,
+        "read_message": read_message,
+        "browse_feed": browse_feed,
+        "unread_count": unread_count,
+        "list_tasks": list_tasks,
+        "get_task": get_task,
+        "update_task": update_task,
+    }
