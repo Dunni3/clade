@@ -150,6 +150,31 @@ class TestBuildRemoteScript:
         script = build_remote_script("sess", None, "dGVzdA==")
         assert "git" not in script
 
+    def test_env_vars_for_task_logging(self):
+        script = build_remote_script(
+            "sess", None, "dGVzdA==",
+            task_id=42,
+            mailbox_url="https://example.com",
+            mailbox_api_key="secret-key",
+        )
+        assert "export CLAUDE_TASK_ID=42" in script
+        assert "export MAILBOX_URL='https://example.com'" in script
+        assert "export MAILBOX_API_KEY='secret-key'" in script
+
+    def test_no_env_vars_without_task_id(self):
+        script = build_remote_script("sess", None, "dGVzdA==")
+        assert "CLAUDE_TASK_ID" not in script
+        assert "MAILBOX_API_KEY" not in script
+
+    def test_no_env_vars_with_partial_args(self):
+        script = build_remote_script(
+            "sess", None, "dGVzdA==",
+            task_id=42,
+            mailbox_url="https://example.com",
+            mailbox_api_key=None,
+        )
+        assert "CLAUDE_TASK_ID" not in script
+
 
 # ---------------------------------------------------------------------------
 # initiate_task

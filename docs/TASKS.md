@@ -131,6 +131,19 @@ Messages can be linked to a task by including `task_id` when sending. This lets 
 
 The wrapped prompt instructs the brother to include `task_id` in their mailbox messages, so receipt confirmations, progress updates, and completion reports are all linked to the task.
 
+## Task Events (Activity Log)
+
+If the brother has the **task logger hook** installed (`hooks/task_logger.sh`), tool calls during a task session are logged as events to the mailbox API. This gives Doot and Ian live visibility into what the brother is doing without attaching to the tmux session.
+
+Events are viewable in the web UI at `https://54.84.119.14` on the task detail page, and via the API at `GET /api/v1/tasks/{id}/events`.
+
+Each event includes:
+- **event_type** — `PostToolUse` or `Stop`
+- **tool_name** — which tool was called (Bash, Edit, Write, Task)
+- **summary** — human-readable description (e.g., `ran: pytest tests/`, `edited: src/main.py`, `Session ended`)
+
+**Setup:** See [BROTHER_SETUP.md](BROTHER_SETUP.md#step-4-install-task-logger-hook-optional-but-recommended) — install the hook on each brother that will receive tasks.
+
 ## Monitoring a Running Task
 
 ### From Doot
@@ -142,6 +155,10 @@ list_tasks(assignee="oppy", status="launched")
 # Check mailbox for updates from the brother
 check_mailbox()
 ```
+
+### From Ian (Web UI)
+
+Visit `https://54.84.119.14` and click on a task to see its detail page with linked messages and live activity events (if the task logger hook is installed).
 
 ### From Ian (SSH)
 
@@ -191,6 +208,18 @@ Update task status/output. Requires assignee, creator, or admin auth.
 ```json
 {"status": "completed", "output": "Reviewed config, found 2 issues"}
 ```
+
+### `POST /api/v1/tasks/{id}/log`
+
+Log a task event (used by the task logger hook).
+
+```json
+{"event_type": "PostToolUse", "tool_name": "Bash", "summary": "ran: pytest tests/"}
+```
+
+### `GET /api/v1/tasks/{id}/events`
+
+Get all events for a task. Returns a list of timestamped activity entries.
 
 ## How It Works Internally
 

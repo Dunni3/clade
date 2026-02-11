@@ -31,8 +31,8 @@ if _mailbox_url and _mailbox_api_key:
 # Register mailbox tools
 create_mailbox_tools(mcp, _mailbox)
 
-# Register task delegation tools
-create_task_tools(mcp, _mailbox, config)
+# Register task delegation tools (pass URL/key for hook-based task logging)
+create_task_tools(mcp, _mailbox, config, mailbox_url=_mailbox_url, mailbox_api_key=_mailbox_api_key)
 
 
 def main():

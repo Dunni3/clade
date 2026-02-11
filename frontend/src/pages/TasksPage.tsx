@@ -98,6 +98,7 @@ export default function TasksPage() {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-mono text-gray-500">#{task.id}</span>
                   <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${statusColors[task.status] || 'bg-gray-700 text-gray-300'}`}>
                     {task.status}
                   </span>

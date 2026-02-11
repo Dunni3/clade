@@ -16,6 +16,8 @@ def create_task_tools(
     mcp: FastMCP,
     mailbox: MailboxClient | None,
     config: dict | None = None,
+    mailbox_url: str | None = None,
+    mailbox_api_key: str | None = None,
 ) -> dict:
     """Register task delegation tools with an MCP server.
 
@@ -23,6 +25,8 @@ def create_task_tools(
         mcp: FastMCP server instance to register tools with
         mailbox: MailboxClient instance, or None if not configured
         config: Terminal spawner config (for brother definitions). If None, loads from default.
+        mailbox_url: Mailbox API URL (passed to remote task for hook-based logging)
+        mailbox_api_key: Mailbox API key (passed to remote task for hook-based logging)
     """
     if config is None:
         config = load_config()
@@ -86,7 +90,7 @@ def create_task_tools(
         sender = mailbox_name or "doot"
         full_prompt = wrap_prompt(prompt, brother, subject, task_id, sender)
 
-        # 3. Launch via SSH
+        # 3. Launch via SSH (pass mailbox credentials for hook-based task logging)
         result: TaskResult = initiate_task(
             host=host,
             working_dir=wd,
@@ -94,6 +98,9 @@ def create_task_tools(
             session_name=session_name,
             max_turns=max_turns,
             auto_pull=auto_pull,
+            task_id=task_id,
+            mailbox_url=mailbox_url,
+            mailbox_api_key=mailbox_api_key,
         )
 
         # 4. Update task status based on result

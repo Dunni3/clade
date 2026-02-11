@@ -107,7 +107,14 @@ python -m pytest tests/ -q
 - **EC2 host:** `54.84.119.14` (Elastic IP, instance `i-049a5a49e7068655b`)
 - **Management:** `deploy/ec2.sh {start|stop|status|ssh}`
 - **Service:** `sudo systemctl restart mailbox` on EC2
-- **Web UI deploy:** `frontend/` -> `npm run build` -> SCP `dist/` to `/var/www/mailbox/` on EC2
+- **Web UI deploy:** `frontend/` -> `npm run build` -> SCP `dist/` to EC2 -> copy to `/var/www/mailbox/`
+  - `/var/www/mailbox/` is owned by `www-data`, so direct SCP as `ubuntu` fails with permission denied
+  - **Correct pattern:** SCP to `/tmp/mailbox-deploy/`, then `sudo cp -r` to `/var/www/mailbox/`:
+    ```bash
+    ssh -i ~/.ssh/moltbot-key.pem ubuntu@54.84.119.14 "mkdir -p /tmp/mailbox-deploy"
+    scp -i ~/.ssh/moltbot-key.pem -r frontend/dist/* ubuntu@54.84.119.14:/tmp/mailbox-deploy/
+    ssh -i ~/.ssh/moltbot-key.pem ubuntu@54.84.119.14 "sudo rm -rf /var/www/mailbox/* && sudo cp -r /tmp/mailbox-deploy/* /var/www/mailbox/ && sudo chown -R www-data:www-data /var/www/mailbox/ && rm -rf /tmp/mailbox-deploy"
+    ```
 
 ## Key Gotchas
 

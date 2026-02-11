@@ -64,6 +64,15 @@ export interface TaskSummary {
   completed_at: string | null;
 }
 
+export interface TaskEvent {
+  id: number;
+  task_id: number;
+  event_type: string;
+  tool_name: string | null;
+  summary: string;
+  created_at: string;
+}
+
 export interface TaskDetail extends TaskSummary {
   prompt: string;
   session_name: string | null;
@@ -71,4 +80,5 @@ export interface TaskDetail extends TaskSummary {
   working_dir: string | null;
   output: string | null;
   messages: FeedMessage[];
+  events: TaskEvent[];
 }

@@ -71,10 +71,10 @@ TEST_CONFIG = {
 }
 
 
-def _make_task_tools(mailbox):
+def _make_task_tools(mailbox, mailbox_url="https://test.example.com", mailbox_api_key="test-key"):
     """Create task delegation tools with the given mailbox client."""
     mcp = FastMCP("test")
-    return create_task_tools(mcp, mailbox, TEST_CONFIG)
+    return create_task_tools(mcp, mailbox, TEST_CONFIG, mailbox_url=mailbox_url, mailbox_api_key=mailbox_api_key)
 
 
 # ---------------------------------------------------------------------------
@@ -651,6 +651,29 @@ class TestInitiateSSHTaskTool:
         result = await tools["initiate_ssh_task"]("oppy", "Do stuff")
         assert "Error creating task" in result
 
+    @pytest.mark.asyncio
+    @patch("terminal_spawner.mcp.tools.task_tools.initiate_task")
+    async def test_passes_mailbox_credentials_for_hooks(self, mock_initiate):
+        mock_client = AsyncMock()
+        mock_client.create_task.return_value = {"id": 10}
+        mock_client.update_task.return_value = {"id": 10, "status": "launched"}
+        mock_initiate.return_value = TaskResult(
+            success=True,
+            session_name="task-oppy-test-789",
+            host="masuda",
+            message="Task launched",
+        )
+        tools = _make_task_tools(
+            mock_client,
+            mailbox_url="https://54.84.119.14",
+            mailbox_api_key="secret-key",
+        )
+        await tools["initiate_ssh_task"]("oppy", "Do stuff", subject="Test")
+        call_kwargs = mock_initiate.call_args.kwargs
+        assert call_kwargs["task_id"] == 10
+        assert call_kwargs["mailbox_url"] == "https://54.84.119.14"
+        assert call_kwargs["mailbox_api_key"] == "secret-key"
+
 
 class TestListTasksTool:
     @pytest.mark.asyncio
@@ -708,3 +731,185 @@ class TestListTasksTool:
         tools = _make_mailbox_tools(mock_client)
         result = await tools["list_tasks"]()
         assert "Error" in result
+
+
+# ---------------------------------------------------------------------------
+# Task Events — database layer
+# ---------------------------------------------------------------------------
+
+
+class TestDatabaseTaskEvents:
+    @pytest.mark.asyncio
+    async def test_insert_and_get_events(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Do stuff"
+        )
+        ev1 = await mailbox_db.insert_task_event(
+            task_id, event_type="PostToolUse", summary="ran: npm test", tool_name="Bash"
+        )
+        ev2 = await mailbox_db.insert_task_event(
+            task_id, event_type="PostToolUse", summary="edited: src/main.py", tool_name="Edit"
+        )
+        assert ev1 > 0
+        assert ev2 > ev1
+
+        events = await mailbox_db.get_task_events(task_id)
+        assert len(events) == 2
+        assert events[0]["event_type"] == "PostToolUse"
+        assert events[0]["tool_name"] == "Bash"
+        assert events[0]["summary"] == "ran: npm test"
+        assert events[1]["tool_name"] == "Edit"
+
+    @pytest.mark.asyncio
+    async def test_events_empty_for_new_task(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Do stuff"
+        )
+        events = await mailbox_db.get_task_events(task_id)
+        assert events == []
+
+    @pytest.mark.asyncio
+    async def test_events_included_in_get_task(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Do stuff"
+        )
+        await mailbox_db.insert_task_event(
+            task_id, event_type="PostToolUse", summary="ran: ls", tool_name="Bash"
+        )
+        await mailbox_db.insert_task_event(
+            task_id, event_type="Stop", summary="Session ended"
+        )
+        task = await mailbox_db.get_task(task_id)
+        assert "events" in task
+        assert len(task["events"]) == 2
+        assert task["events"][0]["summary"] == "ran: ls"
+        assert task["events"][1]["event_type"] == "Stop"
+        assert task["events"][1]["tool_name"] is None
+
+    @pytest.mark.asyncio
+    async def test_event_null_tool_name(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Do stuff"
+        )
+        ev_id = await mailbox_db.insert_task_event(
+            task_id, event_type="Stop", summary="Session ended", tool_name=None
+        )
+        events = await mailbox_db.get_task_events(task_id)
+        assert len(events) == 1
+        assert events[0]["tool_name"] is None
+
+
+# ---------------------------------------------------------------------------
+# Task Events — API endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestAPITaskEvents:
+    @pytest.mark.asyncio
+    async def test_log_event(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff", "subject": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/log",
+            json={
+                "event_type": "PostToolUse",
+                "tool_name": "Bash",
+                "summary": "ran: pytest tests/",
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["event_type"] == "PostToolUse"
+        assert data["tool_name"] == "Bash"
+        assert data["summary"] == "ran: pytest tests/"
+        assert data["task_id"] == task_id
+
+    @pytest.mark.asyncio
+    async def test_log_event_no_tool_name(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/log",
+            json={"event_type": "Stop", "summary": "Session ended"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["tool_name"] is None
+
+    @pytest.mark.asyncio
+    async def test_log_event_task_not_found(self, client):
+        resp = await client.post(
+            "/api/v1/tasks/9999/log",
+            json={"event_type": "Stop", "summary": "Session ended"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_log_event_no_auth(self, client):
+        resp = await client.post(
+            "/api/v1/tasks/1/log",
+            json={"event_type": "Stop", "summary": "Session ended"},
+        )
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_events_in_task_detail(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff", "subject": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        await client.post(
+            f"/api/v1/tasks/{task_id}/log",
+            json={"event_type": "PostToolUse", "tool_name": "Bash", "summary": "ran: ls"},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            f"/api/v1/tasks/{task_id}/log",
+            json={"event_type": "PostToolUse", "tool_name": "Edit", "summary": "edited: main.py"},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            f"/api/v1/tasks/{task_id}/log",
+            json={"event_type": "Stop", "summary": "Session ended"},
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get(f"/api/v1/tasks/{task_id}", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        task = resp.json()
+        assert len(task["events"]) == 3
+        assert task["events"][0]["tool_name"] == "Bash"
+        assert task["events"][2]["event_type"] == "Stop"
+
+    @pytest.mark.asyncio
+    async def test_log_event_validation(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        # Missing required 'summary' field
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/log",
+            json={"event_type": "PostToolUse"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 422

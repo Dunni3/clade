@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { getUnreadCount } from '../api/mailbox';
 import { useAuthStore } from '../store/authStore';
@@ -14,10 +14,16 @@ const navItems = [
 export default function Layout() {
   const [unread, setUnread] = useState(0);
   const apiKey = useAuthStore((s) => s.apiKey);
+  const location = useLocation();
 
+  // Refresh unread count on route changes and every 30s
   useEffect(() => {
     if (!apiKey) return;
     getUnreadCount().then(setUnread).catch(() => {});
+  }, [apiKey, location.pathname]);
+
+  useEffect(() => {
+    if (!apiKey) return;
     const interval = setInterval(() => {
       getUnreadCount().then(setUnread).catch(() => {});
     }, 30000);
