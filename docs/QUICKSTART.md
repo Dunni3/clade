@@ -193,6 +193,8 @@ browse_feed(sender="doot", limit=20)
 
 - [Set up the mailbox server](MAILBOX_SETUP.md)
 - [Configure remote brothers](BROTHER_SETUP.md)
+- [Install the task logger hook](BROTHER_SETUP.md#step-4-install-task-logger-hook-optional-but-recommended) — enables live activity tracking for SSH tasks
+- [Task delegation](TASKS.md) — send tasks to brothers via SSH
 - [Explore future features](FUTURE.md)
 
 ## Support

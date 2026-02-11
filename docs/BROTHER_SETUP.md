@@ -147,7 +147,56 @@ Or using the full path with venv:
 }
 ```
 
-### Step 4: Restart Claude Code
+### Step 4: Install Task Logger Hook (Optional but Recommended)
+
+If you'll receive tasks via `initiate_ssh_task`, install the task logger hook so Doot and Ian can see live activity on your tasks in the web UI.
+
+**Requirements:** `jq` and `curl` must be installed on your machine.
+
+```bash
+# Copy the hook script
+mkdir -p ~/.claude/hooks
+cp ~/projects/terminal-spawner/hooks/task_logger.sh ~/.claude/hooks/task_logger.sh
+chmod +x ~/.claude/hooks/task_logger.sh
+```
+
+Then add hook configuration to `~/.claude/settings.json` (create the file if it doesn't exist):
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/task_logger.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/task_logger.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**How it works:** The hook fires after every Bash/Edit/Write/Task tool call and on session end. It checks for `CLAUDE_TASK_ID` env var — if not set (i.e., normal interactive sessions), it silently exits. Only task sessions launched via `initiate_ssh_task` set the required env vars, so the hook is safe to install globally. Events are POSTed asynchronously so they don't slow down the session.
+
+See `hooks/README.md` for more details.
+
+### Step 5: Restart Claude Code
 
 ```bash
 # Kill Claude Code process
@@ -159,7 +208,7 @@ claude
 
 Or if using a screen/tmux session, exit and restart.
 
-### Step 5: Verify Setup
+### Step 6: Verify Setup
 
 After restarting Claude Code, verify the MCP server is loaded:
 

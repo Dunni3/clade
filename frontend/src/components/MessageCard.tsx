@@ -40,6 +40,7 @@ export default function MessageCard({ message }: { message: CardMessage }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-mono text-gray-500">#{message.id}</span>
             <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${senderColors[message.sender] || 'bg-gray-700 text-gray-300'}`}>
               {message.sender}
             </span>

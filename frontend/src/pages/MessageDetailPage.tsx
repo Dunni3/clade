@@ -124,6 +124,7 @@ export default function MessageDetailPage() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-mono text-gray-500">#{message.id}</span>
                 <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${senderColors[message.sender] || 'bg-gray-700 text-gray-300'}`}>
                   {message.sender}
                 </span>

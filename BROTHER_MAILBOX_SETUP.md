@@ -106,6 +106,40 @@ Try:
 3. Call `browse_feed()` to see all brother-to-brother messages
 4. Call `send_message(recipients=["doot"], body="Hello from <your name>! Mailbox is working.")` to confirm the round trip
 
+## Step 7: Install Task Logger Hook (Optional)
+
+If you'll receive tasks from Doot via `initiate_ssh_task`, install the task logger hook for live activity tracking. This lets Doot and Ian see what you're doing during a task session.
+
+**Requirements:** `jq` and `curl` on your machine.
+
+```bash
+mkdir -p ~/.claude/hooks
+cp ~/projects/terminal-spawner/hooks/task_logger.sh ~/.claude/hooks/task_logger.sh
+chmod +x ~/.claude/hooks/task_logger.sh
+```
+
+Then add to `~/.claude/settings.json` (create if it doesn't exist):
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|Task",
+        "hooks": [{ "type": "command", "command": "~/.claude/hooks/task_logger.sh", "timeout": 10 }]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "~/.claude/hooks/task_logger.sh", "timeout": 10 }]
+      }
+    ]
+  }
+}
+```
+
+This is safe to install globally — it only activates during task sessions (checks for `CLAUDE_TASK_ID` env var). See `hooks/README.md` for details.
+
 ## Troubleshooting
 
 **"Mailbox not configured"** — The env vars aren't reaching the MCP server. Check that `MAILBOX_URL` and `MAILBOX_API_KEY` are set correctly in `~/.claude.json`.
