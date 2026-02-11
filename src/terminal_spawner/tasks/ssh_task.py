@@ -98,10 +98,37 @@ def build_remote_script(
     cd_cmd = f'cd {working_dir} || exit 1' if working_dir else ":"
     if auto_pull:
         pull_block = """\
-# Discover MCP repo from ~/.claude.json and pull latest
-MCP_SCRIPT=$(sed -n 's/.*"\\([^"]*mailbox_mcp\\.py\\)".*/\\1/p' ~/.claude.json 2>/dev/null | head -1)
-if [ -n "$MCP_SCRIPT" ]; then
-    MCP_REPO=$(dirname "$MCP_SCRIPT")
+# Discover terminal-spawner repo and pull latest
+MCP_REPO=""
+
+# New format: packaged install (-m terminal_spawner.mcp.server_lite)
+PYTHON_CMD=$(python3 -c "
+import json, os
+cfg = json.load(open(os.path.expanduser('~/.claude.json')))
+for srv in cfg.get('mcpServers', {}).values():
+    if any('terminal_spawner' in str(a) for a in srv.get('args', [])):
+        print(srv['command'])
+        break
+" 2>/dev/null)
+
+if [ -n "$PYTHON_CMD" ]; then
+    MCP_REPO=$("$PYTHON_CMD" -c "
+from pathlib import Path
+import terminal_spawner
+print(Path(terminal_spawner.__file__).parents[2])
+" 2>/dev/null)
+fi
+
+# Fallback: old format (mailbox_mcp.py file path)
+if [ -z "$MCP_REPO" ]; then
+    MCP_SCRIPT=$(sed -n 's/.*"\\([^"]*mailbox_mcp\\.py\\)".*/\\1/p' ~/.claude.json 2>/dev/null | head -1)
+    if [ -n "$MCP_SCRIPT" ]; then
+        MCP_REPO=$(dirname "$MCP_SCRIPT")
+    fi
+fi
+
+if [ -n "$MCP_REPO" ] && [ -d "$MCP_REPO/.git" ]; then
+    git -C "$MCP_REPO" checkout main 2>&1 || true
     git -C "$MCP_REPO" pull --ff-only 2>&1 || true
 fi"""
     else:

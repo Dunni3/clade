@@ -141,10 +141,12 @@ class TestBuildRemoteScript:
 
     def test_auto_pull_discovers_repo(self):
         script = build_remote_script("sess", None, "dGVzdA==", auto_pull=True)
-        assert "mailbox_mcp" in script
+        assert "terminal_spawner" in script
         assert ".claude.json" in script
         assert "git -C" in script
         assert "pull --ff-only" in script
+        # Fallback for old config format
+        assert "mailbox_mcp" in script
 
     def test_no_auto_pull_no_git(self):
         script = build_remote_script("sess", None, "dGVzdA==")
