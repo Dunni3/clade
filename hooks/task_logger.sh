@@ -11,48 +11,56 @@
 #   MAILBOX_API_KEY - API key for authentication
 #
 # Receives hook context as JSON on stdin. See Claude Code hooks documentation.
+#
+# Dependencies: python3, curl (no jq needed)
 
 [ -z "$CLAUDE_TASK_ID" ] && exit 0
 [ -z "$MAILBOX_URL" ] && exit 0
 [ -z "$MAILBOX_API_KEY" ] && exit 0
 
-# Read JSON from stdin
+# Capture stdin (JSON from Claude Code hook system)
 INPUT=$(cat)
 
-EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty')
-TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
+# Parse JSON and build POST body using Python (avoids jq dependency)
+POST_BODY=$(echo "$INPUT" | python3 -c "
+import json, sys
 
-# Build a human-readable summary based on event type
-if [ "$EVENT" = "Stop" ]; then
-    SUMMARY="Session ended"
-elif [ -z "$TOOL" ]; then
-    SUMMARY="$EVENT"
-elif [ "$TOOL" = "Bash" ]; then
-    CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' | head -c 200)
-    SUMMARY="ran: $CMD"
-elif [ "$TOOL" = "Write" ]; then
-    FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
-    SUMMARY="wrote: $FILE"
-elif [ "$TOOL" = "Edit" ]; then
-    FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
-    SUMMARY="edited: $FILE"
-elif [ "$TOOL" = "Task" ]; then
-    DESC=$(echo "$INPUT" | jq -r '.tool_input.description // empty')
-    SUMMARY="subagent: $DESC"
-else
-    SUMMARY="$TOOL"
-fi
+data = json.load(sys.stdin)
+
+event = data.get('hook_event_name', '')
+tool = data.get('tool_name', '')
+tool_input = data.get('tool_input', {})
+
+if event == 'Stop':
+    summary = 'Session ended'
+elif not tool:
+    summary = event
+elif tool == 'Bash':
+    summary = 'ran: ' + (tool_input.get('command', '') or '')[:200]
+elif tool == 'Write':
+    summary = 'wrote: ' + (tool_input.get('file_path', '') or '')
+elif tool == 'Edit':
+    summary = 'edited: ' + (tool_input.get('file_path', '') or '')
+elif tool == 'Task':
+    summary = 'subagent: ' + (tool_input.get('description', '') or '')
+else:
+    summary = tool
+
+payload = {
+    'event_type': event,
+    'tool_name': tool if tool else None,
+    'summary': summary,
+}
+print(json.dumps(payload))
+" 2>/dev/null) || exit 0
+
+[ -z "$POST_BODY" ] && exit 0
 
 # POST to the task events API (fire-and-forget, don't block Claude)
 curl -s --max-time 5 \
     -X POST "$MAILBOX_URL/api/v1/tasks/$CLAUDE_TASK_ID/log" \
     -H "Authorization: Bearer $MAILBOX_API_KEY" \
     -H "Content-Type: application/json" \
-    -d "$(jq -n \
-        --arg event_type "$EVENT" \
-        --arg tool_name "$TOOL" \
-        --arg summary "$SUMMARY" \
-        '{event_type: $event_type, tool_name: (if $tool_name == "" then null else $tool_name end), summary: $summary}'
-    )" > /dev/null 2>&1 &
+    -d "$POST_BODY" > /dev/null 2>&1 &
 
 exit 0
