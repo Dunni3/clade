@@ -46,7 +46,7 @@ fi
 # POST to the task events API (fire-and-forget, don't block Claude)
 curl -s --max-time 5 \
     -X POST "$MAILBOX_URL/api/v1/tasks/$CLAUDE_TASK_ID/log" \
-    -H "X-API-Key: $MAILBOX_API_KEY" \
+    -H "Authorization: Bearer $MAILBOX_API_KEY" \
     -H "Content-Type: application/json" \
     -d "$(jq -n \
         --arg event_type "$EVENT" \
