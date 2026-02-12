@@ -44,6 +44,21 @@ interface TimelineItem {
   toolEvent?: TaskEvent;
 }
 
+interface ToolGroup {
+  events: TaskEvent[];
+  startTime: string;
+  endTime: string;
+}
+
+interface TimelineEntry {
+  type: 'event' | 'message' | 'tool-group';
+  timestamp: string;
+  label?: string;
+  message?: FeedMessage;
+  toolGroup?: ToolGroup;
+  groupIndex?: number;
+}
+
 function buildTimeline(task: TaskDetail): TimelineItem[] {
   const items: TimelineItem[] = [];
 
@@ -68,6 +83,54 @@ function buildTimeline(task: TaskDetail): TimelineItem[] {
   return items;
 }
 
+function groupToolEvents(timeline: TimelineItem[]): TimelineEntry[] {
+  const entries: TimelineEntry[] = [];
+  let currentToolRun: TaskEvent[] = [];
+  let groupCounter = 0;
+
+  const flushToolRun = () => {
+    if (currentToolRun.length === 0) return;
+    entries.push({
+      type: 'tool-group',
+      timestamp: currentToolRun[0].created_at,
+      toolGroup: {
+        events: [...currentToolRun],
+        startTime: currentToolRun[0].created_at,
+        endTime: currentToolRun[currentToolRun.length - 1].created_at,
+      },
+      groupIndex: groupCounter++,
+    });
+    currentToolRun = [];
+  };
+
+  for (const item of timeline) {
+    if (item.type === 'tool' && item.toolEvent) {
+      currentToolRun.push(item.toolEvent);
+    } else {
+      flushToolRun();
+      entries.push({
+        type: item.type as 'event' | 'message',
+        timestamp: item.timestamp,
+        label: item.label,
+        message: item.message,
+      });
+    }
+  }
+  flushToolRun();
+
+  return entries;
+}
+
+function buildToolGroupSummary(events: TaskEvent[]): string {
+  const counts: Record<string, number> = {};
+  for (const ev of events) {
+    const name = ev.tool_name || 'Unknown';
+    counts[name] = (counts[name] || 0) + 1;
+  }
+  const parts = Object.entries(counts).map(([name, count]) => `${count}\u00d7 ${name}`);
+  return `${events.length} tool use${events.length === 1 ? '' : 's'} \u2014 ${parts.join(', ')}`;
+}
+
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -76,7 +139,8 @@ export default function TaskDetailPage() {
   const [error, setError] = useState('');
   const [newestFirst, setNewestFirst] = useState(false);
   const [promptExpanded, setPromptExpanded] = useState(false);
-  const [eventsCollapsed, setEventsCollapsed] = useState(false);
+  const [showTools, setShowTools] = useState(true);
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchTask = useCallback(async () => {
@@ -112,11 +176,31 @@ export default function TaskDetailPage() {
   if (error) return <p className="text-red-400">{error}</p>;
   if (!task) return <p className="text-gray-500">Task not found.</p>;
 
-  const timeline = buildTimeline(task);
-  if (newestFirst) timeline.reverse();
+  const rawTimeline = buildTimeline(task);
+  if (newestFirst) rawTimeline.reverse();
+  const timeline = groupToolEvents(rawTimeline);
 
   const isActive = ACTIVE_STATUSES.has(task.status);
   const eventCount = (task.events || []).length;
+
+  const toggleGroup = (groupIndex: number) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupIndex)) {
+        next.delete(groupIndex);
+      } else {
+        next.add(groupIndex);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleTools = () => {
+    if (showTools) {
+      setExpandedGroups(new Set());
+    }
+    setShowTools(!showTools);
+  };
 
   return (
     <div>
@@ -183,10 +267,10 @@ export default function TaskDetailPage() {
         <div className="flex items-center gap-2">
           {eventCount > 0 && (
             <button
-              onClick={() => setEventsCollapsed(!eventsCollapsed)}
+              onClick={handleToggleTools}
               className="text-xs text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-2 py-1 transition-colors"
             >
-              {eventsCollapsed ? 'Show' : 'Hide'} tool events ({eventCount})
+              {showTools ? 'Hide' : 'Show'} tool events ({eventCount})
             </button>
           )}
           <button
@@ -199,58 +283,99 @@ export default function TaskDetailPage() {
       </div>
 
       <div className="space-y-1">
-        {timeline.map((item, i) => {
-          // Skip tool events if collapsed
-          if (item.type === 'tool' && eventsCollapsed) return null;
+        {timeline.map((entry, i) => {
+          if (entry.type === 'tool-group' && !showTools) return null;
 
-          if (item.type === 'event') {
+          if (entry.type === 'event') {
             return (
               <div key={`ev-${i}`} className="flex items-center gap-3 py-2">
                 <div className="h-2 w-2 rounded-full bg-gray-600 shrink-0" />
-                <span className="text-sm text-gray-400">{item.label}</span>
-                <span className="text-xs text-gray-600">{formatDate(item.timestamp)}</span>
+                <span className="text-sm text-gray-400">{entry.label}</span>
+                <span className="text-xs text-gray-600">{formatDate(entry.timestamp)}</span>
               </div>
             );
           }
 
-          if (item.type === 'tool' && item.toolEvent) {
-            const ev = item.toolEvent;
-            const icon = (ev.tool_name && toolIcons[ev.tool_name]) || '';
+          if (entry.type === 'tool-group' && entry.toolGroup) {
+            const group = entry.toolGroup;
+            const gIdx = entry.groupIndex!;
+
+            // Single-event groups render inline without expand/collapse
+            if (group.events.length === 1) {
+              const ev = group.events[0];
+              const icon = (ev.tool_name && toolIcons[ev.tool_name]) || '';
+              return (
+                <div key={`tg-${gIdx}`} className="flex items-center gap-3 py-1 pl-1">
+                  <div className="h-1.5 w-1.5 rounded-full bg-cyan-700 shrink-0" />
+                  <span className="text-xs font-mono text-cyan-600">
+                    {icon}{ev.summary}
+                  </span>
+                  <span className="text-xs text-gray-700">{formatTime(ev.created_at)}</span>
+                </div>
+              );
+            }
+
+            // Multi-event groups: collapsible cluster
+            const isExpanded = expandedGroups.has(gIdx);
             return (
-              <div key={`tool-${ev.id}`} className="flex items-center gap-3 py-1 pl-1">
-                <div className="h-1.5 w-1.5 rounded-full bg-cyan-700 shrink-0" />
-                <span className="text-xs font-mono text-cyan-600">
-                  {icon}{ev.summary}
-                </span>
-                <span className="text-xs text-gray-700">{formatTime(ev.created_at)}</span>
+              <div key={`tg-${gIdx}`}>
+                <button
+                  onClick={() => toggleGroup(gIdx)}
+                  className="flex items-center gap-3 py-1.5 pl-1 w-full text-left hover:bg-gray-800/30 rounded transition-colors group"
+                >
+                  <div className="h-1.5 w-1.5 rounded-full bg-cyan-700 shrink-0" />
+                  <span className={`text-xs text-cyan-700 transition-transform ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
+                  <span className="text-xs text-cyan-700 group-hover:text-cyan-500 transition-colors">
+                    {buildToolGroupSummary(group.events)}
+                  </span>
+                  <span className="text-xs text-gray-700">
+                    {formatTime(group.startTime)}{group.startTime !== group.endTime && ` \u2013 ${formatTime(group.endTime)}`}
+                  </span>
+                </button>
+                {isExpanded && (
+                  <div className="ml-6 border-l border-cyan-900/30 pl-3 space-y-0.5">
+                    {group.events.map(ev => {
+                      const icon = (ev.tool_name && toolIcons[ev.tool_name]) || '';
+                      return (
+                        <div key={`tool-${ev.id}`} className="flex items-center gap-3 py-0.5">
+                          <div className="h-1 w-1 rounded-full bg-cyan-800 shrink-0" />
+                          <span className="text-xs font-mono text-cyan-700">
+                            {icon}{ev.summary}
+                          </span>
+                          <span className="text-xs text-gray-700">{formatTime(ev.created_at)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           }
 
-          if (item.type === 'message' && item.message) {
+          if (entry.type === 'message' && entry.message) {
             return (
               <Link
-                key={`msg-${item.message.id}`}
-                to={`/messages/${item.message.id}`}
+                key={`msg-${entry.message.id}`}
+                to={`/messages/${entry.message.id}`}
                 className="block rounded-lg border border-gray-800 p-4 transition-colors hover:bg-gray-800/50"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-mono text-gray-500">#{item.message.id}</span>
-                      <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${senderColors[item.message.sender] || 'bg-gray-700 text-gray-300'}`}>
-                        {item.message.sender}
+                      <span className="text-xs font-mono text-gray-500">#{entry.message.id}</span>
+                      <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${senderColors[entry.message.sender] || 'bg-gray-700 text-gray-300'}`}>
+                        {entry.message.sender}
                       </span>
                       <span className="text-xs text-gray-500">
-                        to {item.message.recipients.join(', ')}
+                        to {entry.message.recipients.join(', ')}
                       </span>
                     </div>
                     <p className="text-sm text-gray-300 truncate">
-                      {item.message.subject || '(no subject)'}
+                      {entry.message.subject || '(no subject)'}
                     </p>
-                    <p className="text-xs text-gray-500 truncate mt-0.5">{item.message.body}</p>
+                    <p className="text-xs text-gray-500 truncate mt-0.5">{entry.message.body}</p>
                   </div>
-                  <span className="text-xs text-gray-500 whitespace-nowrap">{formatDate(item.message.created_at)}</span>
+                  <span className="text-xs text-gray-500 whitespace-nowrap">{formatDate(entry.message.created_at)}</span>
                 </div>
               </Link>
             );
