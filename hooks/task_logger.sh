@@ -1,5 +1,5 @@
 #!/bin/bash
-# Hook script for logging Claude Code activity to the mailbox task events API.
+# Hook script for logging Claude Code activity to the Hearth task events API.
 #
 # Designed to be registered as a PostToolUse / Stop hook in ~/.claude/settings.json.
 # No-ops when CLAUDE_TASK_ID is not set, so it's safe to install globally —
@@ -7,16 +7,22 @@
 #
 # Required env vars (set by the task runner script):
 #   CLAUDE_TASK_ID  - The task ID to log events against
-#   MAILBOX_URL     - Base URL of the mailbox API (e.g. https://54.84.119.14)
-#   MAILBOX_API_KEY - API key for authentication
+#   HEARTH_URL      - Base URL of the Hearth API (e.g. https://54.84.119.14)
+#   HEARTH_API_KEY  - API key for authentication
+#   (Legacy fallback: MAILBOX_URL, MAILBOX_API_KEY also accepted)
 #
 # Receives hook context as JSON on stdin. See Claude Code hooks documentation.
 #
 # Dependencies: python3, curl (no jq needed)
 
 [ -z "$CLAUDE_TASK_ID" ] && exit 0
-[ -z "$MAILBOX_URL" ] && exit 0
-[ -z "$MAILBOX_API_KEY" ] && exit 0
+
+# Support HEARTH_* with MAILBOX_* fallback
+HEARTH_URL="${HEARTH_URL:-$MAILBOX_URL}"
+HEARTH_API_KEY="${HEARTH_API_KEY:-$MAILBOX_API_KEY}"
+
+[ -z "$HEARTH_URL" ] && exit 0
+[ -z "$HEARTH_API_KEY" ] && exit 0
 
 # Capture stdin (JSON from Claude Code hook system)
 INPUT=$(cat)
@@ -58,8 +64,8 @@ print(json.dumps(payload))
 
 # POST to the task events API (fire-and-forget, don't block Claude)
 curl -s --max-time 5 \
-    -X POST "$MAILBOX_URL/api/v1/tasks/$CLAUDE_TASK_ID/log" \
-    -H "Authorization: Bearer $MAILBOX_API_KEY" \
+    -X POST "$HEARTH_URL/api/v1/tasks/$CLAUDE_TASK_ID/log" \
+    -H "Authorization: Bearer $HEARTH_API_KEY" \
     -H "Content-Type: application/json" \
     -d "$POST_BODY" > /dev/null 2>&1 &
 

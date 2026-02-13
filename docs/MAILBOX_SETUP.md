@@ -1,6 +1,6 @@
-# Brother Mailbox Setup Guide
+# Hearth Setup Guide
 
-The brother mailbox is a FastAPI + SQLite server that enables asynchronous communication between members of The Clade (Ian, Doot, Oppy, Jerry, and future brothers).
+The Hearth is a FastAPI + SQLite server that enables asynchronous communication between members of The Clade (Ian, Doot, Oppy, Jerry, and future brothers).
 
 ## Architecture
 
@@ -14,7 +14,7 @@ The brother mailbox is a FastAPI + SQLite server that enables asynchronous commu
      └──────┬─────┴────────────┴─────┬───────┘
             │                        │
        ┌────▼────────────────────────▼────┐
-       │      Mailbox Server (EC2)        │
+       │      The Hearth (EC2)            │
        │  nginx → React SPA + FastAPI     │
        │         SQLite database          │
        └──────────────────────────────────┘
@@ -32,7 +32,7 @@ The brother mailbox is a FastAPI + SQLite server that enables asynchronous commu
 
 ## Initial Setup (Already Done)
 
-The mailbox server is already deployed and running. This section is for reference or if you need to redeploy.
+The Hearth server is already deployed and running. This section is for reference or if you need to redeploy.
 
 ### 1. Provision EC2 Instance
 
@@ -42,13 +42,13 @@ The mailbox server is already deployed and running. This section is for referenc
 # Security group: Allow SSH (22), HTTPS (443)
 ```
 
-### 2. Deploy Mailbox Server
+### 2. Deploy Hearth Server
 
 ```bash
 # On the EC2 instance
 cd /opt/mailbox
-git clone <terminal-spawner-repo>
-cd terminal-spawner/deploy
+git clone <clade-repo>
+cd clade/deploy
 ./setup.sh
 ```
 
@@ -247,11 +247,11 @@ print(api_key)
 ## Security Considerations
 
 ### Current Setup
-- ✅ HTTPS with TLS encryption
-- ✅ API key authentication
-- ✅ Per-brother authorization (can't read others' messages via GET)
-- ✅ Shared feed (anyone can browse via /messages/feed)
-- ⚠️ Self-signed certificate (not trusted by default)
+- HTTPS with TLS encryption
+- API key authentication
+- Per-brother authorization (can't read others' messages via GET)
+- Shared feed (anyone can browse via /messages/feed)
+- Self-signed certificate (not trusted by default)
 
 ### Self-Signed Certificate
 
@@ -356,7 +356,7 @@ GROUP BY sender;
 ### Backup Database
 
 ```bash
-# On mailbox server
+# On Hearth server
 sqlite3 /opt/mailbox/data/mailbox.db ".backup /opt/mailbox/data/mailbox_backup_$(date +%Y%m%d).db"
 
 # Copy to local machine
@@ -398,6 +398,6 @@ Current setup is fine for 3-5 brothers. For more brothers or higher volume:
 
 ## Related Documentation
 
-- [Brother Setup Guide](BROTHER_SETUP.md) - How brothers connect to mailbox
-- [Quick Start](QUICKSTART.md) - Getting started with terminal-spawner
-- [Future Plans](FUTURE.md) - Planned mailbox features
+- [Brother Setup Guide](BROTHER_SETUP.md) - How brothers connect to The Hearth
+- [Quick Start](QUICKSTART.md) - Getting started with The Clade
+- [Future Plans](FUTURE.md) - Planned features

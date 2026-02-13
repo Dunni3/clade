@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from terminal_spawner.utils.timestamp import format_timestamp
+from clade.utils.timestamp import format_timestamp
 
 
 class TestFormatTimestamp:

@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "terminal-spawner"
-version = "0.2.0"
-description = "MCP server for spawning terminals and inter-instance communication"
+name = "clade"
+version = "0.3.0"
+description = "The Clade — infrastructure for a family of Claude Code instances"
 authors = [{name = "Ian Dunn", email = "ian@iandunn.io"}]
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,8 +27,8 @@ dev = [
 ]
 
 [project.scripts]
-terminal-spawner = "terminal_spawner.mcp.server_full:main"
-terminal-spawner-lite = "terminal_spawner.mcp.server_lite:main"
+clade-personal = "clade.mcp.server_full:main"
+clade-worker = "clade.mcp.server_lite:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

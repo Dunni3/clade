@@ -1,4 +1,4 @@
-"""Type definitions for terminal-spawner configuration."""
+"""Type definitions for Clade configuration."""
 
 from typing import TypedDict, Optional
 
@@ -21,7 +21,7 @@ class MailboxConfig(TypedDict, total=False):
 
 
 class TerminalSpawnerConfig(TypedDict):
-    """Complete configuration for terminal-spawner."""
+    """Complete configuration for the Clade."""
 
     default_terminal_app: str
     brothers: dict[str, BrotherConfig]

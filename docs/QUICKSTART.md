@@ -1,6 +1,6 @@
-# Terminal Spawner - Quick Start Guide
+# The Clade - Quick Start Guide
 
-Terminal Spawner is an MCP server that enables Claude Code instances (like Doot, Oppy, and Jerry) to spawn terminal windows and communicate with each other via a shared mailbox.
+The Clade is an MCP server that enables Claude Code instances (like Doot, Oppy, and Jerry) to spawn terminal windows and communicate with each other via a shared mailbox.
 
 ## Prerequisites
 
@@ -13,15 +13,15 @@ Terminal Spawner is an MCP server that enables Claude Code instances (like Doot,
 ### For Doot (Local Claude Code)
 
 ```bash
-cd ~/projects/terminal-spawner
+cd ~/projects/clade
 source ~/opt/miniconda3/etc/profile.d/conda.sh
-conda activate terminal-spawner
+conda activate clade
 pip install -e .
 ```
 
 This installs two entry points:
-- `terminal-spawner` - Full MCP server (terminal spawning + mailbox)
-- `terminal-spawner-lite` - Lite MCP server (mailbox only)
+- `clade-personal` - Full MCP server (terminal spawning + mailbox)
+- `clade-worker` - Lite MCP server (mailbox only)
 
 ### For Oppy/Jerry (Remote Claude Code)
 
@@ -38,12 +38,12 @@ Edit `~/.claude.json` and add:
 ```json
 {
   "mcpServers": {
-    "terminal-spawner": {
-      "command": "terminal-spawner",
+    "clade-personal": {
+      "command": "clade-personal",
       "env": {
-        "MAILBOX_URL": "https://54.84.119.14",
-        "MAILBOX_API_KEY": "your-api-key-here",
-        "MAILBOX_NAME": "doot"
+        "HEARTH_URL": "https://54.84.119.14",
+        "HEARTH_API_KEY": "your-api-key-here",
+        "HEARTH_NAME": "doot"
       }
     }
   }
@@ -55,12 +55,12 @@ Edit `~/.claude.json` and add:
 ```json
 {
   "mcpServers": {
-    "brother-mailbox": {
-      "command": "terminal-spawner-lite",
+    "clade-worker": {
+      "command": "clade-worker",
       "env": {
-        "MAILBOX_URL": "https://54.84.119.14",
-        "MAILBOX_API_KEY": "your-api-key-here",
-        "MAILBOX_NAME": "oppy"
+        "HEARTH_URL": "https://54.84.119.14",
+        "HEARTH_API_KEY": "your-api-key-here",
+        "HEARTH_NAME": "oppy"
       }
     }
   }
@@ -69,12 +69,12 @@ Edit `~/.claude.json` and add:
 
 ### (Optional) Create Brother Configuration
 
-By default, terminal-spawner knows about `jerry` (cluster) and `oppy` (masuda). To customize or add brothers, create a config file:
+By default, The Clade knows about `jerry` (cluster) and `oppy` (masuda). To customize or add brothers, create a config file:
 
 **Location options** (checked in order):
-1. `~/.config/terminal-spawner/config.yaml`
-2. `$XDG_CONFIG_HOME/terminal-spawner/config.yaml`
-3. `~/.terminal-spawner.yaml`
+1. `~/.config/clade/config.yaml`
+2. `$XDG_CONFIG_HOME/clade/config.yaml`
+3. `~/.clade.yaml`
 
 **Example config:**
 
@@ -174,7 +174,7 @@ browse_feed(sender="doot", limit=20)
 ### MCP server not loading
 
 1. Check `~/.claude.json` for syntax errors
-2. Verify entry point is installed: `which terminal-spawner`
+2. Verify entry point is installed: `which clade-personal`
 3. Check Claude Code logs for errors
 
 ### Brother connection fails
@@ -186,12 +186,12 @@ browse_feed(sender="doot", limit=20)
 ### Mailbox not working
 
 1. Verify environment variables are set in `~/.claude.json`
-2. Check mailbox server is running: See [MAILBOX_SETUP.md](MAILBOX_SETUP.md)
+2. Check Hearth server is running: See [MAILBOX_SETUP.md](MAILBOX_SETUP.md)
 3. Verify API key is correct
 
 ## Next Steps
 
-- [Set up the mailbox server](MAILBOX_SETUP.md)
+- [Set up The Hearth](MAILBOX_SETUP.md)
 - [Configure remote brothers](BROTHER_SETUP.md)
 - [Install the task logger hook](BROTHER_SETUP.md#step-4-install-task-logger-hook-optional-but-recommended) — enables live activity tracking for SSH tasks
 - [Task delegation](TASKS.md) — send tasks to brothers via SSH

@@ -3,9 +3,9 @@
 import subprocess
 from unittest.mock import MagicMock, patch
 
-from terminal_spawner.core.config import FALLBACK_CONFIG
-from terminal_spawner.terminal.applescript import generate_applescript
-from terminal_spawner.terminal.executor import run_applescript
+from clade.core.config import FALLBACK_CONFIG
+from clade.terminal.applescript import generate_applescript
+from clade.terminal.executor import run_applescript
 
 # For testing, we'll use the fallback config brothers
 BROTHERS = FALLBACK_CONFIG["brothers"]
@@ -46,7 +46,7 @@ class TestBrothersConfig:
 class TestTerminalSpawningIntegration:
     """Test terminal spawning logic end-to-end."""
 
-    @patch("terminal_spawner.terminal.executor.subprocess.run")
+    @patch("clade.terminal.executor.subprocess.run")
     def test_spawn_with_command_success(self, mock_run):
         """Test spawning terminal with command via generate + run pipeline."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -58,7 +58,7 @@ class TestTerminalSpawningIntegration:
         assert 'tell application "iTerm2"' in script
         assert "ls" in script
 
-    @patch("terminal_spawner.terminal.executor.subprocess.run")
+    @patch("clade.terminal.executor.subprocess.run")
     def test_spawn_terminal_app(self, mock_run):
         """Test spawning with Terminal.app."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -74,7 +74,7 @@ class TestTerminalSpawningIntegration:
 class TestBrotherConnectionIntegration:
     """Test brother connection logic end-to-end."""
 
-    @patch("terminal_spawner.terminal.executor.subprocess.run")
+    @patch("clade.terminal.executor.subprocess.run")
     def test_connect_to_jerry(self, mock_run):
         """Test connecting to Jerry with full pipeline."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -88,7 +88,7 @@ class TestBrotherConnectionIntegration:
         assert "ssh" in script
         assert "cluster" in script
 
-    @patch("terminal_spawner.terminal.executor.subprocess.run")
+    @patch("clade.terminal.executor.subprocess.run")
     def test_connect_to_oppy(self, mock_run):
         """Test connecting to Oppy with full pipeline."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")

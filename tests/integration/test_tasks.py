@@ -11,12 +11,12 @@ os.environ.setdefault("MAILBOX_API_KEYS", "test-key-doot:doot,test-key-oppy:oppy
 from httpx import ASGITransport, AsyncClient
 from mcp.server.fastmcp import FastMCP
 
-from mailbox.app import app
-from mailbox import db as mailbox_db
-from terminal_spawner.communication.mailbox_client import MailboxClient
-from terminal_spawner.mcp.tools.mailbox_tools import create_mailbox_tools
-from terminal_spawner.mcp.tools.task_tools import create_task_tools
-from terminal_spawner.tasks.ssh_task import TaskResult
+from hearth.app import app
+from hearth import db as mailbox_db
+from clade.communication.mailbox_client import MailboxClient
+from clade.mcp.tools.mailbox_tools import create_mailbox_tools
+from clade.mcp.tools.task_tools import create_task_tools
+from clade.tasks.ssh_task import TaskResult
 
 
 # ---------------------------------------------------------------------------
@@ -513,7 +513,7 @@ class TestMailboxClientTasks:
     @pytest.mark.asyncio
     async def test_create_task(self):
         mock_resp = self._make_mock_resp({"id": 1, "message": "Task created"})
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(post_resp=mock_resp)
             MockClient.return_value = instance
             result = await self.client.create_task("oppy", "Do stuff", subject="Test")
@@ -527,7 +527,7 @@ class TestMailboxClientTasks:
              "status": "pending", "created_at": "2026-02-09T10:00:00Z",
              "started_at": None, "completed_at": None}
         ])
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(get_resp=mock_resp)
             MockClient.return_value = instance
             result = await self.client.get_tasks(assignee="oppy")
@@ -544,7 +544,7 @@ class TestMailboxClientTasks:
             "session_name": None, "host": None, "working_dir": None,
             "output": None, "messages": [],
         })
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(get_resp=mock_resp)
             MockClient.return_value = instance
             result = await self.client.get_task(1)
@@ -561,7 +561,7 @@ class TestMailboxClientTasks:
             "session_name": None, "host": None, "working_dir": None,
             "output": "All done", "messages": [],
         })
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(patch_resp=mock_resp)
             MockClient.return_value = instance
             result = await self.client.update_task(1, status="completed", output="All done")
@@ -571,7 +571,7 @@ class TestMailboxClientTasks:
     @pytest.mark.asyncio
     async def test_send_message_with_task_id(self):
         mock_resp = self._make_mock_resp({"id": 5, "message": "Message sent"})
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(post_resp=mock_resp)
             MockClient.return_value = instance
             result = await self.client.send_message(
@@ -603,7 +603,7 @@ class TestInitiateSSHTaskTool:
         assert "Unknown brother" in result
 
     @pytest.mark.asyncio
-    @patch("terminal_spawner.mcp.tools.task_tools.initiate_task")
+    @patch("clade.mcp.tools.task_tools.initiate_task")
     async def test_success(self, mock_initiate):
         mock_client = AsyncMock()
         mock_client.create_task.return_value = {"id": 7}
@@ -625,7 +625,7 @@ class TestInitiateSSHTaskTool:
         mock_initiate.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("terminal_spawner.mcp.tools.task_tools.initiate_task")
+    @patch("clade.mcp.tools.task_tools.initiate_task")
     async def test_ssh_failure(self, mock_initiate):
         mock_client = AsyncMock()
         mock_client.create_task.return_value = {"id": 8}
@@ -652,7 +652,7 @@ class TestInitiateSSHTaskTool:
         assert "Error creating task" in result
 
     @pytest.mark.asyncio
-    @patch("terminal_spawner.mcp.tools.task_tools.initiate_task")
+    @patch("clade.mcp.tools.task_tools.initiate_task")
     async def test_passes_mailbox_credentials_for_hooks(self, mock_initiate):
         mock_client = AsyncMock()
         mock_client.create_task.return_value = {"id": 10}

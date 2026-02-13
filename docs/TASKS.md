@@ -113,7 +113,7 @@ list_tasks(assignee="oppy")
 
 **Task statuses:** `pending`, `launched`, `in_progress`, `completed`, `failed`
 
-### `update_task` (Brothers only — in `mailbox_mcp.py`)
+### `update_task` (Brothers only — in `server_lite`)
 
 Brothers use this to mark tasks as in progress, completed, or failed.
 
@@ -133,7 +133,7 @@ The wrapped prompt instructs the brother to include `task_id` in their mailbox m
 
 ## Task Events (Activity Log)
 
-If the brother has the **task logger hook** installed (`hooks/task_logger.sh`), tool calls during a task session are logged as events to the mailbox API. This gives Doot and Ian live visibility into what the brother is doing without attaching to the tmux session.
+If the brother has the **task logger hook** installed (`hooks/task_logger.sh`), tool calls during a task session are logged as events to the Hearth API. This gives Doot and Ian live visibility into what the brother is doing without attaching to the tmux session.
 
 Events are viewable in the web UI at `https://54.84.119.14` on the task detail page, and via the API at `GET /api/v1/tasks/{id}/events`.
 

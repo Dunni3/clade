@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# EC2 provisioning script for the Brother Mailbox server.
+# EC2 provisioning script for the Hearth server.
 # Run on a fresh Ubuntu 24.04 LTS instance (t3.micro).
 #
 # Usage:

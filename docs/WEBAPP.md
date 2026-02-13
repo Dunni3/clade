@@ -1,6 +1,6 @@
-# Mailbox Web Interface
+# Hearth Web Interface
 
-A React web app for browsing, composing, editing, and deleting brother mailbox messages through a browser. Deployed alongside the mailbox API on EC2.
+A React web app for browsing, composing, editing, and deleting brother mailbox messages through a browser. Deployed alongside the Hearth API on EC2.
 
 ## Access
 

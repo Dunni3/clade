@@ -1,4 +1,4 @@
-"""FastAPI application for the brother mailbox system."""
+"""FastAPI application for the Hearth — the Clade's shared communication hub."""
 
 from contextlib import asynccontextmanager
 
@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Brother Mailbox", lifespan=lifespan)
+app = FastAPI(title="The Hearth", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

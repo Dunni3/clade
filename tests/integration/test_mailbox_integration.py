@@ -1,4 +1,4 @@
-"""Tests for the Brother Mailbox system.
+"""Tests for the Hearth communication system.
 
 Covers: database layer, FastAPI endpoints, mailbox client, and MCP tools.
 """
@@ -16,14 +16,14 @@ os.environ["MAILBOX_API_KEYS"] = "test-key-doot:doot,test-key-oppy:oppy,test-key
 from httpx import ASGITransport, AsyncClient
 from mcp.server.fastmcp import FastMCP
 
-from mailbox.app import app
-from mailbox import db as mailbox_db
-from mailbox.config import parse_api_keys
-from mailbox.auth import resolve_sender
-from terminal_spawner.communication.mailbox_client import MailboxClient
-from terminal_spawner.mcp.tools.mailbox_tools import create_mailbox_tools
-from terminal_spawner.mcp.tools.task_tools import create_task_tools
-from terminal_spawner.tasks.ssh_task import TaskResult
+from hearth.app import app
+from hearth import db as mailbox_db
+from hearth.config import parse_api_keys
+from hearth.auth import resolve_sender
+from clade.communication.mailbox_client import MailboxClient
+from clade.mcp.tools.mailbox_tools import create_mailbox_tools
+from clade.mcp.tools.task_tools import create_task_tools
+from clade.tasks.ssh_task import TaskResult
 
 
 # ---------------------------------------------------------------------------
@@ -420,7 +420,7 @@ class TestMailboxClient:
     async def test_send_message(self):
         mock_resp = self._make_mock_resp({"id": 1, "message": "Message sent"})
 
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(post_resp=mock_resp)
             MockClient.return_value = instance
 
@@ -434,7 +434,7 @@ class TestMailboxClient:
             {"id": 1, "sender": "doot", "subject": "Hi", "body": "Hello", "created_at": "2026-02-07T00:00:00Z", "is_read": False}
         ])
 
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(get_resp=mock_resp)
             MockClient.return_value = instance
 
@@ -450,7 +450,7 @@ class TestMailboxClient:
         })
         mock_post_resp = self._make_mock_resp({"message": "Marked as read"})
 
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(get_resp=mock_get_resp, post_resp=mock_post_resp)
             MockClient.return_value = instance
 
@@ -463,7 +463,7 @@ class TestMailboxClient:
     async def test_unread_count(self):
         mock_resp = self._make_mock_resp({"unread": 3})
 
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(get_resp=mock_resp)
             MockClient.return_value = instance
 
@@ -1032,7 +1032,7 @@ class TestMailboxClientFeedAndView:
              "created_at": "2026-02-07T00:00:00Z", "recipients": ["oppy"],
              "read_by": []}
         ])
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(get_resp=mock_resp)
             MockClient.return_value = instance
             result = await self.client.browse_feed()
@@ -1042,7 +1042,7 @@ class TestMailboxClientFeedAndView:
     @pytest.mark.asyncio
     async def test_browse_feed_with_params(self):
         mock_resp = self._make_mock_resp([])
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(get_resp=mock_resp)
             MockClient.return_value = instance
             await self.client.browse_feed(sender="doot", recipient="oppy", query="hello", limit=10, offset=5)
@@ -1061,7 +1061,7 @@ class TestMailboxClientFeedAndView:
             "created_at": "2026-02-07T00:00:00Z", "recipients": ["oppy"],
             "read_by": [{"brother": "jerry", "read_at": "2026-02-07T00:00:00Z"}]
         })
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(post_resp=mock_resp)
             MockClient.return_value = instance
             result = await self.client.view_message(1)
@@ -1080,7 +1080,7 @@ class TestMailboxClientFeedAndView:
             "read_by": []
         })
 
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = AsyncMock()
             instance.get.return_value = mock_404_resp
             instance.post.return_value = mock_view_resp

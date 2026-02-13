@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Manage the mailbox EC2 instance (stop/start/status/ssh)
+# Manage the Hearth EC2 instance (stop/start/status/ssh)
 set -euo pipefail
 
 INSTANCE_ID="i-049a5a49e7068655b"
@@ -31,12 +31,12 @@ case "${1:-}" in
             fi
             sleep 2
         done
-        echo "Mailbox server should be available at https://$ELASTIC_IP"
+        echo "Hearth server should be available at https://$ELASTIC_IP"
         ;;
     stop)
         echo "Stopping instance $INSTANCE_ID..."
         aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --output text
-        echo "Instance is stopping. Mailbox will be unavailable until you run '$0 start'."
+        echo "Instance is stopping. Hearth will be unavailable until you run '$0 start'."
         ;;
     status)
         STATE=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
@@ -44,7 +44,7 @@ case "${1:-}" in
         echo "Instance $INSTANCE_ID: $STATE"
         echo "Elastic IP: $ELASTIC_IP"
         if [ "$STATE" = "running" ]; then
-            echo "Mailbox: https://$ELASTIC_IP"
+            echo "Hearth: https://$ELASTIC_IP"
         fi
         ;;
     ssh)

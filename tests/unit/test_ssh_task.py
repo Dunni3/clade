@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from terminal_spawner.tasks.ssh_task import (
+from clade.tasks.ssh_task import (
     TaskResult,
     build_remote_script,
     generate_session_name,
@@ -141,7 +141,7 @@ class TestBuildRemoteScript:
 
     def test_auto_pull_discovers_repo(self):
         script = build_remote_script("sess", None, "dGVzdA==", auto_pull=True)
-        assert "terminal_spawner" in script
+        assert "clade" in script
         assert ".claude.json" in script
         assert "git -C" in script
         assert "pull --ff-only" in script
@@ -184,7 +184,7 @@ class TestBuildRemoteScript:
 
 
 class TestInitiateTask:
-    @patch("terminal_spawner.tasks.ssh_task.subprocess.run")
+    @patch("clade.tasks.ssh_task.subprocess.run")
     def test_success(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(
             args=["ssh", "masuda", "bash", "-s"],
@@ -203,7 +203,7 @@ class TestInitiateTask:
         assert result.host == "masuda"
         assert "TASK_LAUNCHED" in result.stdout
 
-    @patch("terminal_spawner.tasks.ssh_task.subprocess.run")
+    @patch("clade.tasks.ssh_task.subprocess.run")
     def test_failure_no_marker(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(
             args=["ssh", "masuda", "bash", "-s"],
@@ -220,7 +220,7 @@ class TestInitiateTask:
         assert result.success is False
         assert "failed" in result.message.lower()
 
-    @patch("terminal_spawner.tasks.ssh_task.subprocess.run")
+    @patch("clade.tasks.ssh_task.subprocess.run")
     def test_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="ssh", timeout=30)
         result = initiate_task(
@@ -232,7 +232,7 @@ class TestInitiateTask:
         assert result.success is False
         assert "timed out" in result.message.lower()
 
-    @patch("terminal_spawner.tasks.ssh_task.subprocess.run")
+    @patch("clade.tasks.ssh_task.subprocess.run")
     def test_ssh_error(self, mock_run):
         mock_run.side_effect = OSError("No such host")
         result = initiate_task(
@@ -244,7 +244,7 @@ class TestInitiateTask:
         assert result.success is False
         assert "error" in result.message.lower()
 
-    @patch("terminal_spawner.tasks.ssh_task.subprocess.run")
+    @patch("clade.tasks.ssh_task.subprocess.run")
     def test_passes_script_via_stdin(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="TASK_LAUNCHED\n", stderr=""
@@ -260,7 +260,7 @@ class TestInitiateTask:
         assert call_kwargs.kwargs["input"] is not None
         assert "task-test-123" in call_kwargs.kwargs["input"]
 
-    @patch("terminal_spawner.tasks.ssh_task.subprocess.run")
+    @patch("clade.tasks.ssh_task.subprocess.run")
     def test_custom_ssh_timeout(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="TASK_LAUNCHED\n", stderr=""
@@ -274,7 +274,7 @@ class TestInitiateTask:
         )
         assert mock_run.call_args.kwargs["timeout"] == 60
 
-    @patch("terminal_spawner.tasks.ssh_task.subprocess.run")
+    @patch("clade.tasks.ssh_task.subprocess.run")
     def test_auto_pull_passed_to_script(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="TASK_LAUNCHED\n", stderr=""

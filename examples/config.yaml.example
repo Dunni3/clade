@@ -1,11 +1,11 @@
-# Example configuration for terminal-spawner
+# Example configuration for The Clade
 #
 # Copy this file to one of these locations:
-#   - ~/.config/terminal-spawner/config.yaml
-#   - $XDG_CONFIG_HOME/terminal-spawner/config.yaml
-#   - ~/.terminal-spawner.yaml
+#   - ~/.config/clade/config.yaml
+#   - $XDG_CONFIG_HOME/clade/config.yaml
+#   - ~/.clade.yaml
 #
-# All fields are optional. If no config file exists, terminal-spawner
+# All fields are optional. If no config file exists, clade
 # will use hardcoded defaults (jerry and oppy brothers).
 
 # Default terminal application to use ("terminal" or "iterm2")
@@ -39,7 +39,7 @@ brothers:
   #   description: "Development VM"
 
 # Mailbox configuration (optional)
-# API key is loaded from MAILBOX_API_KEY environment variable
+# API key is loaded from HEARTH_API_KEY environment variable
 mailbox:
   url: "https://54.84.119.14"
   name: "doot"

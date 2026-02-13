@@ -1,4 +1,4 @@
-"""Configuration loading for terminal-spawner."""
+"""Configuration loading for the Clade."""
 
 import os
 from pathlib import Path
@@ -34,15 +34,17 @@ def _find_config_file() -> Optional[Path]:
     """Search for config file in standard locations.
 
     Search order:
-    1. ~/.config/terminal-spawner/config.yaml
-    2. $XDG_CONFIG_HOME/terminal-spawner/config.yaml
-    3. ~/.terminal-spawner.yaml
+    1. ~/.config/clade/config.yaml
+    2. $XDG_CONFIG_HOME/clade/config.yaml
+    3. ~/.clade.yaml
+    4. (fallback) ~/.config/terminal-spawner/config.yaml
+    5. (fallback) ~/.terminal-spawner.yaml
 
     Returns:
         Path to config file if found, None otherwise
     """
-    # Check ~/.config/terminal-spawner/config.yaml
-    config_dir = Path.home() / ".config" / "terminal-spawner"
+    # Check ~/.config/clade/config.yaml
+    config_dir = Path.home() / ".config" / "clade"
     config_file = config_dir / "config.yaml"
     if config_file.exists():
         return config_file
@@ -50,14 +52,24 @@ def _find_config_file() -> Optional[Path]:
     # Check XDG_CONFIG_HOME
     xdg_config = os.environ.get("XDG_CONFIG_HOME")
     if xdg_config:
-        config_file = Path(xdg_config) / "terminal-spawner" / "config.yaml"
+        config_file = Path(xdg_config) / "clade" / "config.yaml"
         if config_file.exists():
             return config_file
 
-    # Check ~/.terminal-spawner.yaml
-    home_config = Path.home() / ".terminal-spawner.yaml"
+    # Check ~/.clade.yaml
+    home_config = Path.home() / ".clade.yaml"
     if home_config.exists():
         return home_config
+
+    # Fallback: legacy terminal-spawner paths
+    legacy_dir = Path.home() / ".config" / "terminal-spawner"
+    legacy_file = legacy_dir / "config.yaml"
+    if legacy_file.exists():
+        return legacy_file
+
+    legacy_home = Path.home() / ".terminal-spawner.yaml"
+    if legacy_home.exists():
+        return legacy_home
 
     return None
 

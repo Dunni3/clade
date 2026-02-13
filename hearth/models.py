@@ -1,4 +1,4 @@
-"""Pydantic request/response models for the mailbox API."""
+"""Pydantic request/response models for the Hearth API."""
 
 from __future__ import annotations
 

@@ -5,11 +5,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from terminal_spawner.terminal.executor import run_applescript
+from clade.terminal.executor import run_applescript
 
 
 class TestRunApplescript:
-    @patch("terminal_spawner.terminal.executor.subprocess.run")
+    @patch("clade.terminal.executor.subprocess.run")
     def test_success(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         assert run_applescript("some script") == "OK"
@@ -20,7 +20,7 @@ class TestRunApplescript:
             timeout=10,
         )
 
-    @patch("terminal_spawner.terminal.executor.subprocess.run")
+    @patch("clade.terminal.executor.subprocess.run")
     def test_failure_returns_error(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="execution error: blah"
@@ -29,13 +29,13 @@ class TestRunApplescript:
         assert result.startswith("Error:")
         assert "execution error: blah" in result
 
-    @patch("terminal_spawner.terminal.executor.subprocess.run")
+    @patch("clade.terminal.executor.subprocess.run")
     def test_timeout_propagates(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="osascript", timeout=10)
         with pytest.raises(subprocess.TimeoutExpired):
             run_applescript("slow script")
 
-    @patch("terminal_spawner.terminal.executor.subprocess.run")
+    @patch("clade.terminal.executor.subprocess.run")
     def test_passes_script_as_single_arg(self, mock_run):
         """The script should be passed as a single -e argument, not split."""
         mock_run.return_value = MagicMock(returncode=0)

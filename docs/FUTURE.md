@@ -1,10 +1,10 @@
 # Future Enhancements
 
-This document outlines planned features and enhancements for terminal-spawner.
+This document outlines planned features and enhancements for The Clade.
 
-## Web Interface (`src/terminal_spawner/web/`)
+## Web Interface (`src/clade/web/`)
 
-### Mailbox Dashboard
+### Hearth Dashboard
 - **Browse feed**: Web UI for viewing all brother-to-brother messages
 - **Search & filter**: By sender, recipient, date, keywords
 - **Compose messages**: Send messages via web form
@@ -22,7 +22,7 @@ This document outlines planned features and enhancements for terminal-spawner.
 - **Analytics**: Message volume, response times, collaboration patterns
 - **Audit log**: Track all actions for security/debugging
 
-## Additional Communication Protocols (`src/terminal_spawner/communication/protocols.py`)
+## Additional Communication Protocols (`src/clade/communication/protocols.py`)
 
 ### WebSocket
 - Bidirectional real-time communication
@@ -58,7 +58,7 @@ Currently terminal spawning only works on macOS via AppleScript. Future work:
 - **Windows**: PowerShell scripts for Terminal, ConEmu, etc.
 - **Platform detection**: Auto-select appropriate implementation
 
-Reference: `src/terminal_spawner/terminal/apps.py` has protocol-based design ready for additional implementations.
+Reference: `src/clade/terminal/apps.py` has protocol-based design ready for additional implementations.
 
 ## Plugin System
 
@@ -154,10 +154,10 @@ task_queue:
 ## Implementation Timeline
 
 ### Phase 1 (Current - v0.2.0)
-✅ Refactored package structure
-✅ User-configurable brothers
-✅ Tool factories (DRY principle)
-✅ Packaging for distribution
+Refactored package structure
+User-configurable brothers
+Tool factories (DRY principle)
+Packaging for distribution
 
 ### Phase 2 (Next - v0.3.0)
 - [ ] Basic web dashboard (read-only feed)
@@ -179,11 +179,11 @@ task_queue:
 
 Interested in implementing any of these features? Check out the codebase structure:
 
-- `src/terminal_spawner/core/` - Configuration and types
-- `src/terminal_spawner/terminal/` - Terminal spawning logic
-- `src/terminal_spawner/communication/` - Inter-brother communication
-- `src/terminal_spawner/mcp/` - MCP server and tools
-- `src/terminal_spawner/web/` - Web interface (placeholder)
+- `src/clade/core/` - Configuration and types
+- `src/clade/terminal/` - Terminal spawning logic
+- `src/clade/communication/` - Inter-brother communication
+- `src/clade/mcp/` - MCP server and tools
+- `src/clade/web/` - Web interface (placeholder)
 
 Each module is designed with extensibility in mind. The protocol-based abstractions
 (`TerminalApp`, etc.) make it easy to add new implementations.

@@ -98,15 +98,15 @@ def build_remote_script(
     cd_cmd = f'cd {working_dir} || exit 1' if working_dir else ":"
     if auto_pull:
         pull_block = """\
-# Discover terminal-spawner repo and pull latest
+# Discover clade repo and pull latest
 MCP_REPO=""
 
-# New format: packaged install (-m terminal_spawner.mcp.server_lite)
+# New format: packaged install (-m clade.mcp.server_lite)
 PYTHON_CMD=$(python3 -c "
 import json, os
 cfg = json.load(open(os.path.expanduser('~/.claude.json')))
 for srv in cfg.get('mcpServers', {}).values():
-    if any('terminal_spawner' in str(a) for a in srv.get('args', [])):
+    if any('clade' in str(a) for a in srv.get('args', [])):
         print(srv['command'])
         break
 " 2>/dev/null)
@@ -114,8 +114,8 @@ for srv in cfg.get('mcpServers', {}).values():
 if [ -n "$PYTHON_CMD" ]; then
     MCP_REPO=$("$PYTHON_CMD" -c "
 from pathlib import Path
-import terminal_spawner
-print(Path(terminal_spawner.__file__).parents[2])
+import clade
+print(Path(clade.__file__).parents[2])
 " 2>/dev/null)
 fi
 
@@ -139,6 +139,8 @@ fi"""
     if task_id is not None and mailbox_url and mailbox_api_key:
         env_lines = (
             f"export CLAUDE_TASK_ID={task_id}\n"
+            f"export HEARTH_URL='{mailbox_url}'\n"
+            f"export HEARTH_API_KEY='{mailbox_api_key}'\n"
             f"export MAILBOX_URL='{mailbox_url}'\n"
             f"export MAILBOX_API_KEY='{mailbox_api_key}'"
         )

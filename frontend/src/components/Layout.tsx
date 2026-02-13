@@ -34,7 +34,7 @@ export default function Layout() {
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <nav className="border-b border-gray-800 bg-gray-900">
         <div className="mx-auto max-w-4xl flex items-center gap-1 px-4 py-3">
-          <span className="text-lg font-bold text-indigo-400 mr-6">Mailbox</span>
+          <span className="text-lg font-bold text-indigo-400 mr-6">The Hearth</span>
           {navItems.map(({ to, label }) => (
             <NavLink
               key={to}

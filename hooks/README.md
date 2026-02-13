@@ -1,6 +1,6 @@
 # Task Logger Hook
 
-Automatically logs Claude Code activity to the mailbox task events API during SSH task sessions.
+Automatically logs Claude Code activity to the Hearth task events API during SSH task sessions.
 
 ## Setup
 
@@ -42,7 +42,7 @@ Automatically logs Claude Code activity to the mailbox task events API during SS
    }
    ```
 
-3. Requires `jq` and `curl` on the brother's machine.
+3. Requires `python3` and `curl` on the brother's machine.
 
 ## How it works
 
@@ -50,3 +50,4 @@ Automatically logs Claude Code activity to the mailbox task events API during SS
 - Only task sessions launched via `initiate_ssh_task` set the required env vars
 - Normal interactive Claude Code sessions are completely unaffected
 - Events are POSTed asynchronously (backgrounded curl) so they don't slow down the session
+- Supports `HEARTH_URL`/`HEARTH_API_KEY` env vars with `MAILBOX_URL`/`MAILBOX_API_KEY` fallback

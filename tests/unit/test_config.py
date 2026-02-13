@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from terminal_spawner.core.config import (
+from clade.core.config import (
     FALLBACK_CONFIG,
     get_brother_command,
     load_config,

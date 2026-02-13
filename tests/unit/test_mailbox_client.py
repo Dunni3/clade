@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from terminal_spawner.communication.mailbox_client import MailboxClient
+from clade.communication.mailbox_client import MailboxClient
 
 
 class TestMailboxClient:
@@ -34,7 +34,7 @@ class TestMailboxClient:
     async def test_send_message(self):
         mock_resp = self._make_mock_resp({"id": 1, "message": "Message sent"})
 
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(post_resp=mock_resp)
             MockClient.return_value = instance
 
@@ -48,7 +48,7 @@ class TestMailboxClient:
             {"id": 1, "sender": "doot", "subject": "Hi", "body": "Hello", "created_at": "2026-02-07T00:00:00Z", "is_read": False}
         ])
 
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(get_resp=mock_resp)
             MockClient.return_value = instance
 
@@ -64,7 +64,7 @@ class TestMailboxClient:
         })
         mock_post_resp = self._make_mock_resp({"message": "Marked as read"})
 
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(get_resp=mock_get_resp, post_resp=mock_post_resp)
             MockClient.return_value = instance
 
@@ -77,7 +77,7 @@ class TestMailboxClient:
     async def test_unread_count(self):
         mock_resp = self._make_mock_resp({"unread": 3})
 
-        with patch("terminal_spawner.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
             instance = self._make_async_client(get_resp=mock_resp)
             MockClient.return_value = instance
 

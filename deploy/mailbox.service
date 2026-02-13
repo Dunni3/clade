@@ -1,5 +1,5 @@
 [Unit]
-Description=Brother Mailbox API Server
+Description=Hearth API Server
 After=network.target
 
 [Service]

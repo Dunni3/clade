@@ -1,5 +1,5 @@
 """
-Future: FastAPI web dashboard for terminal-spawner.
+Future: FastAPI web dashboard for the Clade.
 
 Planned features:
 - Browse mailbox feed via web UI

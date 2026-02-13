@@ -2,7 +2,7 @@
 
 import pytest
 
-from terminal_spawner.terminal.applescript import generate_applescript
+from clade.terminal.applescript import generate_applescript
 
 # Hardcoded brother config for testing (matches current configuration)
 BROTHERS = {
