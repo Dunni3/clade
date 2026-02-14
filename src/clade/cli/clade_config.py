@@ -18,6 +18,7 @@ class BrotherEntry:
     working_dir: str | None = None
     role: str = "worker"
     description: str = ""
+    personality: str = ""
 
 
 @dataclass
@@ -28,6 +29,7 @@ class CladeConfig:
     created: str = ""
     personal_name: str = "doot"
     personal_description: str = "Personal assistant and coordinator"
+    personal_personality: str = ""
     server_url: str | None = None
     server_ssh: str | None = None
     server_ssh_key: str | None = None
@@ -38,8 +40,14 @@ class CladeConfig:
             self.created = date.today().isoformat()
 
 
-def default_config_path() -> Path:
-    """Return the default path for clade.yaml (~/.config/clade/clade.yaml)."""
+def default_config_path(config_dir: Path | None = None) -> Path:
+    """Return the default path for clade.yaml.
+
+    Args:
+        config_dir: Override config directory. If None, uses ~/.config/clade.
+    """
+    if config_dir:
+        return config_dir / "clade.yaml"
     xdg = os.environ.get("XDG_CONFIG_HOME")
     if xdg:
         return Path(xdg) / "clade" / "clade.yaml"
@@ -80,6 +88,7 @@ def load_clade_config(path: Path | None = None) -> CladeConfig | None:
             working_dir=bro_data.get("working_dir"),
             role=bro_data.get("role", "worker"),
             description=bro_data.get("description", ""),
+            personality=bro_data.get("personality", ""),
         )
 
     return CladeConfig(
@@ -87,6 +96,7 @@ def load_clade_config(path: Path | None = None) -> CladeConfig | None:
         created=clade_sec.get("created", ""),
         personal_name=personal_sec.get("name", "doot"),
         personal_description=personal_sec.get("description", ""),
+        personal_personality=personal_sec.get("personality", ""),
         server_url=server_sec.get("url"),
         server_ssh=server_sec.get("ssh"),
         server_ssh_key=server_sec.get("ssh_key"),
@@ -117,6 +127,8 @@ def save_clade_config(config: CladeConfig, path: Path | None = None) -> Path:
             "description": config.personal_description,
         },
     }
+    if config.personal_personality:
+        data["personal"]["personality"] = config.personal_personality
 
     # Only include server section if any server field is set
     if config.server_url or config.server_ssh or config.server_ssh_key:
@@ -139,6 +151,8 @@ def save_clade_config(config: CladeConfig, path: Path | None = None) -> Path:
             entry["role"] = bro.role
             if bro.description:
                 entry["description"] = bro.description
+            if bro.personality:
+                entry["personality"] = bro.personality
             brothers_data[name] = entry
         data["brothers"] = brothers_data
 

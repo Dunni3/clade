@@ -1,0 +1,27 @@
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y git openssh-client curl && rm -rf /var/lib/apt/lists/*
+
+ENV TERM=xterm
+RUN useradd -m -s /bin/bash testuser
+
+# Set up SSH client config for passwordless access to worker
+RUN mkdir -p /home/testuser/.ssh /home/testuser/.claude \
+    && chown -R testuser:testuser /home/testuser/.ssh /home/testuser/.claude
+COPY --chown=testuser:testuser test-keys/id_ed25519 /home/testuser/.ssh/id_ed25519
+RUN chmod 600 /home/testuser/.ssh/id_ed25519 \
+    && echo "Host worker\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null" \
+       > /home/testuser/.ssh/config \
+    && chmod 600 /home/testuser/.ssh/config \
+    && chown testuser:testuser /home/testuser/.ssh/config
+
+ENV PATH="/home/testuser/.local/bin:$PATH"
+USER testuser
+WORKDIR /home/testuser
+
+COPY --chown=testuser:testuser . /home/testuser/clade
+WORKDIR /home/testuser/clade
+
+RUN pip install --no-cache-dir -e .
+
+CMD ["/bin/bash"]

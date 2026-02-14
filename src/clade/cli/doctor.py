@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 import httpx
 
 from .clade_config import default_config_path, load_clade_config
+from .identity import MARKER_START
 from .keys import keys_path, load_keys
-from .mcp_utils import is_mcp_registered, read_claude_json
+from .mcp_utils import is_mcp_registered
 from .ssh_utils import run_remote, test_ssh
 
 
@@ -66,7 +69,14 @@ def doctor() -> None:
         )
         issues += 1
 
-    # 5. Server
+    # 5. Personal identity in CLAUDE.md
+    local_claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    if local_claude_md.exists() and MARKER_START in local_claude_md.read_text():
+        _pass("Personal identity: written in ~/.claude/CLAUDE.md")
+    else:
+        _warn("Personal identity: not found in ~/.claude/CLAUDE.md (run 'clade init' to write)")
+
+    # 6. Server
     if config.server_url:
         if _check_server(config.server_url):
             _pass(f"Server: {config.server_url} responding")
@@ -76,7 +86,7 @@ def doctor() -> None:
     else:
         _warn("Server: not configured (brothers can't communicate)")
 
-    # 6. Each brother
+    # 7. Each brother
     for name, bro in config.brothers.items():
         click.echo()
         click.echo(click.style(f"Brother: {name}", bold=True))
@@ -116,6 +126,17 @@ def doctor() -> None:
         else:
             _fail("MCP not registered on remote", fix=f"clade add-brother --name {name} --ssh {bro.ssh}")
             issues += 1
+
+        # Identity written on remote
+        identity_result = run_remote(
+            bro.ssh,
+            "grep -c 'CLADE_IDENTITY_START' ~/.claude/CLAUDE.md 2>/dev/null || echo 0",
+            timeout=15,
+        )
+        if identity_result.success and identity_result.stdout.strip() not in ("", "0"):
+            _pass("Identity written on remote")
+        else:
+            _warn(f"Identity not found on remote (run 'clade add-brother --name {name} --ssh {bro.ssh}' to write)")
 
         # Can reach Hearth
         if config.server_url:

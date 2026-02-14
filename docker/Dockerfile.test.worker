@@ -1,0 +1,30 @@
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y \
+    openssh-server \
+    git \
+    tmux \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV TERM=xterm
+
+# Set up SSH server
+RUN mkdir -p /run/sshd
+
+# Create test user with home directory
+RUN useradd -m -s /bin/bash testuser \
+    && mkdir -p /home/testuser/.ssh /home/testuser/.claude \
+    && chmod 700 /home/testuser/.ssh
+
+# Copy public key for SSH auth
+COPY test-keys/id_ed25519.pub /home/testuser/.ssh/authorized_keys
+RUN chmod 600 /home/testuser/.ssh/authorized_keys \
+    && chown -R testuser:testuser /home/testuser/.ssh /home/testuser/.claude
+
+# Install clade package (so prereq checks find python3, and for optional deploy testing)
+COPY . /opt/clade
+RUN pip install --no-cache-dir -e /opt/clade
+
+# sshd needs to run as root
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D"]

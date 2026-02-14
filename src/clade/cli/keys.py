@@ -14,8 +14,14 @@ def generate_api_key() -> str:
     return secrets.token_urlsafe(32)
 
 
-def keys_path() -> Path:
-    """Return the default path for keys.json (~/.config/clade/keys.json)."""
+def keys_path(config_dir: Path | None = None) -> Path:
+    """Return the default path for keys.json.
+
+    Args:
+        config_dir: Override config directory. If None, uses ~/.config/clade.
+    """
+    if config_dir:
+        return config_dir / "keys.json"
     xdg = os.environ.get("XDG_CONFIG_HOME")
     if xdg:
         return Path(xdg) / "clade" / "keys.json"

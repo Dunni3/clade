@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import sys
-
 import click
 
 from .clade_config import (
@@ -12,6 +10,7 @@ from .clade_config import (
     load_clade_config,
     save_clade_config,
 )
+from .identity import generate_worker_identity, write_identity_remote
 from .keys import add_key, keys_path
 from .mcp_utils import register_mcp_remote
 from .naming import format_suggestion, suggest_name
@@ -24,22 +23,30 @@ from .ssh_utils import check_remote_prereqs, run_remote, test_ssh
 @click.option("--working-dir", default=None, help="Working directory on remote host")
 @click.option("--role", default="worker", help="Role (worker/general)")
 @click.option("--description", "desc", default=None, help="Description")
+@click.option("--personality", default=None, help="Personality description for the brother")
 @click.option("--no-deploy", is_flag=True, help="Skip deploying the clade package on remote")
 @click.option("--no-mcp", is_flag=True, help="Skip MCP registration on remote")
+@click.option("--no-identity", is_flag=True, help="Skip writing identity to remote CLAUDE.md")
 @click.option("--yes", "-y", is_flag=True, help="Accept defaults without prompting")
+@click.pass_context
 def add_brother(
+    ctx: click.Context,
     name: str | None,
     ssh_host: str | None,
     working_dir: str | None,
     role: str,
     desc: str | None,
+    personality: str | None,
     no_deploy: bool,
     no_mcp: bool,
+    no_identity: bool,
     yes: bool,
 ) -> None:
     """Add a new brother to the Clade."""
+    config_dir = ctx.obj.get("config_dir") if ctx.obj else None
+
     # Load existing config
-    config = load_clade_config()
+    config = load_clade_config(default_config_path(config_dir))
     if config is None:
         click.echo("No clade.yaml found. Run 'clade init' first.", err=True)
         raise SystemExit(1)
@@ -111,12 +118,20 @@ def add_brother(
         else:
             desc = click.prompt("Description", default=f"Brother {name}")
 
+    # Personality
+    if personality is None and not yes:
+        click.echo()
+        click.echo("Personality gives this brother a distinct character.")
+        click.echo('Example: "Intellectual and curious. Loves clean, scalable systems."')
+        personality = click.prompt("Personality (optional, Enter to skip)", default="")
+    personality = personality or ""
+
     # Deploy clade package on remote
     if not no_deploy and ssh_result.success:
         _deploy_remote(ssh_host, name)
 
     # Generate API key
-    kp = keys_path()
+    kp = keys_path(config_dir)
     api_key = add_key(name, kp)
     click.echo(f"API key for '{name}' saved to {kp}")
 
@@ -124,14 +139,27 @@ def add_brother(
     if not no_mcp and ssh_result.success:
         _register_remote_mcp(ssh_host, name, api_key, config.server_url)
 
+    # Write identity to remote CLAUDE.md
+    if not no_identity and ssh_result.success:
+        _write_remote_identity(
+            ssh_host=ssh_host,
+            name=name,
+            clade_name=config.clade_name,
+            personality=personality,
+            role=role,
+            personal_name=config.personal_name,
+            brothers=config.brothers,
+        )
+
     # Update config
     config.brothers[name] = BrotherEntry(
         ssh=ssh_host,
         working_dir=working_dir,
         role=role,
         description=desc,
+        personality=personality,
     )
-    config_path = default_config_path()
+    config_path = default_config_path(config_dir)
     save_clade_config(config, config_path)
     click.echo(f"Brother '{name}' added to {config_path}")
 
@@ -207,3 +235,38 @@ def _register_remote_mcp(
         click.echo(click.style("  MCP registered", fg="green"))
     else:
         click.echo(click.style(f"  MCP registration failed: {result.message}", fg="red"))
+
+
+def _write_remote_identity(
+    ssh_host: str,
+    name: str,
+    clade_name: str,
+    personality: str,
+    role: str,
+    personal_name: str,
+    brothers: dict,
+) -> None:
+    """Write identity section to the remote brother's CLAUDE.md."""
+    # Build brothers info dict for the identity generator
+    brothers_info = {}
+    for bro_name, bro in brothers.items():
+        brothers_info[bro_name] = {
+            "role": bro.role,
+            "description": bro.description,
+        }
+
+    identity = generate_worker_identity(
+        name=name,
+        clade_name=clade_name,
+        personality=personality,
+        role=role,
+        personal_name=personal_name,
+        brothers=brothers_info,
+    )
+
+    click.echo(f"Writing identity to {ssh_host}...")
+    result = write_identity_remote(ssh_host, identity)
+    if result.success and "IDENTITY_OK" in result.stdout:
+        click.echo(click.style("  Identity written", fg="green"))
+    else:
+        click.echo(click.style(f"  Identity write failed: {result.message}", fg="red"))

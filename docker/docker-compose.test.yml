@@ -1,0 +1,34 @@
+services:
+  personal:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.test
+    stdin_open: true
+    tty: true
+    depends_on:
+      worker:
+        condition: service_started
+      hearth:
+        condition: service_started
+    environment:
+      HEARTH_URL: http://hearth:8000
+      HEARTH_API_KEY: testkey-personal
+      HEARTH_NAME: testpersonal
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.test.worker
+
+  hearth:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.test.hearth
+    environment:
+      MAILBOX_API_KEYS: "testkey-personal:testpersonal,testkey-worker:testworker"
+      MAILBOX_DB_PATH: "/data/hearth.db"
+    volumes:
+      - hearth-data:/data
+
+volumes:
+  hearth-data:

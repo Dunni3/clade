@@ -1,5 +1,7 @@
 """Clade CLI entry point."""
 
+from pathlib import Path
+
 import click
 
 from .init_cmd import init_cmd
@@ -10,8 +12,17 @@ from .doctor import doctor
 
 @click.group()
 @click.version_option(package_name="clade")
-def cli():
+@click.option(
+    "--config-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Override config directory (default: ~/.config/clade)",
+)
+@click.pass_context
+def cli(ctx: click.Context, config_dir: Path | None) -> None:
     """The Clade — setup and manage your family of Claude Code instances."""
+    ctx.ensure_object(dict)
+    ctx.obj["config_dir"] = config_dir
 
 
 cli.add_command(init_cmd, "init")

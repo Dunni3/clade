@@ -7,6 +7,7 @@ import sys
 import click
 
 from .clade_config import CladeConfig, default_config_path, save_clade_config
+from .identity import generate_personal_identity, write_identity_local
 from .keys import add_key, keys_path
 from .mcp_utils import is_mcp_registered, register_mcp_server
 from .naming import format_suggestion, suggest_name
@@ -16,23 +17,30 @@ from .naming import format_suggestion, suggest_name
 @click.option("--name", "clade_name", default=None, help="Clade name")
 @click.option("--personal-name", default=None, help="Your personal brother name")
 @click.option("--personal-desc", default=None, help="Your personal brother description")
+@click.option("--personality", default=None, help="Personality description for your personal brother")
 @click.option("--server-url", default=None, help="Hearth server URL")
 @click.option("--server-ssh", default=None, help="Hearth server SSH (e.g. ubuntu@host)")
 @click.option("--server-ssh-key", default=None, help="SSH key for the server")
 @click.option("--no-mcp", is_flag=True, help="Skip MCP registration in ~/.claude.json")
+@click.option("--no-identity", is_flag=True, help="Skip writing identity to CLAUDE.md")
 @click.option("--yes", "-y", is_flag=True, help="Accept defaults without prompting")
+@click.pass_context
 def init_cmd(
+    ctx: click.Context,
     clade_name: str | None,
     personal_name: str | None,
     personal_desc: str | None,
+    personality: str | None,
     server_url: str | None,
     server_ssh: str | None,
     server_ssh_key: str | None,
     no_mcp: bool,
+    no_identity: bool,
     yes: bool,
 ) -> None:
     """Initialize a new Clade configuration."""
-    config_path = default_config_path()
+    config_dir = ctx.obj.get("config_dir") if ctx.obj else None
+    config_path = default_config_path(config_dir)
 
     # Check for existing config
     if config_path.exists():
@@ -71,6 +79,14 @@ def init_cmd(
                 default="Personal assistant and coordinator",
             )
 
+    # Personality
+    if personality is None and not yes:
+        click.echo()
+        click.echo("Personality gives your Claude Code instance a distinct character.")
+        click.echo('Example: "Methodical and detail-oriented. Loves clean architecture."')
+        personality = click.prompt("Personality (optional, Enter to skip)", default="")
+    personality = personality or ""
+
     # Server configuration
     if not yes and server_url is None:
         if click.confirm("Configure a Hearth server now?", default=False):
@@ -87,6 +103,7 @@ def init_cmd(
         clade_name=clade_name,
         personal_name=personal_name,
         personal_description=personal_desc,
+        personal_personality=personality,
         server_url=server_url,
         server_ssh=server_ssh,
         server_ssh_key=server_ssh_key,
@@ -97,13 +114,24 @@ def init_cmd(
     click.echo(f"Config written to {config_path}")
 
     # Generate API key for personal brother
-    kp = keys_path()
+    kp = keys_path(config_dir)
     key = add_key(personal_name, kp)
     click.echo(f"API key for '{personal_name}' saved to {kp}")
 
     # Register MCP server
     if not no_mcp:
         _register_personal_mcp(personal_name, key, server_url)
+
+    # Write identity to CLAUDE.md
+    if not no_identity:
+        identity = generate_personal_identity(
+            name=personal_name,
+            clade_name=clade_name,
+            personality=personality,
+        )
+        claude_md_path = (config_dir / "CLAUDE.md") if config_dir else None
+        identity_path = write_identity_local(identity, claude_md_path)
+        click.echo(f"Identity written to {identity_path}")
 
     # Next steps
     click.echo()

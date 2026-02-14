@@ -12,11 +12,12 @@ clade/
 │   │   ├── brothers.py            # BROTHERS dict (host, working_dir, description)
 │   │   └── types.py               # Type definitions
 │   ├── cli/                       # CLI commands (`clade` entry point)
-│   │   ├── main.py                # Click group, wires up subcommands
-│   │   ├── init_cmd.py            # `clade init` — interactive setup wizard
-│   │   ├── add_brother.py         # `clade add-brother` — SSH test, deploy, key gen, MCP reg
+│   │   ├── main.py                # Click group + --config-dir, wires up subcommands
+│   │   ├── init_cmd.py            # `clade init` — interactive setup wizard + identity writing
+│   │   ├── add_brother.py         # `clade add-brother` — SSH test, deploy, key gen, MCP reg, identity
 │   │   ├── status_cmd.py          # `clade status` — health overview
-│   │   ├── doctor.py              # `clade doctor` — full diagnostics
+│   │   ├── doctor.py              # `clade doctor` — full diagnostics (incl. identity checks)
+│   │   ├── identity.py            # CLAUDE.md identity section generation + upsert
 │   │   ├── clade_config.py        # CladeConfig / BrotherEntry dataclasses + YAML persistence
 │   │   ├── keys.py                # API key generation + keys.json management
 │   │   ├── ssh_utils.py           # test_ssh(), run_remote(), check_remote_prereqs()
@@ -71,12 +72,31 @@ The `clade` CLI handles onboarding and diagnostics:
 
 | Command | Description |
 |---------|-------------|
-| `clade init` | Interactive wizard: name clade, name personal brother, optional server config, generate API key, register MCP |
-| `clade add-brother` | SSH test, prereq check, remote deploy, API key gen, remote MCP registration |
+| `clade init` | Interactive wizard: name clade, name personal brother, personality, server config, API key, MCP, identity writing |
+| `clade add-brother` | SSH test, prereq check, remote deploy, API key gen, MCP registration, remote identity writing |
 | `clade status` | Health overview: server ping, SSH to each brother, key status |
-| `clade doctor` | Full diagnostic: config, keys, MCP, server, per-brother SSH + package + MCP + Hearth reachability |
+| `clade doctor` | Full diagnostic: config, keys, MCP, identity, server, per-brother SSH + package + MCP + identity + Hearth |
+
+**Global option:** `--config-dir PATH` overrides where `clade.yaml`, `keys.json`, and local `CLAUDE.md` are written. Useful for isolated testing. Does not affect remote paths.
 
 Config lives in `~/.config/clade/clade.yaml` (created by `init`, updated by `add-brother`). API keys in `~/.config/clade/keys.json` (chmod 600). `core/config.py` detects `clade.yaml` (has `clade:` top-level key) with highest priority and converts it to `TerminalSpawnerConfig` so MCP servers work unchanged.
+
+## Identity System
+
+Each brother gets an identity section in their `~/.claude/CLAUDE.md`, telling them who they are, what tools they have, and who their family is.
+
+**Key file:** `src/clade/cli/identity.py`
+
+- **HTML comment markers:** `<!-- CLADE_IDENTITY_START -->` / `<!-- CLADE_IDENTITY_END -->` delimit the identity section
+- **Non-destructive upsert:** If markers exist, replace between them. If no markers, append. Empty file creates fresh.
+- **Two identity flavors:**
+  - `generate_personal_identity()` — for the coordinator (lists all personal server tools)
+  - `generate_worker_identity()` — for worker brothers (lists worker server tools + family list)
+- **Personality:** Optional free-text description stored in `clade.yaml`, included in the identity section
+- **Local writing:** `write_identity_local()` reads/upserts/writes `~/.claude/CLAUDE.md`
+- **Remote writing:** `write_identity_remote()` base64-encodes the identity, SSHes to remote, runs a Python upsert script
+- **`--no-identity`:** Both `init` and `add-brother` accept this flag to skip identity writing
+- **Doctor checks:** WARN-level checks for local and remote identity presence (not failures)
 
 ## MCP Tools
 
