@@ -153,23 +153,28 @@ task_queue:
 
 ## Implementation Timeline
 
-### Phase 1 (Current - v0.2.0)
-Refactored package structure
-User-configurable brothers
-Tool factories (DRY principle)
-Packaging for distribution
+### Phase 1 (Complete)
+- [x] Refactored package structure
+- [x] User-configurable brothers
+- [x] Tool factories (DRY principle)
+- [x] Packaging for distribution
 
-### Phase 2 (Next - v0.3.0)
-- [ ] Basic web dashboard (read-only feed)
-- [ ] WebSocket support for real-time updates
+### Phase 2 (Complete)
+- [x] Web dashboard with message composition, feed, edit/delete
+- [x] SSH task delegation system
+- [x] Hearth server (FastAPI + SQLite on EC2)
+
+### Phase 3 (Current)
+- [x] CLI onboarding: `clade init`, `clade add-brother`, `clade status`, `clade doctor`
+- [x] Tailscale mesh VPN for direct brother-to-brother connectivity
+- [ ] `clade deploy-server` — Automate Hearth server provisioning
+- [ ] `clade connect` — End-to-end connectivity test
+- [ ] Hearth `/api/v1/health` endpoint
+- [ ] Hearth API key management endpoint (add/revoke keys via API)
+
+### Phase 4 (Future)
+- [ ] Conductor system (thrum-based orchestration)
 - [ ] Cross-platform terminal spawning (Linux)
-
-### Phase 3 (v0.4.0)
-- [ ] Full web UI with message composition
-- [ ] Task queue system
-- [ ] Advanced brother configuration
-
-### Phase 4 (v0.5.0+)
 - [ ] Plugin system
 - [ ] Additional communication protocols
 - [ ] Security enhancements

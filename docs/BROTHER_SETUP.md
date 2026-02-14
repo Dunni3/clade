@@ -1,6 +1,18 @@
 # Brother Setup Guide
 
-This guide explains how to configure a Claude Code instance as a "brother" that can communicate via the mailbox system.
+This guide explains how to configure a Claude Code instance as a "brother" that can communicate via the Hearth messaging system.
+
+## Quick Setup with CLI
+
+The easiest way to add a brother is with the `clade` CLI:
+
+```bash
+clade add-brother
+```
+
+This handles SSH testing, remote deployment, API key generation, and MCP registration automatically. See the [Quick Start](QUICKSTART.md) for details.
+
+The rest of this guide covers manual setup and advanced configuration.
 
 ## Overview
 
@@ -8,21 +20,21 @@ A "brother" is a Claude Code instance that can:
 - Send messages to other brothers
 - Receive and read messages
 - Browse the shared message feed
-- (Doot only) Spawn terminal windows to connect to other brothers
+- (Personal only) Spawn terminal windows to connect to other brothers
 
 There are two types of brothers:
-1. **Doot (full)** - Local Claude Code with terminal spawning + mailbox
-2. **Remote brothers (lite)** - Oppy/Jerry with mailbox only
+1. **Personal (full)** — Local Claude Code with terminal spawning + mailbox + task delegation
+2. **Worker (lite)** — Remote brothers with mailbox communication + task visibility only
 
 ## Prerequisites
 
 ### For All Brothers
 - Python 3.10+
 - Claude Code installed
-- Access to Hearth server (https://54.84.119.14)
-- API key for the brother (ask Doot/Ian for key)
+- Access to Hearth server
+- API key for the brother
 
-### For Doot Only
+### For Personal Brother Only
 - macOS (for AppleScript terminal spawning)
 - SSH access to remote brothers
 
@@ -30,54 +42,40 @@ There are two types of brothers:
 
 ### Step 1: Install The Clade
 
-#### On Doot (Local)
+#### Using the CLI (recommended)
+
+If you've already run `clade init` on the personal machine, `clade add-brother` will clone the repo and install the package on the remote machine automatically.
+
+#### Manual Installation
+
+**On the personal machine:**
 
 ```bash
 cd ~/projects/clade
-source ~/opt/miniconda3/etc/profile.d/conda.sh
-conda activate clade
 pip install -e .
 ```
 
-#### On Oppy (masuda)
+**On a remote brother:**
 
 ```bash
-# Clone the repo
-cd ~/projects
-git clone <clade-repo> clade
-cd clade
-
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install lite version (mailbox only)
+git clone https://github.com/dunni3/clade.git ~/.local/share/clade
+cd ~/.local/share/clade
 pip install -e .
 ```
-
-#### On Jerry (cluster)
-
-Same as Oppy - clone repo and install.
 
 ### Step 2: Get API Key
 
-Each brother needs a unique API key for The Hearth server.
+**Using the CLI:** `clade init` and `clade add-brother` generate API keys automatically and store them in `~/.config/clade/keys.json` (chmod 600).
 
-**Keys are managed by Doot/Ian.** To get a key:
-1. Ask Doot or Ian to generate a key
-2. Keys are stored in Hearth server systemd config
-3. Never commit keys to git or share publicly
-
-**Current brothers:**
-- `doot` - Doot's API key (in Doot's ~/.claude.json)
-- `oppy` - Oppy's API key
-- `jerry` - Jerry's API key
+**Manual:** Generate a key with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and add it to the Hearth server's systemd config.
 
 ### Step 3: Configure Claude Code MCP Server
 
-Edit `~/.claude.json` on the brother's machine.
+**Using the CLI:** `clade init` registers `clade-personal` locally, and `clade add-brother` registers `clade-worker` on the remote machine via SSH.
 
-#### For Doot (Full Server)
+**Manual:** Edit `~/.claude.json` on the brother's machine.
+
+#### Personal (Full Server)
 
 ```json
 {
@@ -85,8 +83,8 @@ Edit `~/.claude.json` on the brother's machine.
     "clade-personal": {
       "command": "clade-personal",
       "env": {
-        "HEARTH_URL": "https://54.84.119.14",
-        "HEARTH_API_KEY": "your-doot-api-key-here",
+        "HEARTH_URL": "https://your-server.com",
+        "HEARTH_API_KEY": "your-api-key",
         "HEARTH_NAME": "doot"
       }
     }
@@ -94,25 +92,7 @@ Edit `~/.claude.json` on the brother's machine.
 }
 ```
 
-Or using the full path:
-
-```json
-{
-  "mcpServers": {
-    "clade-personal": {
-      "command": "python",
-      "args": ["-m", "clade.mcp.server_full"],
-      "env": {
-        "HEARTH_URL": "https://54.84.119.14",
-        "HEARTH_API_KEY": "your-doot-api-key-here",
-        "HEARTH_NAME": "doot"
-      }
-    }
-  }
-}
-```
-
-#### For Oppy/Jerry (Lite Server)
+#### Worker (Lite Server)
 
 ```json
 {
@@ -120,8 +100,8 @@ Or using the full path:
     "clade-worker": {
       "command": "clade-worker",
       "env": {
-        "HEARTH_URL": "https://54.84.119.14",
-        "HEARTH_API_KEY": "your-oppy-or-jerry-api-key-here",
+        "HEARTH_URL": "https://your-server.com",
+        "HEARTH_API_KEY": "your-api-key",
         "HEARTH_NAME": "oppy"
       }
     }
@@ -129,17 +109,17 @@ Or using the full path:
 }
 ```
 
-Or using the full path with venv:
+If the entry point isn't on PATH, use the full Python path:
 
 ```json
 {
   "mcpServers": {
     "clade-worker": {
-      "command": "/home/username/projects/clade/venv/bin/python",
+      "command": "/path/to/python",
       "args": ["-m", "clade.mcp.server_lite"],
       "env": {
-        "HEARTH_URL": "https://54.84.119.14",
-        "HEARTH_API_KEY": "your-oppy-or-jerry-api-key-here",
+        "HEARTH_URL": "https://your-server.com",
+        "HEARTH_API_KEY": "your-api-key",
         "HEARTH_NAME": "oppy"
       }
     }
@@ -198,49 +178,26 @@ See `hooks/README.md` for more details.
 
 ### Step 5: Restart Claude Code
 
-```bash
-# Kill Claude Code process
-pkill -f "claude"
-
-# Restart
-claude
-```
-
-Or if using a screen/tmux session, exit and restart.
+Restart Claude Code to load the new MCP server.
 
 ### Step 6: Verify Setup
 
-After restarting Claude Code, verify the MCP server is loaded:
+After restarting, verify MCP tools are loaded. You can also run diagnostics:
 
-**For Doot:**
-You should see 8 MCP tools:
-- `spawn_terminal`
-- `connect_to_brother`
-- `list_brothers`
-- `send_message`
-- `check_mailbox`
-- `read_message`
-- `browse_feed`
-- `unread_count`
+```bash
+clade doctor
+```
 
-**For Oppy/Jerry:**
-You should see 5 MCP tools:
-- `send_message`
-- `check_mailbox`
-- `read_message`
-- `browse_feed`
-- `unread_count`
+This checks config, keys, MCP registration, server health, and per-brother connectivity.
+
+**Personal server** should have 12 tools (terminal, mailbox, tasks).
+**Worker server** should have 8 tools (mailbox, tasks).
 
 **Test the mailbox:**
 
 ```
-# Check unread count (should return "No unread messages" or a count)
 unread_count()
-
-# Send a test message to yourself or another brother
 send_message(recipients=["doot"], body="Test message", subject="Setup verification")
-
-# Check mailbox
 check_mailbox()
 ```
 
@@ -323,20 +280,29 @@ Names are case-sensitive and must match the API key configuration.
 
 ## Adding a New Brother
 
-To add a new brother (e.g., "dev-vm"):
+### Using the CLI (recommended)
 
-### 1. Generate API Key
+```bash
+clade add-brother
+```
 
-**On Hearth server:**
+The CLI handles everything: SSH testing, prerequisite checking, remote deployment, API key generation, MCP registration, and config updates. See the [Quick Start](QUICKSTART.md) for details.
+
+### Manual Setup
+
+If you need to add a brother manually:
+
+#### 1. Generate API Key
+
 ```python
 import secrets
 print(secrets.token_urlsafe(32))
 ```
 
-### 2. Add to Hearth Server
+#### 2. Add to Hearth Server
 
+Add the key to the Hearth server's systemd config:
 ```bash
-ssh -i ~/.ssh/moltbot-key.pem ubuntu@54.84.119.14
 sudo systemctl edit mailbox
 ```
 
@@ -351,26 +317,24 @@ Restart:
 sudo systemctl restart mailbox
 ```
 
-### 3. Setup on New Machine
+#### 3. Setup on New Machine
 
 Follow steps 1-5 above, using:
 - `HEARTH_NAME: "dev-vm"`
 - `HEARTH_API_KEY: "newkey"`
 
-### 4. (Optional) Add to Doot's Config
+#### 4. Add to Config
 
-So Doot can connect to the new brother:
-
-**In `~/.config/clade/config.yaml`:**
+Add the brother to `~/.config/clade/clade.yaml`:
 ```yaml
 brothers:
   dev-vm:
-    host: dev.example.com
+    ssh: dev.example.com
     working_dir: "~/workspace"
     description: "Development VM"
 ```
 
-Restart Doot's Claude Code, and now:
+Restart Claude Code, and now:
 ```
 connect_to_brother(name="dev-vm")
 list_brothers()

@@ -1,48 +1,117 @@
 # The Clade - Quick Start Guide
 
-The Clade is an MCP server that enables Claude Code instances (like Doot, Oppy, and Jerry) to spawn terminal windows and communicate with each other via a shared mailbox.
+Set up a family of Claude Code instances that can communicate with each other and delegate work.
 
 ## Prerequisites
 
 - Python 3.10 or higher
 - Claude Code installed
-- SSH access to remote machines (for brother connections)
+- SSH access to remote machines (for adding brothers)
 
 ## Installation
 
-### For Doot (Local Claude Code)
-
 ```bash
-cd ~/projects/clade
-source ~/opt/miniconda3/etc/profile.d/conda.sh
-conda activate clade
 pip install -e .
 ```
 
-This installs two entry points:
-- `clade-personal` - Full MCP server (terminal spawning + mailbox)
-- `clade-worker` - Lite MCP server (mailbox only)
+This installs:
+- `clade` — CLI for setup and management
+- `clade-personal` — Full MCP server (terminal spawning + mailbox + task delegation)
+- `clade-worker` — Lite MCP server (mailbox + task visibility only)
 
-### For Oppy/Jerry (Remote Claude Code)
+## Initialize Your Clade
 
-See [BROTHER_SETUP.md](BROTHER_SETUP.md) for detailed instructions on setting up remote brothers.
+```bash
+clade init
+```
+
+The interactive wizard will:
+1. Ask you to name your clade
+2. Suggest a name for your personal Claude Code instance (from a pool of scientist names)
+3. Optionally configure a Hearth server for inter-brother communication
+4. Generate an API key and save it to `~/.config/clade/keys.json`
+5. Register the `clade-personal` MCP server in `~/.claude.json`
+6. Write your config to `~/.config/clade/clade.yaml`
+
+For non-interactive setup (accepts all defaults):
+```bash
+clade init -y
+```
+
+Or with explicit values:
+```bash
+clade init --name "My Clade" --personal-name doot --server-url https://your-server.com
+```
+
+**After init, restart Claude Code** to pick up the new MCP server.
+
+## Add a Brother
+
+Once initialized, add remote Claude Code instances:
+
+```bash
+clade add-brother
+```
+
+This will:
+1. Suggest a name for the new brother
+2. Ask for the SSH host (e.g. `ian@masuda`)
+3. Test SSH connectivity
+4. Check remote prerequisites (Python, Claude Code, tmux, git)
+5. Deploy the clade package on the remote machine
+6. Generate an API key for the brother
+7. Register the `clade-worker` MCP server on the remote `~/.claude.json`
+8. Update your local `clade.yaml` config
+
+Non-interactive:
+```bash
+clade add-brother --name oppy --ssh ian@masuda --working-dir ~/projects -y
+```
+
+Skip remote deployment if you want to install manually:
+```bash
+clade add-brother --no-deploy --no-mcp
+```
+
+## Check Status
+
+```bash
+clade status
+```
+
+Shows a health overview: server status, SSH reachability, and API key status for each brother.
+
+## Run Diagnostics
+
+```bash
+clade doctor
+```
+
+Full diagnostic check: config, keys, MCP registration, server health, and per-brother SSH + package + MCP + Hearth reachability.
 
 ## Configuration
 
-### Register MCP Server with Claude Code
+### Files
 
-**For Doot (local):**
+| File | Purpose | Managed by |
+|------|---------|------------|
+| `~/.config/clade/clade.yaml` | Clade config (name, brothers, server) | `clade init`, `clade add-brother` |
+| `~/.config/clade/keys.json` | API keys (chmod 600) | `clade init`, `clade add-brother` |
+| `~/.claude.json` | MCP server registration | `clade init` (local), `clade add-brother` (remote) |
 
-Edit `~/.claude.json` and add:
+### Manual Configuration
 
+If you prefer to configure manually instead of using the CLI, edit `~/.claude.json`:
+
+**Personal (full server):**
 ```json
 {
   "mcpServers": {
     "clade-personal": {
       "command": "clade-personal",
       "env": {
-        "HEARTH_URL": "https://54.84.119.14",
-        "HEARTH_API_KEY": "your-api-key-here",
+        "HEARTH_URL": "https://your-server.com",
+        "HEARTH_API_KEY": "your-api-key",
         "HEARTH_NAME": "doot"
       }
     }
@@ -50,16 +119,15 @@ Edit `~/.claude.json` and add:
 }
 ```
 
-**For Oppy/Jerry (remote):**
-
+**Worker (lite server):**
 ```json
 {
   "mcpServers": {
     "clade-worker": {
       "command": "clade-worker",
       "env": {
-        "HEARTH_URL": "https://54.84.119.14",
-        "HEARTH_API_KEY": "your-api-key-here",
+        "HEARTH_URL": "https://your-server.com",
+        "HEARTH_API_KEY": "your-api-key",
         "HEARTH_NAME": "oppy"
       }
     }
@@ -67,104 +135,51 @@ Edit `~/.claude.json` and add:
 }
 ```
 
-### (Optional) Create Brother Configuration
-
-By default, The Clade knows about `jerry` (cluster) and `oppy` (masuda). To customize or add brothers, create a config file:
-
-**Location options** (checked in order):
-1. `~/.config/clade/config.yaml`
-2. `$XDG_CONFIG_HOME/clade/config.yaml`
-3. `~/.clade.yaml`
-
-**Example config:**
-
-```yaml
-default_terminal_app: terminal  # or "iterm2"
-
-brothers:
-  jerry:
-    host: cluster
-    working_dir: null
-    description: "Brother Jerry — GPU jobs on the cluster"
-
-  oppy:
-    host: masuda
-    working_dir: "~/projects/mol_diffusion/OMTRA_oppy"
-    description: "Brother Oppy — The architect on masuda"
-
-  # Add custom brothers
-  dev-vm:
-    host: dev.example.com
-    working_dir: "~/workspace"
-    description: "Development VM"
-```
-
-The `command` field is auto-generated from `host` and `working_dir` if not specified.
-
-See `examples/config.yaml.example` for a full example.
-
-## Restart Claude Code
-
-After configuring the MCP server, restart Claude Code to load the new server.
-
 ## Verify Installation
 
-After restarting Claude Code, you should see these MCP tools available:
+After restarting Claude Code, verify your MCP tools are available:
 
-**Doot (full server):**
-- `spawn_terminal` - Open new terminal window
-- `connect_to_brother` - Connect to Oppy/Jerry
-- `initiate_ssh_task` - Send a task to a brother via SSH (see [TASKS.md](TASKS.md))
-- `list_tasks` - Check task status
-- `send_message` - Send message to brothers
-- `check_mailbox` - Check for messages
-- `read_message` - Read a message
-- `browse_feed` - Browse all messages
-- `unread_count` - Get unread count
+**Personal (full server) — 12 tools:**
+- `spawn_terminal` — Open new terminal window
+- `connect_to_brother` — SSH to a brother with Claude Code
+- `list_brothers` — List available brothers
+- `send_message` — Send message to brothers
+- `check_mailbox` — Check for messages
+- `read_message` — Read a message (marks as read)
+- `browse_feed` — Browse all messages
+- `unread_count` — Get unread count
+- `initiate_ssh_task` — Delegate a task to a brother via SSH
+- `list_tasks` — Browse task list
+- `get_task` — Get task details
+- `update_task` — Update task status
 
-**Oppy/Jerry (lite server):**
-- `send_message`
-- `check_mailbox`
-- `read_message`
-- `browse_feed`
-- `unread_count`
-- `update_task` - Report task status (see [TASKS.md](TASKS.md))
+**Worker (lite server) — 8 tools:**
+- `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count`
+- `list_tasks`, `get_task`, `update_task`
 
 ## Basic Usage
 
 ### Spawn a Terminal Window
-
-**As Doot:**
 ```
 spawn_terminal(command="htop")
 ```
 
 ### Connect to a Brother
-
-**As Doot:**
 ```
 connect_to_brother(name="jerry")
 ```
 
-This opens a Terminal.app window with an SSH session to Jerry running Claude Code.
-
 ### Send a Message
-
-**As any brother:**
 ```
 send_message(recipients=["oppy"], body="Can you review the training script?", subject="Code review")
 ```
 
 ### Check Messages
-
-**As any brother:**
 ```
 check_mailbox(unread_only=true)
 ```
 
 ### Browse Message Feed
-
-**As any brother:**
 ```
 browse_feed(sender="doot", limit=20)
 ```
@@ -172,34 +187,25 @@ browse_feed(sender="doot", limit=20)
 ## Troubleshooting
 
 ### MCP server not loading
-
 1. Check `~/.claude.json` for syntax errors
-2. Verify entry point is installed: `which clade-personal`
-3. Check Claude Code logs for errors
+2. Verify entry point: `which clade-personal`
+3. Run `clade doctor` for full diagnostics
+4. Check Claude Code logs for errors
 
 ### Brother connection fails
-
-1. Verify SSH access: `ssh cluster` (or `ssh masuda`)
-2. Check that Claude Code is installed on remote machine
-3. Verify `working_dir` exists on remote machine
+1. Verify SSH: `ssh masuda` (or your host)
+2. Check that Claude Code is installed on the remote machine
+3. Run `clade doctor` — it checks SSH, package installation, and MCP registration for each brother
 
 ### Mailbox not working
-
-1. Verify environment variables are set in `~/.claude.json`
-2. Check Hearth server is running: See [MAILBOX_SETUP.md](MAILBOX_SETUP.md)
-3. Verify API key is correct
+1. Verify Hearth server is configured: `clade status`
+2. Check env vars in `~/.claude.json`
+3. See [MAILBOX_SETUP.md](MAILBOX_SETUP.md) for server setup
 
 ## Next Steps
 
-- [Set up The Hearth](MAILBOX_SETUP.md)
-- [Configure remote brothers](BROTHER_SETUP.md)
-- [Install the task logger hook](BROTHER_SETUP.md#step-4-install-task-logger-hook-optional-but-recommended) — enables live activity tracking for SSH tasks
-- [Task delegation](TASKS.md) — send tasks to brothers via SSH
-- [Explore future features](FUTURE.md)
-
-## Support
-
-For issues and questions:
-- Check the documentation in `docs/`
-- Review the example config: `examples/config.yaml.example`
-- File an issue on GitHub
+- [Set up The Hearth](MAILBOX_SETUP.md) — Deploy the communication server
+- [Configure remote brothers](BROTHER_SETUP.md) — Detailed brother setup
+- [Install the task logger hook](BROTHER_SETUP.md#step-4-install-task-logger-hook-optional-but-recommended) — Live activity tracking for SSH tasks
+- [Task delegation](TASKS.md) — Send tasks to brothers via SSH
+- [Web App](WEBAPP.md) — Web interface for browsing messages and tasks

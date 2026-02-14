@@ -11,6 +11,17 @@ clade/
 │   │   ├── config.py              # load_config(), FALLBACK_CONFIG with brother defs
 │   │   ├── brothers.py            # BROTHERS dict (host, working_dir, description)
 │   │   └── types.py               # Type definitions
+│   ├── cli/                       # CLI commands (`clade` entry point)
+│   │   ├── main.py                # Click group, wires up subcommands
+│   │   ├── init_cmd.py            # `clade init` — interactive setup wizard
+│   │   ├── add_brother.py         # `clade add-brother` — SSH test, deploy, key gen, MCP reg
+│   │   ├── status_cmd.py          # `clade status` — health overview
+│   │   ├── doctor.py              # `clade doctor` — full diagnostics
+│   │   ├── clade_config.py        # CladeConfig / BrotherEntry dataclasses + YAML persistence
+│   │   ├── keys.py                # API key generation + keys.json management
+│   │   ├── ssh_utils.py           # test_ssh(), run_remote(), check_remote_prereqs()
+│   │   ├── mcp_utils.py           # ~/.claude.json read/write/register (local + remote)
+│   │   └── naming.py              # Scientist name pool for brother suggestions
 │   ├── terminal/                  # AppleScript terminal spawning
 │   │   ├── applescript.py         # AppleScript generation (quote escaping, etc.)
 │   │   └── executor.py            # osascript execution
@@ -35,7 +46,7 @@ clade/
 │   ├── models.py                  # Pydantic request/response models
 │   └── config.py                  # Server configuration
 ├── tests/                         # All tests
-│   ├── unit/                      # Fast, no network (config, applescript, client, ssh, timestamp)
+│   ├── unit/                      # Fast, no network (config, applescript, client, ssh, cli, timestamp)
 │   └── integration/               # MCP tool + Hearth server integration tests
 ├── frontend/                      # Hearth web UI (Vite + React + TypeScript + Tailwind v4)
 ├── deploy/                        # Deployment and infrastructure scripts
@@ -49,9 +60,23 @@ clade/
 └── HEARTH_SETUP.md                # Self-setup guide for brothers
 ```
 
-**Two MCP server variants:**
-- `server_full` (clade-personal) — Doot's server: terminal spawning + mailbox + task delegation
-- `server_lite` (clade-worker) — Brothers' server: mailbox communication + task visibility/updates only
+**Three entry points** (defined in `pyproject.toml`):
+- `clade` — CLI for setup and management (`cli/main.py`)
+- `clade-personal` — Full MCP server: terminal spawning + mailbox + task delegation
+- `clade-worker` — Lite MCP server: mailbox communication + task visibility/updates only
+
+## CLI Commands
+
+The `clade` CLI handles onboarding and diagnostics:
+
+| Command | Description |
+|---------|-------------|
+| `clade init` | Interactive wizard: name clade, name personal brother, optional server config, generate API key, register MCP |
+| `clade add-brother` | SSH test, prereq check, remote deploy, API key gen, remote MCP registration |
+| `clade status` | Health overview: server ping, SSH to each brother, key status |
+| `clade doctor` | Full diagnostic: config, keys, MCP, server, per-brother SSH + package + MCP + Hearth reachability |
+
+Config lives in `~/.config/clade/clade.yaml` (created by `init`, updated by `add-brother`). API keys in `~/.config/clade/keys.json` (chmod 600). `core/config.py` detects `clade.yaml` (has `clade:` top-level key) with highest priority and converts it to `TerminalSpawnerConfig` so MCP servers work unchanged.
 
 ## MCP Tools
 

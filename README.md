@@ -85,6 +85,7 @@ Infrastructure for [Claude Code](https://claude.com/claude-code) instances to co
 clade/
 ├── src/clade/                    # Main package
 │   ├── core/                     # Config, brother definitions, types
+│   ├── cli/                      # CLI commands (init, add-brother, status, doctor)
 │   ├── terminal/                 # AppleScript terminal spawning
 │   ├── communication/            # Hearth HTTP client
 │   ├── tasks/                    # SSH task delegation
@@ -96,7 +97,7 @@ clade/
 ├── hearth/                       # Hearth API server (deployed to EC2)
 ├── frontend/                     # Hearth web UI (Vite + React + TypeScript + Tailwind)
 ├── tests/                        # Tests
-│   ├── unit/                     # Config, applescript, client, SSH, timestamp
+│   ├── unit/                     # Config, applescript, client, SSH, CLI, timestamp
 │   └── integration/              # MCP server, mailbox, and task integration
 ├── docs/                         # Documentation
 │   ├── QUICKSTART.md             # Getting started
@@ -109,12 +110,30 @@ clade/
 │   ├── setup.sh                  # Server provisioning
 │   └── ec2.sh                    # Instance management (start/stop/status/ssh)
 ├── HEARTH_SETUP.md               # Self-setup guide for new brothers
-└── pyproject.toml                # Package config (v0.3.0)
+└── pyproject.toml                # Package config
 ```
 
-## Setup
+## Getting Started
 
-See the [docs/](docs/) directory for full documentation:
+```bash
+pip install -e .
+clade init
+# Restart Claude Code, then:
+clade add-brother
+```
+
+The `clade` CLI handles initialization, brother onboarding, and diagnostics. See the [Quick Start](docs/QUICKSTART.md) for the full walkthrough.
+
+### CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `clade init` | Interactive wizard to initialize a new Clade |
+| `clade add-brother` | Add a remote Claude Code instance |
+| `clade status` | Health overview (server, SSH, keys) |
+| `clade doctor` | Full diagnostics for the entire setup |
+
+### Documentation
 
 - **[Quick Start](docs/QUICKSTART.md)** — Installation and first steps
 - **[Hearth Setup](docs/MAILBOX_SETUP.md)** — Deploying the Hearth server
