@@ -38,9 +38,12 @@ clade/
 │   ├── unit/                      # Fast, no network (config, applescript, client, ssh, timestamp)
 │   └── integration/               # MCP tool + Hearth server integration tests
 ├── frontend/                      # Hearth web UI (Vite + React + TypeScript + Tailwind v4)
-├── deploy/                        # EC2 deployment scripts
-│   ├── setup.sh                   # Server provisioning
-│   └── ec2.sh                     # Instance management (start/stop/status/ssh)
+├── deploy/                        # Deployment and infrastructure scripts
+│   ├── setup.sh                   # EC2 server provisioning
+│   ├── ec2.sh                     # EC2 instance management (start/stop/status/ssh)
+│   ├── cluster-tailscale-setup.sh # One-time Tailscale bootstrap for SLURM clusters
+│   ├── cluster-tailscale-job.sh   # SLURM job that runs Tailscale (sbatch script)
+│   └── cluster-tailscale-start.sh # Submit/stop the Tailscale SLURM job
 ├── research_notes/                # Development logs and research (gitignored)
 ├── docs/                          # Documentation
 └── HEARTH_SETUP.md                # Self-setup guide for brothers
@@ -114,6 +117,33 @@ python -m pytest tests/ -q
     scp -i ~/.ssh/moltbot-key.pem -r frontend/dist/* ubuntu@54.84.119.14:/tmp/mailbox-deploy/
     ssh -i ~/.ssh/moltbot-key.pem ubuntu@54.84.119.14 "sudo rm -rf /var/www/mailbox/* && sudo cp -r /tmp/mailbox-deploy/* /var/www/mailbox/ && sudo chown -R www-data:www-data /var/www/mailbox/ && rm -rf /tmp/mailbox-deploy"
     ```
+
+## Tailscale Mesh VPN
+
+The Clade uses Tailscale for direct brother-to-brother connectivity. To join the mesh:
+
+**If you have root access** (e.g. masuda, EC2, personal machines):
+Tailscale is installed system-wide and runs as a service. It's always on — nothing to do.
+
+**If you're on a shared SLURM cluster with no root** (e.g. university HPC):
+Tailscale runs in userspace networking mode inside a SLURM job. Scripts in `deploy/` handle this:
+
+1. **One-time setup** (human runs this once, needs an auth key from [Tailscale admin](https://login.tailscale.com/admin/settings/keys)):
+   ```bash
+   bash ~/projects/clade/deploy/cluster-tailscale-setup.sh --authkey tskey-auth-XXXXX
+   ```
+
+2. **Connect to the mesh** (run anytime — submits a 24h SLURM job to `dept_cpu`):
+   ```bash
+   bash ~/projects/clade/deploy/cluster-tailscale-start.sh
+   ```
+
+3. **Disconnect:**
+   ```bash
+   bash ~/projects/clade/deploy/cluster-tailscale-start.sh --stop
+   ```
+
+Brothers on SLURM clusters are **intermittently available** — online only while the job is running. See `docs/cluster-tailscale-setup.md` for full details and troubleshooting.
 
 ## Key Gotchas
 

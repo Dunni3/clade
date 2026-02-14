@@ -13,6 +13,7 @@ dependencies = [
     "mcp[cli]>=0.1.0",
     "httpx>=0.27.0",
     "pyyaml>=6.0",
+    "click>=8.0",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +28,7 @@ dev = [
 ]
 
 [project.scripts]
+clade = "clade.cli.main:cli"
 clade-personal = "clade.mcp.server_full:main"
 clade-worker = "clade.mcp.server_lite:main"
 
