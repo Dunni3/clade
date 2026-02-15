@@ -10,6 +10,7 @@ from .clade_config import (
     load_clade_config,
     save_clade_config,
 )
+from .ember_setup import setup_ember
 from .identity import generate_worker_identity, write_identity_remote
 from .keys import add_key, keys_path, load_keys
 from .mcp_utils import register_mcp_remote
@@ -27,6 +28,8 @@ from .ssh_utils import check_remote_prereqs, run_remote, test_ssh
 @click.option("--no-deploy", is_flag=True, help="Skip deploying the clade package on remote")
 @click.option("--no-mcp", is_flag=True, help="Skip MCP registration on remote")
 @click.option("--no-identity", is_flag=True, help="Skip writing identity to remote CLAUDE.md")
+@click.option("--ember", "setup_ember_flag", is_flag=True, help="Set up an Ember server on the remote")
+@click.option("--ember-port", default=None, type=int, help="Ember server port (default: 8100)")
 @click.option("--yes", "-y", is_flag=True, help="Accept defaults without prompting")
 @click.pass_context
 def add_brother(
@@ -40,6 +43,8 @@ def add_brother(
     no_deploy: bool,
     no_mcp: bool,
     no_identity: bool,
+    setup_ember_flag: bool,
+    ember_port: int | None,
     yes: bool,
 ) -> None:
     """Add a new brother to the Clade."""
@@ -155,6 +160,20 @@ def add_brother(
             brothers=config.brothers,
         )
 
+    # Ember setup
+    ember_host = None
+    actual_ember_port = None
+    if setup_ember_flag and ssh_result.success:
+        ember_host, actual_ember_port = setup_ember(
+            ssh_host=ssh_host,
+            name=name,
+            api_key=api_key,
+            port=ember_port or 8100,
+            working_dir=working_dir,
+            server_url=config.server_url,
+            yes=yes,
+        )
+
     # Update config
     config.brothers[name] = BrotherEntry(
         ssh=ssh_host,
@@ -162,6 +181,8 @@ def add_brother(
         role=role,
         description=desc,
         personality=personality,
+        ember_port=actual_ember_port if ember_host else None,
+        ember_host=ember_host,
     )
     config_path = default_config_path(config_dir)
     save_clade_config(config, config_path)
@@ -175,6 +196,8 @@ def add_brother(
     if working_dir:
         click.echo(f"  Dir:  {working_dir}")
     click.echo(f"  Role: {role}")
+    if ember_host:
+        click.echo(f"  Ember: {ember_host}:{actual_ember_port}")
 
     if not config.server_url:
         click.echo()

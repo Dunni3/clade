@@ -22,7 +22,9 @@ clade/
 │   │   ├── keys.py                # API key generation + keys.json management
 │   │   ├── ssh_utils.py           # test_ssh(), run_remote(), check_remote_prereqs()
 │   │   ├── mcp_utils.py           # ~/.claude.json read/write/register (local + remote)
-│   │   └── naming.py              # Scientist name pool for brother suggestions
+│   │   ├── naming.py              # Scientist name pool for brother suggestions
+│   │   ├── ember_setup.py         # Ember server detection, deployment, health check
+│   │   └── setup_ember_cmd.py     # `clade setup-ember` — deploy Ember on existing brother
 │   ├── terminal/                  # AppleScript terminal spawning
 │   │   ├── applescript.py         # AppleScript generation (quote escaping, etc.)
 │   │   └── executor.py            # osascript execution
@@ -81,9 +83,10 @@ The `clade` CLI handles onboarding and diagnostics:
 | Command | Description |
 |---------|-------------|
 | `clade init` | Interactive wizard: name clade, name personal brother, personality, server config, API key gen + registration (`--server-key`), MCP, identity writing |
-| `clade add-brother` | SSH test, prereq check, remote deploy, API key gen + Hearth registration, MCP registration, remote identity writing |
+| `clade add-brother` | SSH test, prereq check, remote deploy, API key gen + Hearth registration, MCP registration, remote identity writing. `--ember` flag adds Ember setup. |
+| `clade setup-ember` | Deploy an Ember server on an existing brother: detect binary/user/Tailscale IP, template systemd service, start + health check |
 | `clade status` | Health overview: server ping, SSH to each brother, key status |
-| `clade doctor` | Full diagnostic: config, keys, MCP, identity, server, per-brother SSH + package + MCP + identity + Hearth |
+| `clade doctor` | Full diagnostic: config, keys, MCP, identity, server, per-brother SSH + package + MCP + identity + Hearth + Ember health |
 
 **Global option:** `--config-dir PATH` overrides where `clade.yaml`, `keys.json`, and local `CLAUDE.md` are written. Useful for isolated testing. Does not affect remote paths.
 
@@ -182,7 +185,7 @@ An **Ember** is a lightweight HTTP server running on a worker brother's machine 
 
 **In-memory state:** `TaskState` tracks one active task. No DB — the Hearth is source of truth. `is_busy()` checks tmux liveness and auto-clears stale tasks.
 
-**Deployment:** `deploy/ember.service` — systemd unit for masuda (Oppy). Phase 1 is Oppy only; Jerry stays SSH-only.
+**Deployment:** Automated via `clade setup-ember <name>` or `clade add-brother --ember`. The CLI detects the remote user, `clade-ember` binary path, clade package directory, and Tailscale IP, then templates and deploys a systemd service. Falls back to printing manual instructions if sudo is unavailable. Reference service file: `deploy/ember.service`. Config fields `ember_host` and `ember_port` are stored in `BrotherEntry` in `clade.yaml`.
 
 ## The Hearth (Communication Hub)
 
@@ -242,6 +245,8 @@ Tailscale runs in userspace networking mode inside a SLURM job. Scripts in `depl
    ```
 
 Brothers on SLURM clusters are **intermittently available** — online only while the job is running. See `docs/cluster-tailscale-setup.md` for full details and troubleshooting.
+
+**Tailscale + Ember:** `clade setup-ember` auto-detects the brother's Tailscale IP and uses it as the `ember_host` in config. This means Ember health checks and future Conductor calls route through the Tailscale mesh, bypassing firewalls. If Tailscale isn't available, it falls back to the SSH hostname.
 
 ## Key Gotchas
 

@@ -173,6 +173,72 @@ class TestSaveAndLoad:
         assert "personality" not in data["brothers"]["oppy"]
 
 
+class TestEmberFields:
+    def test_defaults_none(self):
+        bro = BrotherEntry(ssh="ian@masuda")
+        assert bro.ember_port is None
+        assert bro.ember_host is None
+
+    def test_custom(self):
+        bro = BrotherEntry(
+            ssh="ian@masuda",
+            ember_port=8100,
+            ember_host="100.71.57.52",
+        )
+        assert bro.ember_port == 8100
+        assert bro.ember_host == "100.71.57.52"
+
+    def test_round_trip(self, tmp_path: Path):
+        config_file = tmp_path / "clade.yaml"
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_port=8100,
+                    ember_host="100.71.57.52",
+                ),
+            },
+        )
+        save_clade_config(cfg, config_file)
+        loaded = load_clade_config(config_file)
+
+        assert loaded is not None
+        assert loaded.brothers["oppy"].ember_port == 8100
+        assert loaded.brothers["oppy"].ember_host == "100.71.57.52"
+
+    def test_not_saved_when_none(self, tmp_path: Path):
+        config_file = tmp_path / "clade.yaml"
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(ssh="ian@masuda"),
+            },
+        )
+        save_clade_config(cfg, config_file)
+
+        with open(config_file) as f:
+            data = yaml.safe_load(f)
+        assert "ember_port" not in data["brothers"]["oppy"]
+        assert "ember_host" not in data["brothers"]["oppy"]
+
+    def test_load_without_ember_fields(self, tmp_path: Path):
+        """Configs written before ember was added should load with None defaults."""
+        config_file = tmp_path / "clade.yaml"
+        data = {
+            "clade": {"name": "Old Clade", "created": "2026-02-01"},
+            "personal": {"name": "doot", "description": "Coordinator"},
+            "brothers": {
+                "oppy": {"ssh": "ian@masuda", "role": "worker"},
+            },
+        }
+        with open(config_file, "w") as f:
+            yaml.dump(data, f)
+
+        loaded = load_clade_config(config_file)
+        assert loaded is not None
+        assert loaded.brothers["oppy"].ember_port is None
+        assert loaded.brothers["oppy"].ember_host is None
+
+
 class TestDefaultConfigPath:
     def test_returns_path(self):
         p = default_config_path()

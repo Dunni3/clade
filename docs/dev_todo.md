@@ -1,7 +1,11 @@
-- we have hard-coded brother configs specific to OG clade (Ian, Doot, Jerry, Oppy). Will have to relax this constrint
-- server-structured heartbeat for status reporting? (conductor, hearth manager)
-- hooks still not working
-- when viewing a message, should give the user the option to click through to related tasks and messages (insert hyperlinks, or have a panel at the bottom with a rectangle/box for each related task/message)
-- task timeline should default newest-to-oldest display
-- architecture v2 plan (research_notes/2026-02-12_140000_clade-architecture-v2.md)
-- streamline clade setup (research_notes/2026-02-12_150000_clade-onboarding-pipeline.md)
+- [ ] we have hard-coded brother configs specific to OG clade (Ian, Doot, Jerry, Oppy). Will have to relax this constrint
+- [ ] server-structured heartbeat for status reporting? (conductor, hearth manager)
+- [ ] hooks still not working
+- [ ] when viewing a message, should give the user the option to click through to related tasks and messages (insert hyperlinks, or have a panel at the bottom with a rectangle/box for each related task/message)
+- [ ] task timeline should default newest-to-oldest display
+- [ ] architecture v2 plan (research_notes/2026-02-12_140000_clade-architecture-v2.md)
+- [ ] streamline clade setup (research_notes/2026-02-12_150000_clade-onboarding-pipeline.md) (almost done, some more cli cmds needed but we have a note about which to build)
+- [ ] clade status page on the frontend (equivalent of the "clade status" cli command, but with a more user-friendly UI)
+  - [ ] maybe also a cool diagram showing every clade member at what they are doing if anything 
+- [ ] build the conductor, build the tailscale network connections. 
+- [ ] testing tailscale networking on the docker system? hmmm

@@ -18,6 +18,7 @@ This installs:
 - `clade` — CLI for setup and management
 - `clade-personal` — Full MCP server (terminal spawning + mailbox + task delegation)
 - `clade-worker` — Lite MCP server (mailbox + task visibility only)
+- `clade-ember` — Ember server (HTTP-based task execution on worker machines)
 
 ## Initialize Your Clade
 
@@ -78,10 +79,37 @@ Non-interactive:
 clade add-brother --name oppy --ssh ian@masuda --working-dir ~/projects -y
 ```
 
+With Ember server setup (deploys a systemd service for HTTP-based task execution):
+```bash
+clade add-brother --name oppy --ssh ian@masuda --working-dir ~/projects --ember -y
+```
+
 Skip remote deployment if you want to install manually:
 ```bash
 clade add-brother --no-deploy --no-mcp
 ```
+
+## Set Up Ember on an Existing Brother
+
+If you added a brother without `--ember`, you can set up the Ember server later:
+
+```bash
+clade setup-ember oppy
+```
+
+This will:
+1. Detect the remote user, `clade-ember` binary, and package directory
+2. Detect the Tailscale IP (if available) for mesh connectivity
+3. Deploy a systemd service file and start the Ember server
+4. Run a health check
+5. Save `ember_host` and `ember_port` to your `clade.yaml`
+
+Custom port:
+```bash
+clade setup-ember oppy --port 9000
+```
+
+If sudo is not available on the remote, the command prints manual instructions.
 
 ## Check Status
 
@@ -97,7 +125,7 @@ Shows a health overview: server status, SSH reachability, and API key status for
 clade doctor
 ```
 
-Full diagnostic check: config, keys, MCP registration, server health, and per-brother SSH + package + MCP + Hearth reachability.
+Full diagnostic check: config, keys, MCP registration, server health, and per-brother SSH + package + MCP + Hearth reachability + Ember health.
 
 ## Configuration
 
@@ -105,7 +133,7 @@ Full diagnostic check: config, keys, MCP registration, server health, and per-br
 
 | File | Purpose | Managed by |
 |------|---------|------------|
-| `~/.config/clade/clade.yaml` | Clade config (name, brothers, server) | `clade init`, `clade add-brother` |
+| `~/.config/clade/clade.yaml` | Clade config (name, brothers, server, ember) | `clade init`, `clade add-brother`, `clade setup-ember` |
 | `~/.config/clade/keys.json` | API keys (chmod 600) | `clade init`, `clade add-brother` |
 | `~/.claude.json` | MCP server registration | `clade init` (local), `clade add-brother` (remote) |
 
@@ -149,7 +177,7 @@ If you prefer to configure manually instead of using the CLI, edit `~/.claude.js
 
 After restarting Claude Code, verify your MCP tools are available:
 
-**Personal (full server) — 12 tools:**
+**Personal (full server) — 14 tools:**
 - `spawn_terminal` — Open new terminal window
 - `connect_to_brother` — SSH to a brother with Claude Code
 - `list_brothers` — List available brothers
@@ -162,10 +190,13 @@ After restarting Claude Code, verify your MCP tools are available:
 - `list_tasks` — Browse task list
 - `get_task` — Get task details
 - `update_task` — Update task status
+- `check_ember_health` — Check Ember server health
+- `list_ember_tasks` — List active Ember tasks
 
-**Worker (lite server) — 8 tools:**
+**Worker (lite server) — 10 tools:**
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count`
 - `list_tasks`, `get_task`, `update_task`
+- `check_ember_health`, `list_ember_tasks`
 
 ## Basic Usage
 
@@ -206,6 +237,12 @@ browse_feed(sender="doot", limit=20)
 1. Verify SSH: `ssh masuda` (or your host)
 2. Check that Claude Code is installed on the remote machine
 3. Run `clade doctor` — it checks SSH, package installation, and MCP registration for each brother
+
+### Ember server not starting
+1. Check the service: `ssh masuda systemctl status clade-ember`
+2. Check logs: `ssh masuda journalctl -u clade-ember --no-pager -n 20`
+3. Verify `clade-ember` is installed: `ssh masuda which clade-ember`
+4. Re-deploy: `clade setup-ember oppy`
 
 ### Mailbox not working
 1. Verify Hearth server is configured: `clade status`

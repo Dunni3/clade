@@ -19,6 +19,8 @@ class BrotherEntry:
     role: str = "worker"
     description: str = ""
     personality: str = ""
+    ember_port: int | None = None
+    ember_host: str | None = None
 
 
 @dataclass
@@ -89,6 +91,8 @@ def load_clade_config(path: Path | None = None) -> CladeConfig | None:
             role=bro_data.get("role", "worker"),
             description=bro_data.get("description", ""),
             personality=bro_data.get("personality", ""),
+            ember_port=bro_data.get("ember_port"),
+            ember_host=bro_data.get("ember_host"),
         )
 
     return CladeConfig(
@@ -153,6 +157,10 @@ def save_clade_config(config: CladeConfig, path: Path | None = None) -> Path:
                 entry["description"] = bro.description
             if bro.personality:
                 entry["personality"] = bro.personality
+            if bro.ember_port is not None:
+                entry["ember_port"] = bro.ember_port
+            if bro.ember_host is not None:
+                entry["ember_host"] = bro.ember_host
             brothers_data[name] = entry
         data["brothers"] = brothers_data
 

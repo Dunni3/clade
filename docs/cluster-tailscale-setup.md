@@ -158,3 +158,13 @@ When the Tailscale SLURM job is running, Jerry is a full member of the tailnet:
 - Jerry can reach other tailnet nodes via the SOCKS5 proxy at `localhost:1055`
 
 Since Jerry is intermittent, the Clade should handle him being offline gracefully. The `cluster-tailscale-start.sh` script makes it easy to bring him back online whenever needed.
+
+### Ember + Tailscale
+
+The Ember server (HTTP-based task execution) relies on Tailscale for connectivity. When you run `clade setup-ember <name>`, the CLI auto-detects the brother's Tailscale IP and stores it as `ember_host` in `clade.yaml`. This means:
+
+- **Health checks** (`clade doctor`) and the future **Conductor** reach Embers via the Tailscale mesh
+- **Firewalls are bypassed** — university networks that block arbitrary ports over the public internet are transparent to Tailscale
+- If Tailscale is not available, `setup-ember` falls back to the SSH hostname
+
+For brothers on SLURM clusters, the Ember server would also need to run inside the SLURM job (alongside Tailscale). This is not yet automated — Phase 1 targets always-on machines like masuda.

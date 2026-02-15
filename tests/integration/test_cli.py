@@ -21,6 +21,7 @@ class TestCLIHelp:
         assert "add-brother" in result.output
         assert "status" in result.output
         assert "doctor" in result.output
+        assert "setup-ember" in result.output
 
     def test_version(self):
         runner = CliRunner()
@@ -304,6 +305,140 @@ class TestAddBrother:
 
         assert result.exit_code == 0, result.output
         mock_write.assert_not_called()
+
+
+class TestSetupEmber:
+    def test_no_config(self, tmp_path: Path):
+        """Should fail if no clade.yaml exists."""
+        runner = CliRunner()
+        with patch("clade.cli.setup_ember_cmd.load_clade_config", return_value=None), \
+             patch("clade.cli.setup_ember_cmd.default_config_path", return_value=tmp_path / "clade.yaml"):
+            result = runner.invoke(cli, ["setup-ember", "oppy"])
+        assert result.exit_code == 1
+        assert "clade init" in result.output
+
+    def test_brother_not_found(self, tmp_path: Path):
+        """Should fail if brother not in config."""
+        from clade.cli.clade_config import CladeConfig
+        cfg = CladeConfig(clade_name="Test")
+
+        runner = CliRunner()
+        with patch("clade.cli.setup_ember_cmd.load_clade_config", return_value=cfg), \
+             patch("clade.cli.setup_ember_cmd.default_config_path", return_value=tmp_path / "clade.yaml"):
+            result = runner.invoke(cli, ["setup-ember", "oppy"])
+        assert result.exit_code == 1
+        assert "not found" in result.output
+
+    def test_no_api_key(self, tmp_path: Path):
+        """Should fail if no API key for brother."""
+        from clade.cli.clade_config import BrotherEntry, CladeConfig
+        cfg = CladeConfig(
+            brothers={"oppy": BrotherEntry(ssh="ian@masuda")},
+        )
+
+        runner = CliRunner()
+        with patch("clade.cli.setup_ember_cmd.load_clade_config", return_value=cfg), \
+             patch("clade.cli.setup_ember_cmd.default_config_path", return_value=tmp_path / "clade.yaml"), \
+             patch("clade.cli.setup_ember_cmd.load_keys", return_value={}), \
+             patch("clade.cli.setup_ember_cmd.keys_path", return_value=tmp_path / "keys.json"):
+            result = runner.invoke(cli, ["setup-ember", "oppy"])
+        assert result.exit_code == 1
+        assert "No API key" in result.output
+
+    @patch("clade.cli.ember_setup.check_ember_health_remote", return_value=True)
+    @patch("clade.cli.ember_setup.deploy_systemd_service")
+    @patch("clade.cli.ember_setup.detect_tailscale_ip", return_value="100.71.57.52")
+    @patch("clade.cli.ember_setup.detect_clade_dir", return_value="/home/ian/.local/share/clade")
+    @patch("clade.cli.ember_setup.detect_clade_ember_path", return_value="/usr/local/bin/clade-ember")
+    @patch("clade.cli.ember_setup.detect_remote_user", return_value="ian")
+    def test_success(self, mock_user, mock_path, mock_dir, mock_ts, mock_deploy, mock_health, tmp_path: Path):
+        """Successful setup should update config."""
+        from clade.cli.clade_config import BrotherEntry, CladeConfig
+        cfg = CladeConfig(
+            clade_name="Test",
+            server_url="https://example.com",
+            brothers={"oppy": BrotherEntry(ssh="ian@masuda", working_dir="~/projects/OMTRA")},
+        )
+
+        mock_deploy.return_value = SSHResult(success=True, stdout="EMBER_DEPLOY_OK")
+
+        runner = CliRunner()
+        with patch("clade.cli.setup_ember_cmd.load_clade_config", return_value=cfg), \
+             patch("clade.cli.setup_ember_cmd.default_config_path", return_value=tmp_path / "clade.yaml"), \
+             patch("clade.cli.setup_ember_cmd.load_keys", return_value={"oppy": "test-key"}), \
+             patch("clade.cli.setup_ember_cmd.keys_path", return_value=tmp_path / "keys.json"), \
+             patch("clade.cli.setup_ember_cmd.save_clade_config") as mock_save:
+            result = runner.invoke(cli, ["setup-ember", "oppy", "-y"])
+
+        assert result.exit_code == 0, result.output
+        assert "healthy" in result.output.lower() or "Ember config saved" in result.output
+
+        # Config was saved with ember fields
+        mock_save.assert_called_once()
+        saved_config = mock_save.call_args[0][0]
+        assert saved_config.brothers["oppy"].ember_host == "100.71.57.52"
+        assert saved_config.brothers["oppy"].ember_port == 8100
+
+
+class TestAddBrotherEmber:
+    @patch("clade.cli.ember_setup.check_ember_health_remote", return_value=True)
+    @patch("clade.cli.ember_setup.deploy_systemd_service")
+    @patch("clade.cli.ember_setup.detect_tailscale_ip", return_value="100.71.57.52")
+    @patch("clade.cli.ember_setup.detect_clade_dir", return_value="/home/ian/clade")
+    @patch("clade.cli.ember_setup.detect_clade_ember_path", return_value="/usr/bin/clade-ember")
+    @patch("clade.cli.ember_setup.detect_remote_user", return_value="ian")
+    @patch("clade.cli.add_brother.write_identity_remote")
+    @patch("clade.cli.add_brother.register_mcp_remote")
+    @patch("clade.cli.add_brother.run_remote")
+    @patch("clade.cli.add_brother.check_remote_prereqs")
+    @patch("clade.cli.add_brother.test_ssh")
+    def test_add_with_ember(
+        self, mock_ssh, mock_prereqs, mock_run, mock_mcp, mock_identity,
+        mock_user, mock_path, mock_dir, mock_ts, mock_deploy, mock_health,
+        tmp_path: Path,
+    ):
+        """add-brother --ember should set up Ember and include fields in config."""
+        from clade.cli.clade_config import CladeConfig, save_clade_config
+        config_file = tmp_path / "clade.yaml"
+        keys_file = tmp_path / "keys.json"
+
+        cfg = CladeConfig(clade_name="Test", server_url="https://example.com")
+        save_clade_config(cfg, config_file)
+
+        mock_ssh.return_value = SSHResult(success=True, stdout="ok")
+        mock_prereqs.return_value = MagicMock(
+            python="/usr/bin/python3", python_version="3.12.0",
+            claude=True, tmux=True, git=True, errors=[], all_ok=True,
+        )
+        mock_run.return_value = SSHResult(success=True, stdout="DEPLOY_OK")
+        mock_mcp.return_value = SSHResult(success=True, stdout="MCP_REGISTERED")
+        mock_identity.return_value = SSHResult(success=True, stdout="IDENTITY_OK")
+        mock_deploy.return_value = SSHResult(success=True, stdout="EMBER_DEPLOY_OK")
+
+        runner = CliRunner()
+        with patch("clade.cli.add_brother.load_clade_config", return_value=cfg), \
+             patch("clade.cli.add_brother.default_config_path", return_value=config_file), \
+             patch("clade.cli.add_brother.save_clade_config") as mock_save, \
+             patch("clade.cli.add_brother.keys_path", return_value=keys_file):
+
+            result = runner.invoke(cli, [
+                "add-brother",
+                "--name", "oppy",
+                "--ssh", "ian@masuda",
+                "--working-dir", "~/projects/OMTRA",
+                "--ember",
+                "--ember-port", "8100",
+                "-y",
+            ])
+
+        assert result.exit_code == 0, result.output
+        assert "Ember" in result.output
+
+        # Config was saved with ember fields
+        mock_save.assert_called_once()
+        saved_config = mock_save.call_args[0][0]
+        assert saved_config.brothers["oppy"].ember_host == "100.71.57.52"
+        assert saved_config.brothers["oppy"].ember_port == 8100
 
 
 class TestStatus:

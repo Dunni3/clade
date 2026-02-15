@@ -151,6 +151,27 @@ def doctor() -> None:
                 _fail(f"Cannot reach Hearth from {bro.ssh}")
                 issues += 1
 
+        # Ember server
+        if bro.ember_host and bro.ember_port:
+            # HTTP health check
+            if _check_ember(bro.ember_host, bro.ember_port):
+                _pass(f"Ember: http://{bro.ember_host}:{bro.ember_port}/health responding")
+            else:
+                _fail(f"Ember: http://{bro.ember_host}:{bro.ember_port}/health not responding")
+                issues += 1
+
+            # systemd service check via SSH
+            svc_result = run_remote(
+                bro.ssh,
+                "systemctl is-active clade-ember 2>/dev/null || echo inactive",
+                timeout=10,
+            )
+            if svc_result.success and "active" == svc_result.stdout.strip():
+                _pass("Ember service: active")
+            else:
+                status = svc_result.stdout.strip() if svc_result.success else "unknown"
+                _warn(f"Ember service: {status}")
+
     # Summary
     click.echo()
     if issues == 0:
@@ -158,6 +179,15 @@ def doctor() -> None:
     else:
         click.echo(click.style(f"{issues} issue(s) found.", fg="red", bold=True))
     raise SystemExit(0 if issues == 0 else 1)
+
+
+def _check_ember(host: str, port: int) -> bool:
+    """Check if an Ember server is responding."""
+    try:
+        resp = httpx.get(f"http://{host}:{port}/health", timeout=5)
+        return resp.status_code == 200
+    except Exception:
+        return False
 
 
 def _check_server(url: str) -> bool:
