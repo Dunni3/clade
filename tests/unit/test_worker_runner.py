@@ -1,0 +1,210 @@
+"""Tests for the local tmux task runner."""
+
+import os
+import subprocess
+from unittest.mock import patch, MagicMock
+
+import pytest
+
+from clade.worker.runner import (
+    LocalTaskResult,
+    build_runner_script,
+    launch_local_task,
+    check_tmux_session,
+    list_tmux_sessions,
+)
+
+
+class TestBuildRunnerScript:
+    def test_creates_temp_files(self):
+        prompt_path, runner_path = build_runner_script(
+            "task-oppy-test-123", None, "Do the thing"
+        )
+        try:
+            assert os.path.exists(prompt_path)
+            assert os.path.exists(runner_path)
+            # Prompt file has the prompt
+            with open(prompt_path) as f:
+                assert f.read() == "Do the thing"
+            # Runner script is executable
+            assert os.access(runner_path, os.X_OK)
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_runner_contains_claude_command(self):
+        prompt_path, runner_path = build_runner_script(
+            "task-oppy-test-123", None, "hello"
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "claude -p" in content
+            assert "--dangerously-skip-permissions" in content
+            assert prompt_path in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_working_dir(self):
+        prompt_path, runner_path = build_runner_script(
+            "sess", "~/projects/test", "hello"
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "cd ~/projects/test" in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_no_working_dir(self):
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello"
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "cd " not in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_max_turns(self):
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello", max_turns=25
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "--max-turns 25" in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_env_vars_with_task_id(self):
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello",
+            task_id=42,
+            hearth_url="https://example.com",
+            hearth_api_key="secret",
+            hearth_name="oppy",
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "export CLAUDE_TASK_ID=42" in content
+            assert "export HEARTH_URL='https://example.com'" in content
+            assert "export HEARTH_API_KEY='secret'" in content
+            assert "export HEARTH_NAME='oppy'" in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_no_env_vars_without_task_id(self):
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello"
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "CLAUDE_TASK_ID" not in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_self_cleanup(self):
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello"
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "rm -f" in content
+            assert prompt_path in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+
+class TestLaunchLocalTask:
+    @patch("clade.worker.runner.subprocess.run")
+    @patch("clade.worker.runner.build_runner_script")
+    def test_success(self, mock_build, mock_run):
+        mock_build.return_value = ("/tmp/prompt.txt", "/tmp/runner.sh")
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        result = launch_local_task("task-oppy-test-123", None, "do stuff")
+        assert result.success is True
+        assert result.session_name == "task-oppy-test-123"
+
+    @patch("clade.worker.runner.subprocess.run")
+    @patch("clade.worker.runner.build_runner_script")
+    def test_tmux_failure(self, mock_build, mock_run):
+        mock_build.return_value = ("/tmp/prompt.txt", "/tmp/runner.sh")
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="duplicate session"
+        )
+        # Mock os.unlink to not fail on non-existent files
+        with patch("clade.worker.runner.os.unlink"):
+            result = launch_local_task("task-oppy-test-123", None, "do stuff")
+        assert result.success is False
+        assert "code 1" in result.message
+
+    @patch("clade.worker.runner.subprocess.run")
+    @patch("clade.worker.runner.build_runner_script")
+    def test_exception_cleanup(self, mock_build, mock_run):
+        mock_build.return_value = ("/tmp/prompt.txt", "/tmp/runner.sh")
+        mock_run.side_effect = OSError("tmux not found")
+        with patch("clade.worker.runner.os.unlink") as mock_unlink:
+            result = launch_local_task("task-test", None, "do stuff")
+        assert result.success is False
+        assert "tmux" in result.message.lower()
+        # Should try to clean up both files
+        assert mock_unlink.call_count == 2
+
+
+class TestCheckTmuxSession:
+    @patch("clade.worker.runner.subprocess.run")
+    def test_exists(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        assert check_tmux_session("task-oppy-123") is True
+
+    @patch("clade.worker.runner.subprocess.run")
+    def test_not_exists(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="no session"
+        )
+        assert check_tmux_session("task-oppy-123") is False
+
+    @patch("clade.worker.runner.subprocess.run")
+    def test_exception(self, mock_run):
+        mock_run.side_effect = OSError("tmux not found")
+        assert check_tmux_session("task-oppy-123") is False
+
+
+class TestListTmuxSessions:
+    @patch("clade.worker.runner.subprocess.run")
+    def test_returns_matching_sessions(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="task-oppy-review-123\ntask-jerry-fix-456\nother-session\n",
+            stderr=""
+        )
+        result = list_tmux_sessions(prefix="task-")
+        assert result == ["task-oppy-review-123", "task-jerry-fix-456"]
+
+    @patch("clade.worker.runner.subprocess.run")
+    def test_no_sessions(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="no server running"
+        )
+        assert list_tmux_sessions() == []
+
+    @patch("clade.worker.runner.subprocess.run")
+    def test_exception(self, mock_run):
+        mock_run.side_effect = OSError("tmux not found")
+        assert list_tmux_sessions() == []

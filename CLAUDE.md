@@ -30,15 +30,21 @@ clade/
 │   │   └── mailbox_client.py      # MailboxClient (messages + tasks API)
 │   ├── tasks/                     # SSH task delegation
 │   │   └── ssh_task.py            # build_remote_script, wrap_prompt, initiate_task
+│   ├── worker/                    # Ember server (HTTP-based task execution on workers)
+│   │   ├── auth.py                # Bearer token auth (reuses HEARTH_API_KEY)
+│   │   ├── runner.py              # Local tmux task launcher (like ssh_task without SSH)
+│   │   ├── ember.py               # FastAPI Ember server (endpoints + in-memory state)
+│   │   └── client.py              # EmberClient (httpx client for Ember API)
 │   ├── utils/                     # Shared utilities
 │   │   └── timestamp.py           # format_timestamp (timezone-aware, human-friendly)
 │   ├── mcp/                       # MCP server definitions
-│   │   ├── server_full.py         # Personal Brother server (Doot: terminal + mailbox + tasks)
-│   │   ├── server_lite.py         # Worker Brother server (Oppy/Jerry: mailbox + tasks only)
+│   │   ├── server_full.py         # Personal Brother server (Doot: terminal + mailbox + tasks + ember)
+│   │   ├── server_lite.py         # Worker Brother server (Oppy/Jerry: mailbox + tasks + ember only)
 │   │   └── tools/
 │   │       ├── terminal_tools.py  # spawn_terminal, connect_to_brother
 │   │       ├── mailbox_tools.py   # send/check/read/browse/unread + task list/get/update
-│   │       └── task_tools.py      # initiate_ssh_task (Doot only)
+│   │       ├── task_tools.py      # initiate_ssh_task (Doot only)
+│   │       └── ember_tools.py     # check_ember_health, list_ember_tasks
 │   └── web/                       # Web app backend (unused currently)
 ├── hearth/                        # Hearth API server (FastAPI + SQLite, deployed on EC2)
 │   ├── app.py                     # FastAPI routes (/api/v1/messages, /api/v1/tasks, etc.)
@@ -53,6 +59,7 @@ clade/
 ├── deploy/                        # Deployment and infrastructure scripts
 │   ├── setup.sh                   # EC2 server provisioning
 │   ├── ec2.sh                     # EC2 instance management (start/stop/status/ssh)
+│   ├── ember.service              # systemd unit for Ember server on masuda
 │   ├── cluster-tailscale-setup.sh # One-time Tailscale bootstrap for SLURM clusters
 │   ├── cluster-tailscale-job.sh   # SLURM job that runs Tailscale (sbatch script)
 │   └── cluster-tailscale-start.sh # Submit/stop the Tailscale SLURM job
@@ -61,10 +68,11 @@ clade/
 └── HEARTH_SETUP.md                # Self-setup guide for brothers
 ```
 
-**Three entry points** (defined in `pyproject.toml`):
+**Four entry points** (defined in `pyproject.toml`):
 - `clade` — CLI for setup and management (`cli/main.py`)
-- `clade-personal` — Full MCP server: terminal spawning + mailbox + task delegation
-- `clade-worker` — Lite MCP server: mailbox communication + task visibility/updates only
+- `clade-personal` — Full MCP server: terminal spawning + mailbox + task delegation + ember
+- `clade-worker` — Lite MCP server: mailbox communication + task visibility/updates + ember
+- `clade-ember` — Ember server: HTTP listener for task execution on worker machines
 
 ## CLI Commands
 
@@ -106,10 +114,14 @@ Each brother gets an identity section in their `~/.claude/CLAUDE.md`, telling th
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
 - `initiate_ssh_task(brother, prompt, subject?, max_turns?, auto_pull?)` — Delegate a task via SSH + tmux
 - `list_tasks(assignee?, status?, limit?)` — Browse tasks
+- `check_ember_health(url?)` — Check Ember server health (optional URL for ad-hoc checks)
+- `list_ember_tasks()` — List active tasks and orphaned tmux sessions on configured Ember
 
 ### Brothers' tools (clade-worker)
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
 - `list_tasks`, `get_task`, `update_task` — Task visibility and status updates
+- `check_ember_health(url?)` — Check local Ember server health
+- `list_ember_tasks()` — List active tasks on local Ember
 
 ## Task Delegation System
 
@@ -131,6 +143,46 @@ Doot can delegate tasks to brothers via SSH. The flow:
 **Task lifecycle:** `pending` -> `launched` -> `in_progress` -> `completed` / `failed`
 
 Key file: `src/clade/tasks/ssh_task.py` — contains `build_remote_script()`, `wrap_prompt()`, `initiate_task()`
+
+## Ember Server (HTTP-based Task Execution)
+
+An **Ember** is a lightweight HTTP server running on a worker brother's machine that accepts task execution requests. It replaces SSH-based delegation with HTTP triggers, enabling the future Conductor (Kamaji) to orchestrate tasks without SSH access.
+
+**Architecture:** The Ember is a separate process from the `clade-worker` MCP server. The MCP server's lifecycle is tied to a Claude Code session (stdio transport). The Ember runs 24/7, waiting for incoming task requests even when no Claude session is active.
+
+**Key files:**
+- `src/clade/worker/ember.py` — FastAPI app with endpoints
+- `src/clade/worker/runner.py` — Local tmux launcher (reuses `generate_session_name()` and `wrap_prompt()` from `ssh_task.py`)
+- `src/clade/worker/auth.py` — Bearer token auth
+- `src/clade/worker/client.py` — `EmberClient` for calling Ember APIs
+
+**Endpoints:**
+| Endpoint | Auth | Purpose |
+|----------|------|---------|
+| `GET /health` | No | Liveness check (brother name, active tasks, uptime) |
+| `POST /tasks/execute` | Yes (202) | Launch a Claude Code tmux session. Returns busy error if already running a task. |
+| `GET /tasks/active` | Yes | Active task info + orphaned tmux sessions |
+
+**Authentication:** Embers reuse the brother's Hearth API key (`HEARTH_API_KEY` env var) — no separate Ember key needed. Doot authenticates to a remote Ember using the brother's Hearth key (from `keys.json`). Workers authenticate to their local Ember using their own Hearth key.
+
+**Env vars** (for the Ember server process):
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `EMBER_PORT` | No | `8100` | HTTP port |
+| `EMBER_HOST` | No | `0.0.0.0` | Bind address |
+| `EMBER_BROTHER_NAME` | No | `oppy` | Self-identification |
+| `EMBER_WORKING_DIR` | No | — | Default working dir for tasks |
+| `HEARTH_API_KEY` | Yes | — | Auth token (validated for incoming requests, also passed to spawned Claude sessions) |
+| `HEARTH_URL` | No | — | Passed to spawned Claude sessions |
+| `HEARTH_NAME` | No | — | Passed to spawned Claude sessions |
+
+**MCP env vars** (for Ember *client* in MCP servers):
+- Workers: `EMBER_URL=http://localhost:8100` (local Ember, uses existing `HEARTH_API_KEY`)
+- Doot: `EMBER_URL=http://100.71.57.52:8100` + `EMBER_API_KEY=<brother's Hearth key>`
+
+**In-memory state:** `TaskState` tracks one active task. No DB — the Hearth is source of truth. `is_busy()` checks tmux liveness and auto-clears stale tasks.
+
+**Deployment:** `deploy/ember.service` — systemd unit for masuda (Oppy). Phase 1 is Oppy only; Jerry stays SSH-only.
 
 ## The Hearth (Communication Hub)
 

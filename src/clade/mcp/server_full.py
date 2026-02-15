@@ -5,6 +5,8 @@ from mcp.server.fastmcp import FastMCP
 
 from ..communication.mailbox_client import MailboxClient
 from ..core.config import load_config
+from ..worker.client import EmberClient
+from .tools.ember_tools import create_ember_tools
 from .tools.mailbox_tools import create_mailbox_tools
 from .tools.task_tools import create_task_tools
 from .tools.terminal_tools import create_terminal_tools
@@ -33,6 +35,13 @@ create_mailbox_tools(mcp, _mailbox)
 
 # Register task delegation tools (pass URL/key for hook-based task logging)
 create_task_tools(mcp, _mailbox, config, mailbox_url=_hearth_url, mailbox_api_key=_hearth_api_key)
+
+# Setup Ember client if configured
+# Doot uses EMBER_API_KEY (set to the brother's Hearth key) to authenticate to remote Embers
+_ember_url = os.environ.get("EMBER_URL")
+_ember_api_key = os.environ.get("EMBER_API_KEY")
+_ember = EmberClient(_ember_url, _ember_api_key, verify_ssl=False) if _ember_url and _ember_api_key else None
+create_ember_tools(mcp, _ember)
 
 
 def main():
