@@ -60,6 +60,20 @@ CREATE TABLE IF NOT EXISTS api_keys (
     key        TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
+
+CREATE TABLE IF NOT EXISTS thrums (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    creator      TEXT NOT NULL,
+    title        TEXT NOT NULL DEFAULT '',
+    goal         TEXT NOT NULL DEFAULT '',
+    plan         TEXT,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    priority     TEXT NOT NULL DEFAULT 'normal',
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    started_at   TEXT,
+    completed_at TEXT,
+    output       TEXT
+);
 """
 
 
@@ -79,6 +93,13 @@ async def init_db() -> None:
         try:
             await db.execute(
                 "ALTER TABLE messages ADD COLUMN task_id INTEGER REFERENCES tasks(id)"
+            )
+        except Exception:
+            pass  # Column already exists
+        # Migration: add thrum_id to tasks
+        try:
+            await db.execute(
+                "ALTER TABLE tasks ADD COLUMN thrum_id INTEGER REFERENCES thrums(id)"
             )
         except Exception:
             pass  # Column already exists
@@ -435,13 +456,14 @@ async def insert_task(
     session_name: str | None = None,
     host: str | None = None,
     working_dir: str | None = None,
+    thrum_id: int | None = None,
 ) -> int:
     db = await get_db()
     try:
         cursor = await db.execute(
-            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (creator, assignee, subject, prompt, session_name, host, working_dir),
+            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, thrum_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (creator, assignee, subject, prompt, session_name, host, working_dir, thrum_id),
         )
         await db.commit()
         return cursor.lastrowid
@@ -471,7 +493,7 @@ async def get_tasks(
             params.append(creator)
         where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
         sql = f"""
-            SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at
+            SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, thrum_id
             FROM tasks
             {where_sql}
             ORDER BY created_at DESC
@@ -638,6 +660,143 @@ async def delete_api_key(name: str) -> bool:
         cursor = await db.execute(
             "DELETE FROM api_keys WHERE name = ?", (name,)
         )
+        await db.commit()
+        return cursor.rowcount > 0
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# Thrums
+# ---------------------------------------------------------------------------
+
+
+async def insert_thrum(
+    creator: str,
+    title: str = "",
+    goal: str = "",
+    plan: str | None = None,
+    priority: str = "normal",
+) -> int:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """INSERT INTO thrums (creator, title, goal, plan, priority)
+               VALUES (?, ?, ?, ?, ?)""",
+            (creator, title, goal, plan, priority),
+        )
+        await db.commit()
+        return cursor.lastrowid
+    finally:
+        await db.close()
+
+
+async def get_thrums(
+    *,
+    status: str | None = None,
+    creator: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    db = await get_db()
+    try:
+        where_clauses: list[str] = []
+        params: list = []
+        if status:
+            where_clauses.append("status = ?")
+            params.append(status)
+        if creator:
+            where_clauses.append("creator = ?")
+            params.append(creator)
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        sql = f"""
+            SELECT id, creator, title, goal, status, priority, created_at, started_at, completed_at
+            FROM thrums
+            {where_sql}
+            ORDER BY created_at DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        cursor = await db.execute(sql, params)
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+async def get_thrum(thrum_id: int) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM thrums WHERE id = ?", (thrum_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        thrum = dict(row)
+
+        # Get linked tasks
+        cursor = await db.execute(
+            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, thrum_id
+               FROM tasks WHERE thrum_id = ? ORDER BY created_at ASC""",
+            (thrum_id,),
+        )
+        task_rows = await cursor.fetchall()
+        thrum["tasks"] = [dict(r) for r in task_rows]
+
+        return thrum
+    finally:
+        await db.close()
+
+
+async def update_thrum(
+    thrum_id: int,
+    *,
+    title: str | None = None,
+    goal: str | None = None,
+    plan: str | None = None,
+    status: str | None = None,
+    priority: str | None = None,
+    output: str | None = None,
+    started_at: str | None = None,
+    completed_at: str | None = None,
+) -> dict | None:
+    db = await get_db()
+    try:
+        updates: list[str] = []
+        params: list = []
+        for field, value in [
+            ("title", title),
+            ("goal", goal),
+            ("plan", plan),
+            ("status", status),
+            ("priority", priority),
+            ("output", output),
+            ("started_at", started_at),
+            ("completed_at", completed_at),
+        ]:
+            if value is not None:
+                updates.append(f"{field} = ?")
+                params.append(value)
+
+        if updates:
+            params.append(thrum_id)
+            query = f"UPDATE thrums SET {', '.join(updates)} WHERE id = ?"
+            cursor = await db.execute(query, params)
+            if cursor.rowcount == 0:
+                return None
+            await db.commit()
+
+        return await get_thrum(thrum_id)
+    finally:
+        await db.close()
+
+
+async def delete_thrum(thrum_id: int) -> bool:
+    db = await get_db()
+    try:
+        # Unlink tasks (set thrum_id to NULL)
+        await db.execute(
+            "UPDATE tasks SET thrum_id = NULL WHERE thrum_id = ?", (thrum_id,)
+        )
+        cursor = await db.execute("DELETE FROM thrums WHERE id = ?", (thrum_id,))
         await db.commit()
         return cursor.rowcount > 0
     finally:

@@ -83,6 +83,7 @@ class CreateTaskRequest(BaseModel):
     session_name: str | None = None
     host: str | None = None
     working_dir: str | None = None
+    thrum_id: int | None = None
 
 
 class UpdateTaskRequest(BaseModel):
@@ -99,6 +100,7 @@ class TaskSummary(BaseModel):
     created_at: str
     started_at: str | None = None
     completed_at: str | None = None
+    thrum_id: int | None = None
 
 
 class TaskDetail(TaskSummary):
@@ -150,3 +152,45 @@ class RegisterKeyResponse(BaseModel):
 class KeyInfo(BaseModel):
     name: str
     created_at: str
+
+
+# -- Thrums --
+
+
+class CreateThrumRequest(BaseModel):
+    title: str = ""
+    goal: str = ""
+    plan: str | None = None
+    priority: str = "normal"
+
+
+class UpdateThrumRequest(BaseModel):
+    title: str | None = None
+    goal: str | None = None
+    plan: str | None = None
+    status: str | None = None
+    priority: str | None = None
+    output: str | None = None
+
+
+class ThrumSummary(BaseModel):
+    id: int
+    creator: str
+    title: str
+    goal: str
+    status: str
+    priority: str
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
+class ThrumDetail(ThrumSummary):
+    plan: str | None = None
+    output: str | None = None
+    tasks: list[TaskSummary] = []
+
+
+class CreateThrumResponse(BaseModel):
+    id: int
+    message: str = "Thrum created"

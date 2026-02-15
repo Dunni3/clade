@@ -5,6 +5,8 @@ from fastapi import Header, HTTPException
 from . import db
 from .config import API_KEYS
 
+ADMIN_NAMES = frozenset({"ian", "doot", "kamaji"})
+
 
 async def resolve_sender(authorization: str = Header(...)) -> str:
     """Extract brother name from Authorization: Bearer <key> header."""

@@ -1,0 +1,209 @@
+"""Conductor-specific MCP tool definitions for task delegation via Ember."""
+
+from __future__ import annotations
+
+from mcp.server.fastmcp import FastMCP
+
+from ...communication.mailbox_client import MailboxClient
+from ...worker.client import EmberClient
+
+
+_NOT_CONFIGURED = "Conductor not configured. Ensure HEARTH_URL and HEARTH_API_KEY are set."
+
+
+def create_conductor_tools(
+    mcp: FastMCP,
+    mailbox: MailboxClient | None,
+    worker_registry: dict[str, dict],
+    hearth_url: str | None = None,
+    hearth_api_key: str | None = None,
+) -> dict:
+    """Register conductor tools with an MCP server.
+
+    Args:
+        mcp: FastMCP server instance to register tools with
+        mailbox: MailboxClient instance, or None if not configured
+        worker_registry: Dict of worker names to config dicts with keys:
+            ember_url, ember_api_key, working_dir (optional)
+        hearth_url: Hearth URL to pass to spawned worker sessions
+        hearth_api_key: Not passed to workers — workers use their own key
+
+    Returns:
+        Dict mapping tool names to their callable functions (for testing).
+    """
+
+    def _get_ember_client(brother: str) -> EmberClient | None:
+        worker = worker_registry.get(brother)
+        if not worker:
+            return None
+        url = worker.get("ember_url")
+        key = worker.get("ember_api_key")
+        if not url or not key:
+            return None
+        return EmberClient(url, key, verify_ssl=False)
+
+    @mcp.tool()
+    async def delegate_task(
+        brother: str,
+        prompt: str,
+        subject: str = "",
+        thrum_id: int | None = None,
+        working_dir: str | None = None,
+        max_turns: int = 50,
+    ) -> str:
+        """Delegate a task to a worker brother via their Ember server.
+
+        Creates a task in the Hearth, sends it to the worker's Ember, and
+        updates the task status.
+
+        Args:
+            brother: Worker name (e.g. "oppy").
+            prompt: The task prompt/instructions.
+            subject: Short description of the task.
+            thrum_id: Optional thrum ID to link this task to.
+            working_dir: Override the worker's default working directory.
+            max_turns: Maximum Claude turns for the task.
+        """
+        if mailbox is None:
+            return _NOT_CONFIGURED
+
+        if brother not in worker_registry:
+            available = ", ".join(worker_registry.keys()) or "(none)"
+            return f"Unknown worker '{brother}'. Available workers: {available}"
+
+        worker = worker_registry[brother]
+        ember = _get_ember_client(brother)
+        if ember is None:
+            return f"Worker '{brother}' has no Ember configured."
+
+        # Create task in Hearth
+        try:
+            task_result = await mailbox.create_task(
+                assignee=brother,
+                prompt=prompt,
+                subject=subject,
+                thrum_id=thrum_id,
+            )
+            task_id = task_result["id"]
+        except Exception as e:
+            return f"Error creating task in Hearth: {e}"
+
+        # Send to Ember
+        wd = working_dir or worker.get("working_dir")
+        try:
+            ember_result = await ember.execute_task(
+                prompt=prompt,
+                subject=subject,
+                task_id=task_id,
+                working_dir=wd,
+                max_turns=max_turns,
+                hearth_url=hearth_url,
+                hearth_api_key=worker.get("hearth_api_key"),
+                hearth_name=brother,
+            )
+        except Exception as e:
+            # Mark task as failed
+            try:
+                await mailbox.update_task(task_id, status="failed", output=str(e))
+            except Exception:
+                pass
+            return f"Task #{task_id} created but Ember delegation failed: {e}"
+
+        # Update task status
+        try:
+            await mailbox.update_task(task_id, status="launched")
+        except Exception:
+            pass
+
+        session = ember_result.get("session_name", "?")
+        return (
+            f"Task #{task_id} delegated to {brother}.\n"
+            f"  Subject: {subject or '(none)'}\n"
+            f"  Session: {session}\n"
+            f"  Status: launched"
+        )
+
+    @mcp.tool()
+    async def check_worker_health(brother: str | None = None) -> str:
+        """Check the health of worker Ember servers.
+
+        Args:
+            brother: Specific worker to check. If not provided, checks all workers.
+        """
+        workers = (
+            {brother: worker_registry[brother]}
+            if brother and brother in worker_registry
+            else worker_registry
+        )
+
+        if brother and brother not in worker_registry:
+            return f"Unknown worker '{brother}'."
+
+        if not workers:
+            return "No workers configured."
+
+        lines = []
+        for name, _config in workers.items():
+            ember = _get_ember_client(name)
+            if ember is None:
+                lines.append(f"{name}: No Ember configured")
+                continue
+            try:
+                result = await ember.health()
+                lines.append(
+                    f"{name}: Healthy\n"
+                    f"  Active tasks: {result.get('active_tasks', '?')}\n"
+                    f"  Uptime: {result.get('uptime_seconds', '?')}s"
+                )
+            except Exception as e:
+                lines.append(f"{name}: Unreachable ({e})")
+
+        return "\n\n".join(lines)
+
+    @mcp.tool()
+    async def list_worker_tasks(brother: str | None = None) -> str:
+        """List active tasks on worker Ember servers.
+
+        Args:
+            brother: Specific worker to check. If not provided, checks all workers.
+        """
+        workers = (
+            {brother: worker_registry[brother]}
+            if brother and brother in worker_registry
+            else worker_registry
+        )
+
+        if brother and brother not in worker_registry:
+            return f"Unknown worker '{brother}'."
+
+        if not workers:
+            return "No workers configured."
+
+        lines = []
+        for name, _config in workers.items():
+            ember = _get_ember_client(name)
+            if ember is None:
+                lines.append(f"{name}: No Ember configured")
+                continue
+            try:
+                result = await ember.active_tasks()
+                active = result.get("active_task")
+                if active:
+                    lines.append(
+                        f"{name}: Active\n"
+                        f"  Task ID: {active.get('task_id', 'N/A')}\n"
+                        f"  Subject: {active.get('subject', '(none)')}\n"
+                        f"  Session: {active.get('session_name', '?')}"
+                    )
+                else:
+                    lines.append(f"{name}: Idle")
+            except Exception as e:
+                lines.append(f"{name}: Unreachable ({e})")
+
+        return "\n\n".join(lines)
+
+    return {
+        "delegate_task": delegate_task,
+        "check_worker_health": check_worker_health,
+        "list_worker_tasks": list_worker_tasks,
+    }

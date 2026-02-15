@@ -6,6 +6,7 @@ from unittest.mock import patch
 from clade.cli.identity import (
     MARKER_END,
     MARKER_START,
+    generate_conductor_identity,
     generate_personal_identity,
     generate_worker_identity,
     upsert_identity_section,
@@ -53,6 +54,59 @@ class TestGeneratePersonalIdentity:
         assert "connect_to_brother" in result
         assert "initiate_ssh_task" in result
         assert "send_message" in result
+
+
+class TestGenerateConductorIdentity:
+    def test_basic(self):
+        result = generate_conductor_identity("kamaji", "The Clade")
+        assert MARKER_START in result
+        assert MARKER_END in result
+        assert "**Name:** kamaji" in result
+        assert "**Role:** Conductor" in result
+        assert "clade-conductor" in result
+
+    def test_with_personality(self):
+        result = generate_conductor_identity(
+            "kamaji", "The Clade",
+            personality="Gruff and no-nonsense but quietly kind"
+        )
+        assert "Gruff and no-nonsense" in result
+
+    def test_conductor_tools_listed(self):
+        result = generate_conductor_identity("kamaji", "The Clade")
+        assert "delegate_task" in result
+        assert "check_worker_health" in result
+        assert "list_worker_tasks" in result
+        assert "create_thrum" in result
+        assert "list_thrums" in result
+        assert "get_thrum" in result
+        assert "update_thrum" in result
+        assert "send_message" in result
+
+    def test_with_workers(self):
+        workers = {"oppy": {"description": "The architect"}}
+        result = generate_conductor_identity(
+            "kamaji", "The Clade", workers=workers
+        )
+        assert "## Workers" in result
+        assert "**oppy**" in result
+        assert "The architect" in result
+
+    def test_with_brothers(self):
+        brothers = {
+            "doot": {"role": "coordinator", "description": "Personal assistant"},
+        }
+        result = generate_conductor_identity(
+            "kamaji", "The Clade", brothers=brothers
+        )
+        assert "## Brothers" in result
+        assert "**doot**" in result
+
+    def test_no_personal_tools(self):
+        result = generate_conductor_identity("kamaji", "The Clade")
+        assert "spawn_terminal" not in result
+        assert "connect_to_brother" not in result
+        assert "initiate_ssh_task" not in result
 
 
 class TestGenerateWorkerIdentity:

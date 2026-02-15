@@ -1,0 +1,9 @@
+# Conductor worker registry — Phase 1
+# Maps worker names to their Ember connection details.
+
+workers:
+  oppy:
+    ember_url: "http://100.71.57.52:8100"
+    ember_api_key: "${OPPY_HEARTH_API_KEY}"
+    hearth_api_key: "${OPPY_HEARTH_API_KEY}"
+    working_dir: "~/projects/mol_diffusion/OMTRA_oppy"

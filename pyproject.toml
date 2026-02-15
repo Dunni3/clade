@@ -32,6 +32,7 @@ clade = "clade.cli.main:cli"
 clade-personal = "clade.mcp.server_full:main"
 clade-worker = "clade.mcp.server_lite:main"
 clade-ember = "clade.worker.ember:main"
+clade-conductor = "clade.mcp.server_conductor:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

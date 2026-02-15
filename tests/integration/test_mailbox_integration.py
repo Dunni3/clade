@@ -11,7 +11,7 @@ import pytest
 import pytest_asyncio
 
 # Set test config before importing mailbox modules
-os.environ["MAILBOX_API_KEYS"] = "test-key-doot:doot,test-key-oppy:oppy,test-key-jerry:jerry"
+os.environ["MAILBOX_API_KEYS"] = "test-key-doot:doot,test-key-oppy:oppy,test-key-jerry:jerry,test-key-kamaji:kamaji,test-key-ian:ian"
 
 from httpx import ASGITransport, AsyncClient
 from mcp.server.fastmcp import FastMCP

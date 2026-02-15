@@ -119,3 +119,75 @@ class TestMailboxClient:
         with patch("clade.communication.mailbox_client.httpx.post", return_value=mock_resp):
             result = self.client.register_key_sync("curie", "new-key-123")
             assert result is False
+
+    @pytest.mark.asyncio
+    async def test_create_thrum(self):
+        mock_resp = self._make_mock_resp({"id": 1, "message": "Thrum created"})
+
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(post_resp=mock_resp)
+            MockClient.return_value = instance
+
+            result = await self.client.create_thrum(
+                title="Test", goal="Do stuff", priority="high"
+            )
+            assert result["id"] == 1
+            instance.post.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_thrums(self):
+        mock_resp = self._make_mock_resp([
+            {"id": 1, "creator": "kamaji", "title": "Test", "goal": "",
+             "status": "pending", "priority": "normal",
+             "created_at": "2026-02-15T10:00:00Z",
+             "started_at": None, "completed_at": None}
+        ])
+
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(get_resp=mock_resp)
+            MockClient.return_value = instance
+
+            result = await self.client.get_thrums(status="pending")
+            assert len(result) == 1
+            assert result[0]["creator"] == "kamaji"
+
+    @pytest.mark.asyncio
+    async def test_get_thrum(self):
+        mock_resp = self._make_mock_resp({
+            "id": 1, "creator": "kamaji", "title": "Test", "goal": "Do stuff",
+            "plan": None, "status": "pending", "priority": "normal",
+            "created_at": "2026-02-15T10:00:00Z",
+            "started_at": None, "completed_at": None,
+            "output": None, "tasks": [],
+        })
+
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(get_resp=mock_resp)
+            MockClient.return_value = instance
+
+            result = await self.client.get_thrum(1)
+            assert result["id"] == 1
+            assert result["tasks"] == []
+
+    @pytest.mark.asyncio
+    async def test_update_thrum(self):
+        mock_resp = self._make_mock_resp({
+            "id": 1, "creator": "kamaji", "title": "Test", "goal": "Do stuff",
+            "plan": "Step 1", "status": "active", "priority": "normal",
+            "created_at": "2026-02-15T10:00:00Z",
+            "started_at": "2026-02-15T10:01:00Z", "completed_at": None,
+            "output": None, "tasks": [],
+        })
+
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = AsyncMock()
+            instance.patch.return_value = mock_resp
+            instance.__aenter__ = AsyncMock(return_value=instance)
+            instance.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = instance
+
+            result = await self.client.update_thrum(
+                1, status="active", plan="Step 1"
+            )
+            assert result["status"] == "active"
+            instance.patch.assert_called_once()

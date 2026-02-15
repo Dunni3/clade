@@ -10,10 +10,14 @@ services:
         condition: service_started
       hearth:
         condition: service_started
+      ember:
+        condition: service_started
     environment:
       HEARTH_URL: http://hearth:8000
       HEARTH_API_KEY: testkey-personal
       HEARTH_NAME: testpersonal
+      EMBER_URL: http://ember:8100
+      EMBER_API_KEY: testkey-ember
 
   worker:
     build:
@@ -25,10 +29,45 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.test.hearth
     environment:
-      MAILBOX_API_KEYS: "testkey-personal:testpersonal,testkey-worker:testworker"
+      MAILBOX_API_KEYS: "testkey-personal:testpersonal,testkey-worker:testworker,testkey-ember:testember,testkey-kamaji:kamaji"
       MAILBOX_DB_PATH: "/data/hearth.db"
     volumes:
       - hearth-data:/data
+
+  ember:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.test.worker
+    user: testuser
+    command: ["clade-ember"]
+    depends_on:
+      hearth:
+        condition: service_started
+    environment:
+      EMBER_PORT: "8100"
+      EMBER_HOST: "0.0.0.0"
+      EMBER_BROTHER_NAME: testember
+      EMBER_WORKING_DIR: /home/testuser
+      HEARTH_API_KEY: testkey-ember
+      HEARTH_URL: http://hearth:8000
+      HEARTH_NAME: testember
+
+  conductor:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.test
+    stdin_open: true
+    tty: true
+    depends_on:
+      hearth:
+        condition: service_started
+      ember:
+        condition: service_started
+    environment:
+      HEARTH_URL: http://hearth:8000
+      HEARTH_API_KEY: testkey-kamaji
+      HEARTH_NAME: kamaji
+      CONDUCTOR_WORKERS_CONFIG: /home/testuser/clade/docker/test-conductor-workers.yaml
 
 volumes:
   hearth-data:

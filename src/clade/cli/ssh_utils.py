@@ -106,6 +106,45 @@ class RemotePrereqs:
         return self.python is not None and self.claude and self.tmux and self.git
 
 
+def deploy_clade_remote(host: str, ssh_key: str | None = None) -> SSHResult:
+    """Clone/pull the clade repo and pip install on a remote host.
+
+    Args:
+        host: SSH host string (e.g. 'ian@masuda').
+        ssh_key: Optional path to SSH private key.
+
+    Returns:
+        SSHResult — check for "DEPLOY_OK" in stdout for success.
+    """
+    script = """\
+#!/bin/bash
+set -e
+CLADE_DIR="$HOME/.local/share/clade"
+
+# If clade is already installed, just update it
+if python3 -c "import clade" 2>/dev/null; then
+    if [ -d "$CLADE_DIR/.git" ]; then
+        cd "$CLADE_DIR"
+        git pull --ff-only 2>&1 || true
+        pip install -e . 2>&1 | tail -3
+    fi
+    echo "DEPLOY_OK"
+    exit 0
+fi
+
+if [ -d "$CLADE_DIR/.git" ]; then
+    cd "$CLADE_DIR"
+    git pull --ff-only 2>&1
+else
+    git clone https://github.com/dunni3/clade.git "$CLADE_DIR" 2>&1
+fi
+cd "$CLADE_DIR"
+pip install -e . 2>&1 | tail -3
+echo "DEPLOY_OK"
+"""
+    return run_remote(host, script, ssh_key=ssh_key, timeout=120)
+
+
 def check_remote_prereqs(host: str, ssh_key: str | None = None) -> RemotePrereqs:
     """Check that a remote host has the required tools installed.
 

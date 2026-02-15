@@ -151,7 +151,9 @@ def init_cmd(
     click.echo(click.style("Next steps:", bold=True))
     click.echo("  1. Restart Claude Code to pick up the new config")
     click.echo("  2. Add brothers with: clade add-brother")
-    if not server_url:
+    if server_url:
+        click.echo("  3. Deploy the Conductor with: clade setup-conductor")
+    else:
         click.echo("  3. Set up a Hearth server for inter-brother communication")
 
 

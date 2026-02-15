@@ -15,7 +15,7 @@ from .identity import generate_worker_identity, write_identity_remote
 from .keys import add_key, keys_path, load_keys
 from .mcp_utils import register_mcp_remote
 from .naming import format_suggestion, suggest_name
-from .ssh_utils import check_remote_prereqs, run_remote, test_ssh
+from .ssh_utils import check_remote_prereqs, deploy_clade_remote, run_remote, test_ssh
 
 
 @click.command()
@@ -211,33 +211,7 @@ def add_brother(
 def _deploy_remote(ssh_host: str, name: str) -> None:
     """Clone/pull the clade repo and install on the remote host."""
     click.echo(f"Deploying clade package on {ssh_host}...")
-    script = """\
-#!/bin/bash
-set -e
-CLADE_DIR="$HOME/.local/share/clade"
-
-# If clade is already installed, just update it
-if python3 -c "import clade" 2>/dev/null; then
-    if [ -d "$CLADE_DIR/.git" ]; then
-        cd "$CLADE_DIR"
-        git pull --ff-only 2>&1 || true
-        pip install -e . 2>&1 | tail -3
-    fi
-    echo "DEPLOY_OK"
-    exit 0
-fi
-
-if [ -d "$CLADE_DIR/.git" ]; then
-    cd "$CLADE_DIR"
-    git pull --ff-only 2>&1
-else
-    git clone https://github.com/dunni3/clade.git "$CLADE_DIR" 2>&1
-fi
-cd "$CLADE_DIR"
-pip install -e . 2>&1 | tail -3
-echo "DEPLOY_OK"
-"""
-    result = run_remote(ssh_host, script, timeout=120)
+    result = deploy_clade_remote(ssh_host)
     if result.success and "DEPLOY_OK" in result.stdout:
         click.echo(click.style("  Deploy OK", fg="green"))
     else:

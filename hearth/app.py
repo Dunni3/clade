@@ -7,11 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from . import db
-from .auth import resolve_sender
+from .auth import ADMIN_NAMES, resolve_sender
 from .models import (
     CreateTaskEventRequest,
     CreateTaskRequest,
     CreateTaskResponse,
+    CreateThrumRequest,
+    CreateThrumResponse,
     EditMessageRequest,
     FeedMessage,
     KeyInfo,
@@ -26,8 +28,11 @@ from .models import (
     TaskDetail,
     TaskEvent,
     TaskSummary,
+    ThrumDetail,
+    ThrumSummary,
     UnreadCountResponse,
     UpdateTaskRequest,
+    UpdateThrumRequest,
 )
 
 
@@ -46,6 +51,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _now_utc() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @app.get("/api/v1/health")
@@ -157,10 +168,10 @@ async def edit_message(
     if msg is None:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    if msg["sender"] != caller and caller not in ("doot", "ian"):
+    if msg["sender"] != caller and caller not in ADMIN_NAMES:
         raise HTTPException(
             status_code=403,
-            detail="Only the sender or Ian can edit this message",
+            detail="Only the sender or an admin can edit this message",
         )
 
     updated = await db.update_message(
@@ -181,10 +192,10 @@ async def delete_message(
     if msg is None:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    if msg["sender"] != caller and caller not in ("doot", "ian"):
+    if msg["sender"] != caller and caller not in ADMIN_NAMES:
         raise HTTPException(
             status_code=403,
-            detail="Only the sender or Ian can delete this message",
+            detail="Only the sender or an admin can delete this message",
         )
 
     deleted = await db.delete_message(message_id)
@@ -220,6 +231,7 @@ async def create_task(
         session_name=req.session_name,
         host=req.host,
         working_dir=req.working_dir,
+        thrum_id=req.thrum_id,
     )
     return CreateTaskResponse(id=task_id)
 
@@ -286,7 +298,7 @@ async def update_task(
         raise HTTPException(status_code=404, detail="Task not found")
 
     # Only assignee, creator, or admins can update
-    if caller not in (task["assignee"], task["creator"], "doot", "ian"):
+    if caller not in (task["assignee"], task["creator"]) and caller not in ADMIN_NAMES:
         raise HTTPException(
             status_code=403, detail="Only assignee, creator, or admin can update"
         )
@@ -295,17 +307,9 @@ async def update_task(
     if req.status is not None:
         kwargs["status"] = req.status
         if req.status == "in_progress" and task["started_at"] is None:
-            from datetime import datetime, timezone
-
-            kwargs["started_at"] = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            kwargs["started_at"] = _now_utc()
         if req.status in ("completed", "failed"):
-            from datetime import datetime, timezone
-
-            kwargs["completed_at"] = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            kwargs["completed_at"] = _now_utc()
     if req.output is not None:
         kwargs["output"] = req.output
 
@@ -341,3 +345,94 @@ async def list_keys(
 ):
     """List all registered API key names (never exposes key values)."""
     return await db.list_api_keys()
+
+
+# ---------------------------------------------------------------------------
+# Thrum endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/v1/thrums", response_model=CreateThrumResponse)
+async def create_thrum(
+    req: CreateThrumRequest,
+    caller: str = Depends(resolve_sender),
+):
+    thrum_id = await db.insert_thrum(
+        creator=caller,
+        title=req.title,
+        goal=req.goal,
+        plan=req.plan,
+        priority=req.priority,
+    )
+    return CreateThrumResponse(id=thrum_id)
+
+
+@app.get("/api/v1/thrums", response_model=list[ThrumSummary])
+async def list_thrums(
+    status: str | None = None,
+    creator: str | None = None,
+    limit: int = 50,
+    _caller: str = Depends(resolve_sender),
+):
+    return await db.get_thrums(status=status, creator=creator, limit=limit)
+
+
+@app.get("/api/v1/thrums/{thrum_id}", response_model=ThrumDetail)
+async def get_thrum(
+    thrum_id: int,
+    _caller: str = Depends(resolve_sender),
+):
+    thrum = await db.get_thrum(thrum_id)
+    if thrum is None:
+        raise HTTPException(status_code=404, detail="Thrum not found")
+    return thrum
+
+
+@app.patch("/api/v1/thrums/{thrum_id}", response_model=ThrumDetail)
+async def update_thrum(
+    thrum_id: int,
+    req: UpdateThrumRequest,
+    caller: str = Depends(resolve_sender),
+):
+    thrum = await db.get_thrum(thrum_id)
+    if thrum is None:
+        raise HTTPException(status_code=404, detail="Thrum not found")
+
+    if thrum["creator"] != caller and caller not in ADMIN_NAMES:
+        raise HTTPException(
+            status_code=403, detail="Only creator or admin can update"
+        )
+
+    kwargs: dict = {}
+    if req.status is not None:
+        kwargs["status"] = req.status
+        if req.status in ("planning", "active") and thrum["started_at"] is None:
+            kwargs["started_at"] = _now_utc()
+        if req.status in ("completed", "failed"):
+            kwargs["completed_at"] = _now_utc()
+    for field in ("title", "goal", "plan", "priority", "output"):
+        value = getattr(req, field)
+        if value is not None:
+            kwargs[field] = value
+
+    updated = await db.update_thrum(thrum_id, **kwargs)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Thrum not found")
+    return updated
+
+
+@app.delete("/api/v1/thrums/{thrum_id}", status_code=204)
+async def delete_thrum(
+    thrum_id: int,
+    caller: str = Depends(resolve_sender),
+):
+    """Delete a thrum (admin only)."""
+    if caller not in ADMIN_NAMES:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    thrum = await db.get_thrum(thrum_id)
+    if thrum is None:
+        raise HTTPException(status_code=404, detail="Thrum not found")
+
+    await db.delete_thrum(thrum_id)
+    return Response(status_code=204)

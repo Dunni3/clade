@@ -77,6 +77,89 @@ def generate_personal_identity(
     return "\n".join(lines)
 
 
+def generate_conductor_identity(
+    name: str,
+    clade_name: str,
+    personality: str = "",
+    workers: dict[str, dict] | None = None,
+    brothers: dict[str, dict] | None = None,
+) -> str:
+    """Generate a CLAUDE.md identity section for the conductor.
+
+    Args:
+        name: The conductor's name.
+        clade_name: Name of the clade.
+        personality: Optional personality description.
+        workers: Dict of worker names to info dicts (managed by this conductor).
+        brothers: Dict of all brother names to info dicts.
+
+    Returns:
+        Markdown string wrapped in identity markers.
+    """
+    lines = [
+        MARKER_START,
+        f"# {clade_name} — Identity",
+        "",
+        f"**Name:** {name}",
+        f"**Role:** Conductor",
+        "",
+    ]
+
+    if personality:
+        lines.append(f"**Personality:** {personality}")
+    else:
+        lines.append("**Personality:** No personality description provided.")
+    lines.append("")
+
+    # MCP tools
+    lines.append("## Available Tools (clade-conductor)")
+    lines.append("")
+    lines.append("- `send_message` — Send a message via the Hearth")
+    lines.append("- `check_mailbox` — Check for messages")
+    lines.append("- `read_message` — Read a specific message")
+    lines.append("- `browse_feed` — Browse all messages")
+    lines.append("- `unread_count` — Get unread message count")
+    lines.append("- `list_tasks` — List tasks from the Hearth")
+    lines.append("- `get_task` — Get task details")
+    lines.append("- `update_task` — Update task status")
+    lines.append("- `create_thrum` — Create a new thrum (workflow)")
+    lines.append("- `list_thrums` — List thrums")
+    lines.append("- `get_thrum` — Get thrum details with linked tasks")
+    lines.append("- `update_thrum` — Update thrum status/plan/output")
+    lines.append("- `delegate_task` — Delegate a task to a worker via Ember")
+    lines.append("- `check_worker_health` — Check worker Ember health")
+    lines.append("- `list_worker_tasks` — List active worker tasks")
+    lines.append("")
+
+    # Workers
+    if workers:
+        lines.append("## Workers")
+        lines.append("")
+        for w_name, w_info in workers.items():
+            desc = w_info.get("description", "")
+            entry = f"- **{w_name}**"
+            if desc:
+                entry += f" — {desc}"
+            lines.append(entry)
+        lines.append("")
+
+    # Brothers
+    if brothers:
+        lines.append("## Brothers")
+        lines.append("")
+        for bro_name, bro_info in brothers.items():
+            desc = bro_info.get("description", "")
+            role = bro_info.get("role", "worker")
+            entry = f"- **{bro_name}** ({role})"
+            if desc:
+                entry += f" — {desc}"
+            lines.append(entry)
+        lines.append("")
+
+    lines.append(MARKER_END)
+    return "\n".join(lines)
+
+
 def generate_worker_identity(
     name: str,
     clade_name: str,

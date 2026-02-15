@@ -131,6 +131,7 @@ class MailboxClient:
         session_name: str | None = None,
         host: str | None = None,
         working_dir: str | None = None,
+        thrum_id: int | None = None,
     ) -> dict:
         payload: dict = {"assignee": assignee, "prompt": prompt, "subject": subject}
         if session_name is not None:
@@ -139,6 +140,8 @@ class MailboxClient:
             payload["host"] = host
         if working_dir is not None:
             payload["working_dir"] = working_dir
+        if thrum_id is not None:
+            payload["thrum_id"] = thrum_id
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.post(
                 self._url("/tasks"),
@@ -212,6 +215,90 @@ class MailboxClient:
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.patch(
                 self._url(f"/tasks/{task_id}"),
+                json=payload,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    # -- Thrums --
+
+    async def create_thrum(
+        self,
+        title: str = "",
+        goal: str = "",
+        plan: str | None = None,
+        priority: str = "normal",
+    ) -> dict:
+        payload: dict = {"title": title, "goal": goal, "priority": priority}
+        if plan is not None:
+            payload["plan"] = plan
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.post(
+                self._url("/thrums"),
+                json=payload,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_thrums(
+        self,
+        status: str | None = None,
+        creator: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        params: dict = {"limit": limit}
+        if status:
+            params["status"] = status
+        if creator:
+            params["creator"] = creator
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url("/thrums"),
+                params=params,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_thrum(self, thrum_id: int) -> dict:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url(f"/thrums/{thrum_id}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def update_thrum(
+        self,
+        thrum_id: int,
+        title: str | None = None,
+        goal: str | None = None,
+        plan: str | None = None,
+        status: str | None = None,
+        priority: str | None = None,
+        output: str | None = None,
+    ) -> dict:
+        payload: dict = {}
+        for field, value in [
+            ("title", title),
+            ("goal", goal),
+            ("plan", plan),
+            ("status", status),
+            ("priority", priority),
+            ("output", output),
+        ]:
+            if value is not None:
+                payload[field] = value
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.patch(
+                self._url(f"/thrums/{thrum_id}"),
                 json=payload,
                 headers=self.headers,
                 timeout=10,
