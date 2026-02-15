@@ -21,6 +21,7 @@ from .naming import format_suggestion, suggest_name
 @click.option("--server-url", default=None, help="Hearth server URL")
 @click.option("--server-ssh", default=None, help="Hearth server SSH (e.g. ubuntu@host)")
 @click.option("--server-ssh-key", default=None, help="SSH key for the server")
+@click.option("--server-key", default=None, help="Existing API key for bootstrapping registration with the Hearth")
 @click.option("--no-mcp", is_flag=True, help="Skip MCP registration in ~/.claude.json")
 @click.option("--no-identity", is_flag=True, help="Skip writing identity to CLAUDE.md")
 @click.option("--yes", "-y", is_flag=True, help="Accept defaults without prompting")
@@ -34,6 +35,7 @@ def init_cmd(
     server_url: str | None,
     server_ssh: str | None,
     server_ssh_key: str | None,
+    server_key: str | None,
     no_mcp: bool,
     no_identity: bool,
     yes: bool,
@@ -93,10 +95,17 @@ def init_cmd(
             server_url = click.prompt("Server URL (e.g. https://your-server.com)")
             server_ssh = click.prompt("Server SSH (e.g. ubuntu@your-server.com)", default="")
             server_ssh_key = click.prompt("SSH key path (optional)", default="")
+            if server_key is None:
+                server_key = click.prompt(
+                    "Bootstrap API key (existing key for initial registration, Enter to skip)",
+                    default="",
+                )
             if not server_ssh:
                 server_ssh = None
             if not server_ssh_key:
                 server_ssh_key = None
+            if not server_key:
+                server_key = None
 
     # Build config
     config = CladeConfig(
@@ -117,6 +126,10 @@ def init_cmd(
     kp = keys_path(config_dir)
     key = add_key(personal_name, kp)
     click.echo(f"API key for '{personal_name}' saved to {kp}")
+
+    # Register API key with the Hearth
+    if server_url and server_key:
+        _register_key_with_hearth(server_url, server_key, personal_name, key)
 
     # Register MCP server
     if not no_mcp:
@@ -167,3 +180,28 @@ def _register_personal_mcp(
         env=env if env else None,
     )
     click.echo(f"Registered '{server_name}' MCP server in ~/.claude.json")
+
+
+def _register_key_with_hearth(
+    server_url: str,
+    bootstrap_key: str,
+    name: str,
+    api_key: str,
+) -> None:
+    """Register a newly generated API key with the Hearth server."""
+    from ..communication.mailbox_client import MailboxClient
+
+    verify_ssl = server_url.startswith("https")
+    client = MailboxClient(server_url, bootstrap_key, verify_ssl=verify_ssl)
+    try:
+        ok = client.register_key_sync(name, api_key)
+        if ok:
+            click.echo(f"Registered '{name}' key with the Hearth")
+        else:
+            click.echo(
+                click.style(f"  Warning: failed to register key with Hearth", fg="yellow")
+            )
+    except Exception as e:
+        click.echo(
+            click.style(f"  Warning: could not reach Hearth to register key: {e}", fg="yellow")
+        )

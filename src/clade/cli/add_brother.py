@@ -11,7 +11,7 @@ from .clade_config import (
     save_clade_config,
 )
 from .identity import generate_worker_identity, write_identity_remote
-from .keys import add_key, keys_path
+from .keys import add_key, keys_path, load_keys
 from .mcp_utils import register_mcp_remote
 from .naming import format_suggestion, suggest_name
 from .ssh_utils import check_remote_prereqs, run_remote, test_ssh
@@ -135,6 +135,10 @@ def add_brother(
     api_key = add_key(name, kp)
     click.echo(f"API key for '{name}' saved to {kp}")
 
+    # Register API key with the Hearth
+    if config.server_url:
+        _register_key_with_hearth(config.server_url, config.personal_name, name, api_key, kp)
+
     # Register MCP on remote
     if not no_mcp and ssh_result.success:
         _register_remote_mcp(ssh_host, name, api_key, config.server_url)
@@ -188,6 +192,18 @@ def _deploy_remote(ssh_host: str, name: str) -> None:
 #!/bin/bash
 set -e
 CLADE_DIR="$HOME/.local/share/clade"
+
+# If clade is already installed, just update it
+if python3 -c "import clade" 2>/dev/null; then
+    if [ -d "$CLADE_DIR/.git" ]; then
+        cd "$CLADE_DIR"
+        git pull --ff-only 2>&1 || true
+        pip install -e . 2>&1 | tail -3
+    fi
+    echo "DEPLOY_OK"
+    exit 0
+fi
+
 if [ -d "$CLADE_DIR/.git" ]; then
     cd "$CLADE_DIR"
     git pull --ff-only 2>&1
@@ -270,3 +286,40 @@ def _write_remote_identity(
         click.echo(click.style("  Identity written", fg="green"))
     else:
         click.echo(click.style(f"  Identity write failed: {result.message}", fg="red"))
+
+
+def _register_key_with_hearth(
+    server_url: str,
+    personal_name: str,
+    brother_name: str,
+    brother_key: str,
+    kp,
+) -> None:
+    """Register the brother's API key with the Hearth using the personal brother's key."""
+    from ..communication.mailbox_client import MailboxClient
+
+    keys = load_keys(kp)
+    personal_key = keys.get(personal_name)
+    if not personal_key:
+        click.echo(
+            click.style(
+                f"  Warning: no API key found for '{personal_name}' — cannot register with Hearth",
+                fg="yellow",
+            )
+        )
+        return
+
+    verify_ssl = server_url.startswith("https")
+    client = MailboxClient(server_url, personal_key, verify_ssl=verify_ssl)
+    try:
+        ok = client.register_key_sync(brother_name, brother_key)
+        if ok:
+            click.echo(f"Registered '{brother_name}' key with the Hearth")
+        else:
+            click.echo(
+                click.style(f"  Warning: failed to register key with Hearth", fg="yellow")
+            )
+    except Exception as e:
+        click.echo(
+            click.style(f"  Warning: could not reach Hearth to register key: {e}", fg="yellow")
+        )

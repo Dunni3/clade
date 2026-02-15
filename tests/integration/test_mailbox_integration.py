@@ -618,6 +618,68 @@ class TestMCPToolsWithMock:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# db.py — API keys
+# ---------------------------------------------------------------------------
+
+
+class TestDatabaseApiKeys:
+    @pytest.mark.asyncio
+    async def test_insert_and_lookup(self):
+        ok = await mailbox_db.insert_api_key("curie", "secret-key-curie")
+        assert ok is True
+        name = await mailbox_db.get_api_key_by_key("secret-key-curie")
+        assert name == "curie"
+
+    @pytest.mark.asyncio
+    async def test_lookup_not_found(self):
+        name = await mailbox_db.get_api_key_by_key("nonexistent-key")
+        assert name is None
+
+    @pytest.mark.asyncio
+    async def test_duplicate_name(self):
+        await mailbox_db.insert_api_key("curie", "key-1")
+        ok = await mailbox_db.insert_api_key("curie", "key-2")
+        assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_duplicate_key(self):
+        await mailbox_db.insert_api_key("curie", "same-key")
+        ok = await mailbox_db.insert_api_key("darwin", "same-key")
+        assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_list_keys(self):
+        await mailbox_db.insert_api_key("curie", "key-1")
+        await mailbox_db.insert_api_key("darwin", "key-2")
+        keys = await mailbox_db.list_api_keys()
+        assert len(keys) == 2
+        names = [k["name"] for k in keys]
+        assert "curie" in names
+        assert "darwin" in names
+        # Should NOT contain the actual key values
+        for k in keys:
+            assert "key" not in k or k.get("key") is None
+
+    @pytest.mark.asyncio
+    async def test_list_keys_empty(self):
+        keys = await mailbox_db.list_api_keys()
+        assert keys == []
+
+    @pytest.mark.asyncio
+    async def test_delete_key(self):
+        await mailbox_db.insert_api_key("curie", "key-1")
+        deleted = await mailbox_db.delete_api_key("curie")
+        assert deleted is True
+        name = await mailbox_db.get_api_key_by_key("key-1")
+        assert name is None
+
+    @pytest.mark.asyncio
+    async def test_delete_key_not_found(self):
+        deleted = await mailbox_db.delete_api_key("nonexistent")
+        assert deleted is False
+
+
 class TestDatabaseReadTracking:
     @pytest.mark.asyncio
     async def test_record_read(self):
@@ -819,6 +881,117 @@ class TestDatabaseGetMessageAny:
 # ---------------------------------------------------------------------------
 # FastAPI — feed and view endpoints
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# FastAPI — API key registration and dynamic auth
+# ---------------------------------------------------------------------------
+
+
+class TestAPIKeyRegistration:
+    @pytest.mark.asyncio
+    async def test_register_key(self, client):
+        resp = await client.post(
+            "/api/v1/keys",
+            json={"name": "curie", "key": "new-key-curie"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["name"] == "curie"
+        assert data["message"] == "Key registered"
+
+    @pytest.mark.asyncio
+    async def test_register_key_duplicate_name(self, client):
+        await client.post(
+            "/api/v1/keys",
+            json={"name": "curie", "key": "key-1"},
+            headers=DOOT_HEADERS,
+        )
+        resp = await client.post(
+            "/api/v1/keys",
+            json={"name": "curie", "key": "key-2"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_register_key_no_auth(self, client):
+        resp = await client.post(
+            "/api/v1/keys",
+            json={"name": "curie", "key": "key-1"},
+        )
+        assert resp.status_code == 422  # missing header
+
+    @pytest.mark.asyncio
+    async def test_list_keys(self, client):
+        await client.post(
+            "/api/v1/keys",
+            json={"name": "curie", "key": "key-1"},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            "/api/v1/keys",
+            json={"name": "darwin", "key": "key-2"},
+            headers=DOOT_HEADERS,
+        )
+        resp = await client.get("/api/v1/keys", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        keys = resp.json()
+        assert len(keys) == 2
+        names = [k["name"] for k in keys]
+        assert "curie" in names
+        assert "darwin" in names
+
+    @pytest.mark.asyncio
+    async def test_list_keys_no_key_values_exposed(self, client):
+        await client.post(
+            "/api/v1/keys",
+            json={"name": "curie", "key": "super-secret-key"},
+            headers=DOOT_HEADERS,
+        )
+        resp = await client.get("/api/v1/keys", headers=DOOT_HEADERS)
+        keys = resp.json()
+        for k in keys:
+            assert "key" not in k
+
+    @pytest.mark.asyncio
+    async def test_auth_with_db_registered_key(self, client):
+        """A key registered via the API should be usable for auth."""
+        # Register a new key
+        await client.post(
+            "/api/v1/keys",
+            json={"name": "curie", "key": "dynamic-key-curie"},
+            headers=DOOT_HEADERS,
+        )
+        # Use the new key to send a message
+        resp = await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["doot"], "body": "Hello from curie"},
+            headers={"Authorization": "Bearer dynamic-key-curie"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["message"] == "Message sent"
+
+    @pytest.mark.asyncio
+    async def test_auth_with_db_key_sender_identity(self, client):
+        """Messages sent with a DB-registered key should have correct sender."""
+        await client.post(
+            "/api/v1/keys",
+            json={"name": "curie", "key": "dynamic-key-curie"},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["doot"], "body": "Hello from curie"},
+            headers={"Authorization": "Bearer dynamic-key-curie"},
+        )
+        # Check doot's inbox
+        resp = await client.get("/api/v1/messages", headers=DOOT_HEADERS)
+        messages = resp.json()
+        assert len(messages) == 1
+        assert messages[0]["sender"] == "curie"
 
 
 class TestAPIFeed:

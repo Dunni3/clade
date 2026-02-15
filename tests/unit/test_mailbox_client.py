@@ -95,3 +95,27 @@ class TestMailboxClient:
     def test_auth_header(self):
         c = MailboxClient("http://example.com", "my-secret-key")
         assert c.headers["Authorization"] == "Bearer my-secret-key"
+
+    def test_register_key_sync_success(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 201
+        with patch("clade.communication.mailbox_client.httpx.post", return_value=mock_resp) as mock_post:
+            result = self.client.register_key_sync("curie", "new-key-123")
+            assert result is True
+            mock_post.assert_called_once()
+            call_kwargs = mock_post.call_args
+            assert call_kwargs.kwargs["json"] == {"name": "curie", "key": "new-key-123"}
+
+    def test_register_key_sync_conflict(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 409
+        with patch("clade.communication.mailbox_client.httpx.post", return_value=mock_resp):
+            result = self.client.register_key_sync("curie", "new-key-123")
+            assert result is True  # 409 is OK — already registered
+
+    def test_register_key_sync_failure(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        with patch("clade.communication.mailbox_client.httpx.post", return_value=mock_resp):
+            result = self.client.register_key_sync("curie", "new-key-123")
+            assert result is False

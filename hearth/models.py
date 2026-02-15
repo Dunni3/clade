@@ -132,3 +132,21 @@ class TaskEvent(BaseModel):
     tool_name: str | None = None
     summary: str
     created_at: str
+
+
+# -- API Keys --
+
+
+class RegisterKeyRequest(BaseModel):
+    name: str
+    key: str
+
+
+class RegisterKeyResponse(BaseModel):
+    message: str = "Key registered"
+    name: str
+
+
+class KeyInfo(BaseModel):
+    name: str
+    created_at: str

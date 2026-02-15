@@ -3,9 +3,10 @@
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-# Default timezone for display. Hardcoded to US/Eastern for now.
+# Default timezone for display. Hardcoded to America/New_York for now.
+# Uses canonical IANA key (not legacy "US/Eastern" which is missing in some environments).
 # See research_notes/ for the open problem of per-brother timezone support.
-DEFAULT_TZ = "US/Eastern"
+DEFAULT_TZ = "America/New_York"
 
 
 def format_timestamp(
@@ -20,7 +21,7 @@ def format_timestamp(
 
     Args:
         utc_iso: ISO 8601 UTC timestamp (e.g. "2026-02-08T15:30:00Z").
-        tz_name: IANA timezone name for display (default: US/Eastern).
+        tz_name: IANA timezone name for display (default: America/New_York).
         now: Override "now" for testing. Must be timezone-aware (UTC).
     """
     utc_dt = datetime.fromisoformat(utc_iso.replace("Z", "+00:00"))

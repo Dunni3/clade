@@ -14,10 +14,13 @@ from .models import (
     CreateTaskResponse,
     EditMessageRequest,
     FeedMessage,
+    KeyInfo,
     MarkReadResponse,
     MessageDetail,
     MessageSummary,
     ReadByEntry,
+    RegisterKeyRequest,
+    RegisterKeyResponse,
     SendMessageRequest,
     SendMessageResponse,
     TaskDetail,
@@ -43,6 +46,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/api/v1/health")
+async def health():
+    return {"status": "ok"}
 
 
 @app.post("/api/v1/messages", response_model=SendMessageResponse)
@@ -305,3 +313,31 @@ async def update_task(
     if updated is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return updated
+
+
+# ---------------------------------------------------------------------------
+# API Key registration endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/v1/keys", response_model=RegisterKeyResponse, status_code=201)
+async def register_key(
+    req: RegisterKeyRequest,
+    _caller: str = Depends(resolve_sender),
+):
+    """Register a new API key. Any authenticated user can register keys."""
+    success = await db.insert_api_key(req.name, req.key)
+    if not success:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Key name '{req.name}' or key value already exists",
+        )
+    return RegisterKeyResponse(name=req.name)
+
+
+@app.get("/api/v1/keys", response_model=list[KeyInfo])
+async def list_keys(
+    _caller: str = Depends(resolve_sender),
+):
+    """List all registered API key names (never exposes key values)."""
+    return await db.list_api_keys()

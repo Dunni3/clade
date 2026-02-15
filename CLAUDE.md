@@ -42,7 +42,7 @@ clade/
 │   └── web/                       # Web app backend (unused currently)
 ├── hearth/                        # Hearth API server (FastAPI + SQLite, deployed on EC2)
 │   ├── app.py                     # FastAPI routes (/api/v1/messages, /api/v1/tasks, etc.)
-│   ├── db.py                      # SQLite database (messages + tasks tables)
+│   ├── db.py                      # SQLite database (messages, tasks, api_keys tables)
 │   ├── auth.py                    # API key authentication
 │   ├── models.py                  # Pydantic request/response models
 │   └── config.py                  # Server configuration
@@ -72,8 +72,8 @@ The `clade` CLI handles onboarding and diagnostics:
 
 | Command | Description |
 |---------|-------------|
-| `clade init` | Interactive wizard: name clade, name personal brother, personality, server config, API key, MCP, identity writing |
-| `clade add-brother` | SSH test, prereq check, remote deploy, API key gen, MCP registration, remote identity writing |
+| `clade init` | Interactive wizard: name clade, name personal brother, personality, server config, API key gen + registration (`--server-key`), MCP, identity writing |
+| `clade add-brother` | SSH test, prereq check, remote deploy, API key gen + Hearth registration, MCP registration, remote identity writing |
 | `clade status` | Health overview: server ping, SSH to each brother, key status |
 | `clade doctor` | Full diagnostic: config, keys, MCP, identity, server, per-brother SSH + package + MCP + identity + Hearth |
 
@@ -139,6 +139,7 @@ Key file: `src/clade/tasks/ssh_task.py` — contains `build_remote_script()`, `w
 - **4 members:** ian, doot, oppy, jerry — each with their own API key
 - **Admins:** ian and doot can edit/delete any message; others only their own
 - **Env vars:** `HEARTH_URL`, `HEARTH_API_KEY`, `HEARTH_NAME` (with `MAILBOX_*` fallback for transition)
+- **Dynamic key registration:** API keys can be registered via `POST /api/v1/keys` (any authenticated user). The CLI does this automatically during `clade init --server-key` and `clade add-brother`. Auth checks env-var keys first (fast), then falls back to DB-registered keys.
 
 ## Testing
 

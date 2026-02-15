@@ -2,15 +2,21 @@
 
 from fastapi import Header, HTTPException
 
+from . import db
 from .config import API_KEYS
 
 
-def resolve_sender(authorization: str = Header(...)) -> str:
+async def resolve_sender(authorization: str = Header(...)) -> str:
     """Extract brother name from Authorization: Bearer <key> header."""
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid authorization header")
-    token = authorization[len("Bearer ") :]
+    token = authorization[len("Bearer "):]
+    # Check env-var keys first (fast, in-memory)
     name = API_KEYS.get(token)
-    if name is None:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    return name
+    if name:
+        return name
+    # Fall back to DB-registered keys
+    name = await db.get_api_key_by_key(token)
+    if name:
+        return name
+    raise HTTPException(status_code=401, detail="Invalid API key")

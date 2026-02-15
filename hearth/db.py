@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS task_events (
     summary    TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    name       TEXT PRIMARY KEY,
+    key        TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
 """
 
 
@@ -574,6 +580,66 @@ async def get_task_events(task_id: int) -> list[dict]:
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# API Keys
+# ---------------------------------------------------------------------------
+
+
+async def insert_api_key(name: str, key: str) -> bool:
+    """Insert a new API key. Returns True on success, False if duplicate."""
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO api_keys (name, key) VALUES (?, ?)",
+            (name, key),
+        )
+        await db.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        await db.close()
+
+
+async def get_api_key_by_key(key: str) -> str | None:
+    """Look up a brother name by API key. Returns None if not found."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT name FROM api_keys WHERE key = ?", (key,)
+        )
+        row = await cursor.fetchone()
+        return row["name"] if row else None
+    finally:
+        await db.close()
+
+
+async def list_api_keys() -> list[dict]:
+    """Return all registered key names and creation times (never the keys)."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT name, created_at FROM api_keys ORDER BY created_at"
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+async def delete_api_key(name: str) -> bool:
+    """Remove an API key by name. Returns True if deleted."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "DELETE FROM api_keys WHERE name = ?", (name,)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
     finally:
         await db.close()
 

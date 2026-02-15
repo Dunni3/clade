@@ -216,33 +216,82 @@ Update task status/output. Requires assignee, creator, or admin (doot/ian) autho
 
 See [TASKS.md](TASKS.md) for full task delegation documentation.
 
-## API Key Management
+### POST /keys
+Register a new API key. Any authenticated user can register keys.
 
-### Generate New API Key
-
-```python
-import secrets
-api_key = secrets.token_urlsafe(32)
-print(api_key)
+```json
+{"name": "curie", "key": "the-api-key-value"}
 ```
 
-### Add Brother
+Returns 201 on success, 409 if name or key already exists.
 
-1. Generate API key
-2. Edit systemd service:
-   ```bash
-   sudo systemctl edit mailbox
-   ```
-3. Add to `MAILBOX_API_KEYS`: `newkey:brothername`
-4. Restart service:
-   ```bash
-   sudo systemctl restart mailbox
-   ```
+### GET /keys
+List all registered API key names and creation timestamps. Never exposes key values.
+
+## API Key Management
+
+The Hearth supports two sources of API keys:
+
+1. **Environment variable keys** (`MAILBOX_API_KEYS`) — checked first, in-memory. Good for bootstrapping the initial members.
+2. **Database-registered keys** (`api_keys` table) — checked second, via SQLite. Used by the CLI's automatic registration flow.
+
+Both sources are checked on every request. Env-var keys take priority (faster, no DB hit).
+
+### Automatic Registration (Recommended)
+
+The `clade` CLI automatically registers keys with the Hearth during onboarding:
+
+```bash
+# First brother: use --server-key with an existing env-var key to bootstrap
+clade init --server-url https://your-server.com --server-key <existing-key>
+
+# Subsequent brothers: the personal brother's key is used automatically
+clade add-brother --name curie --ssh user@host
+```
+
+After `clade init`, the personal brother's generated key is registered in the Hearth's database. When `clade add-brother` runs, it loads the personal key from `~/.config/clade/keys.json` and uses it to register the new brother's key. No server restart needed.
+
+### Manual Registration via API
+
+You can also register keys directly via the API:
+
+```bash
+# Register a new key (requires an existing valid key for auth)
+curl -X POST https://54.84.119.14/api/v1/keys \
+  -H "Authorization: Bearer <your-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "newbrother", "key": "the-generated-key"}'
+
+# List registered keys (names only, never exposes key values)
+curl https://54.84.119.14/api/v1/keys \
+  -H "Authorization: Bearer <your-key>"
+```
+
+### Environment Variable Keys (Bootstrap)
+
+For the initial server setup, keys are configured in the systemd service:
+
+```bash
+sudo systemctl edit mailbox
+```
+
+```ini
+[Service]
+Environment="MAILBOX_API_KEYS=key1:doot,key2:oppy,key3:jerry"
+```
+
+Format: `key:name,key:name,...`
+
+These keys are always checked first (fast, in-memory) and don't require a DB lookup. They're mainly useful for bootstrapping — once you have one working key, you can register all others via the API.
 
 ### Revoke API Key
 
-1. Remove from `MAILBOX_API_KEYS`
-2. Restart service
+For env-var keys: remove from `MAILBOX_API_KEYS` and restart the service.
+
+For DB-registered keys: currently requires direct SQLite access:
+```bash
+sqlite3 /opt/mailbox/data/mailbox.db "DELETE FROM api_keys WHERE name = 'brothername';"
+```
 
 ## Security Considerations
 

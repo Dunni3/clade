@@ -30,8 +30,9 @@ The interactive wizard will:
 2. Suggest a name for your personal Claude Code instance (from a pool of scientist names)
 3. Optionally configure a Hearth server for inter-brother communication
 4. Generate an API key and save it to `~/.config/clade/keys.json`
-5. Register the `clade-personal` MCP server in `~/.claude.json`
-6. Write your config to `~/.config/clade/clade.yaml`
+5. Register the key with the Hearth server (if `--server-key` is provided)
+6. Register the `clade-personal` MCP server in `~/.claude.json`
+7. Write your config to `~/.config/clade/clade.yaml`
 
 For non-interactive setup (accepts all defaults):
 ```bash
@@ -42,6 +43,14 @@ Or with explicit values:
 ```bash
 clade init --name "My Clade" --personal-name doot --server-url https://your-server.com
 ```
+
+If you have an existing Hearth server with a pre-configured API key, use `--server-key` to bootstrap automatic key registration:
+```bash
+clade init --name "My Clade" --personal-name doot \
+  --server-url https://your-server.com --server-key <existing-key>
+```
+
+This registers your generated key with the Hearth so it's immediately usable. Without `--server-key`, you'd need to manually add the key on the server. See [MAILBOX_SETUP.md](MAILBOX_SETUP.md) for details.
 
 **After init, restart Claude Code** to pick up the new MCP server.
 
@@ -60,8 +69,9 @@ This will:
 4. Check remote prerequisites (Python, Claude Code, tmux, git)
 5. Deploy the clade package on the remote machine
 6. Generate an API key for the brother
-7. Register the `clade-worker` MCP server on the remote `~/.claude.json`
-8. Update your local `clade.yaml` config
+7. Register the key with the Hearth server (using your personal key)
+8. Register the `clade-worker` MCP server on the remote `~/.claude.json`
+9. Update your local `clade.yaml` config
 
 Non-interactive:
 ```bash

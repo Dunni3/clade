@@ -183,6 +183,21 @@ class MailboxClient:
             resp.raise_for_status()
             return resp.json()
 
+    def register_key_sync(self, name: str, key: str) -> bool:
+        """Register an API key with the Hearth. Returns True on success.
+
+        Uses synchronous httpx since key registration is a one-shot call
+        during CLI onboarding (which is sync).
+        """
+        resp = httpx.post(
+            self._url("/keys"),
+            json={"name": name, "key": key},
+            headers=self.headers,
+            timeout=10,
+            verify=self.verify_ssl,
+        )
+        return resp.status_code in (200, 201, 409)  # 409 = already registered, OK
+
     async def update_task(
         self,
         task_id: int,

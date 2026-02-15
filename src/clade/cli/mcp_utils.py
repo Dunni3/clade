@@ -112,33 +112,31 @@ def register_mcp_remote(
     Returns:
         SSHResult from the remote operation.
     """
-    env_json = json.dumps(env)
+    # Build env as a Python dict literal to avoid quoting nightmares
+    env_items = ", ".join(f"'{k}': '{v}'" for k, v in env.items())
+    env_literal = f"{{{env_items}}}"
     script = f"""\
 #!/bin/bash
 set -e
-CLAUDE_JSON="$HOME/.claude.json"
-
-# Read existing or create empty
-if [ -f "$CLAUDE_JSON" ]; then
-    CONTENT=$(cat "$CLAUDE_JSON")
-else
-    CONTENT='{{}}'
-fi
-
-# Use python to merge the MCP server entry
 python3 -c "
-import json, sys
-data = json.loads('''$CONTENT''')
+import json, os, pathlib
+
+claude_json = pathlib.Path(os.path.expanduser('~/.claude.json'))
+if claude_json.exists():
+    data = json.loads(claude_json.read_text())
+else:
+    data = {{}}
+
 if 'mcpServers' not in data:
     data['mcpServers'] = {{}}
+
 data['mcpServers']['{server_name}'] = {{
     'command': '{python_path}',
     'args': ['-m', '{module}'],
-    'env': json.loads('''{env_json}'''),
+    'env': {env_literal},
 }}
-with open('$CLAUDE_JSON', 'w') as f:
-    json.dump(data, f, indent=2)
-    f.write('\\n')
+
+claude_json.write_text(json.dumps(data, indent=2) + '\\n')
 print('MCP_REGISTERED')
 "
 """
