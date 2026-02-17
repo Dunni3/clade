@@ -27,9 +27,6 @@ clade/
 │   │   ├── setup_ember_cmd.py     # `clade setup-ember` — deploy Ember on existing brother
 │   │   ├── conductor_setup.py     # Conductor (Kamaji) deployment logic
 │   │   └── setup_conductor_cmd.py # `clade setup-conductor` — deploy Conductor on Hearth server
-│   ├── terminal/                  # AppleScript terminal spawning
-│   │   ├── applescript.py         # AppleScript generation (quote escaping, etc.)
-│   │   └── executor.py            # osascript execution
 │   ├── communication/             # Hearth HTTP client
 │   │   └── mailbox_client.py      # MailboxClient (messages + tasks API)
 │   ├── tasks/                     # SSH task delegation
@@ -42,11 +39,11 @@ clade/
 │   ├── utils/                     # Shared utilities
 │   │   └── timestamp.py           # format_timestamp (timezone-aware, human-friendly)
 │   ├── mcp/                       # MCP server definitions
-│   │   ├── server_full.py         # Personal Brother server (Doot: terminal + mailbox + tasks + ember)
+│   │   ├── server_full.py         # Personal Brother server (Doot: mailbox + tasks + ember)
 │   │   ├── server_lite.py         # Worker Brother server (Oppy/Jerry: mailbox + tasks + ember only)
 │   │   ├── server_conductor.py    # Conductor server (Kamaji: mailbox + thrums + delegation)
 │   │   └── tools/
-│   │       ├── terminal_tools.py  # spawn_terminal, connect_to_brother
+│   │       ├── brother_tools.py   # list_brothers
 │   │       ├── mailbox_tools.py   # send/check/read/browse/unread + task list/get/update
 │   │       ├── task_tools.py      # initiate_ssh_task (Doot only)
 │   │       ├── ember_tools.py     # check_ember_health, list_ember_tasks
@@ -60,7 +57,7 @@ clade/
 │   ├── models.py                  # Pydantic request/response models
 │   └── config.py                  # Server configuration
 ├── tests/                         # All tests
-│   ├── unit/                      # Fast, no network (config, applescript, client, ssh, cli, timestamp)
+│   ├── unit/                      # Fast, no network (config, client, ssh, cli, timestamp)
 │   └── integration/               # MCP tool + Hearth server integration tests
 ├── frontend/                      # Hearth web UI (Vite + React + TypeScript + Tailwind v4)
 ├── deploy/                        # Deployment and infrastructure scripts
@@ -83,7 +80,7 @@ clade/
 
 **Five entry points** (defined in `pyproject.toml`):
 - `clade` — CLI for setup and management (`cli/main.py`)
-- `clade-personal` — Full MCP server: terminal spawning + mailbox + task delegation + ember
+- `clade-personal` — Full MCP server: mailbox + task delegation + ember + brother listing
 - `clade-worker` — Lite MCP server: mailbox communication + task visibility/updates + ember
 - `clade-ember` — Ember server: HTTP listener for task execution on worker machines
 - `clade-conductor` — Conductor MCP server: mailbox + thrums + worker delegation (used by Kamaji)
@@ -126,8 +123,7 @@ Each brother gets an identity section in their `~/.claude/CLAUDE.md`, telling th
 ## MCP Tools
 
 ### Doot's tools (clade-personal)
-- `spawn_terminal(command?, app?)` — Open Terminal.app window, optionally run a command
-- `connect_to_brother(name)` — SSH + Claude Code session to oppy or jerry
+- `list_brothers()` — List available brother instances
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
 - `initiate_ssh_task(brother, prompt, subject?, max_turns?, auto_pull?)` — Delegate a task via SSH + tmux
 - `list_tasks(assignee?, status?, limit?)` — Browse tasks

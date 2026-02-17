@@ -30,6 +30,9 @@ RUN chmod 600 /home/testuser/.ssh/authorized_keys \
 COPY . /opt/clade
 RUN pip install --no-cache-dir -e "/opt/clade[server]"
 
-# sshd needs to run as root
-EXPOSE 22
-CMD ["/usr/sbin/sshd", "-D"]
+# Entrypoint starts sshd + Ember server
+COPY docker/entrypoint-worker.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 22 8100
+CMD ["/entrypoint.sh"]

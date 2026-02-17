@@ -9,3 +9,4 @@
   - [ ] maybe also a cool diagram showing every clade member at what they are doing if anything 
 - [ ] build the conductor, build the tailscale network connections. 
 - [ ] testing tailscale networking on the docker system? hmmm
+- [ ] after `clade init` personal brother is aware of oppy and jerry if you ask it "who are you?" -- this should not be the case, oppy and jerry are instantiations of my clade, the OG clade, but not the general case of a arbitrary user-created clade. 

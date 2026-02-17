@@ -9,31 +9,8 @@ from clade.core.config import (
     FALLBACK_CONFIG,
     _convert_clade_yaml,
     _is_clade_yaml,
-    get_brother_command,
     load_config,
 )
-
-
-class TestGetBrotherCommand:
-    def test_brother_without_working_dir(self):
-        brother = {
-            "host": "cluster",
-            "working_dir": None,
-            "command": "",
-            "description": "Test",
-        }
-        cmd = get_brother_command(brother)
-        assert cmd == 'ssh -t cluster "bash -lc claude"'
-
-    def test_brother_with_working_dir(self):
-        brother = {
-            "host": "masuda",
-            "working_dir": "~/projects/foo",
-            "command": "",
-            "description": "Test",
-        }
-        cmd = get_brother_command(brother)
-        assert cmd == 'ssh -t masuda "bash -lc \'cd ~/projects/foo && claude\'"'
 
 
 class TestLoadConfig:
@@ -48,7 +25,6 @@ class TestLoadConfig:
         """Should load configuration from valid YAML file."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("""
-default_terminal_app: iterm2
 brothers:
   test-brother:
     host: test.example.com
@@ -63,30 +39,9 @@ mailbox:
 
         try:
             config = load_config(path=config_path)
-            assert config["default_terminal_app"] == "iterm2"
             assert "test-brother" in config["brothers"]
             assert config["brothers"]["test-brother"]["host"] == "test.example.com"
             assert config["mailbox"]["url"] == "https://example.com"
-        finally:
-            config_path.unlink()
-
-    def test_auto_generate_commands(self):
-        """Should auto-generate SSH commands if not provided."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write("""
-brothers:
-  auto-gen:
-    host: auto.example.com
-    working_dir: null
-    description: "Auto-generated command"
-""")
-            f.flush()
-            config_path = Path(f.name)
-
-        try:
-            config = load_config(path=config_path)
-            cmd = config["brothers"]["auto-gen"]["command"]
-            assert cmd == 'ssh -t auto.example.com "bash -lc claude"'
         finally:
             config_path.unlink()
 
@@ -111,7 +66,7 @@ class TestCladeYamlDetection:
         assert _is_clade_yaml(data)
 
     def test_is_clade_yaml_false_legacy(self):
-        data = {"default_terminal_app": "terminal", "brothers": {}}
+        data = {"brothers": {}}
         assert not _is_clade_yaml(data)
 
     def test_is_clade_yaml_false_no_clade_key(self):
@@ -135,12 +90,10 @@ class TestConvertCladeYaml:
             },
         }
         config = _convert_clade_yaml(data)
-        assert config["default_terminal_app"] == "terminal"
         assert "oppy" in config["brothers"]
         assert config["brothers"]["oppy"]["host"] == "masuda"
         assert config["brothers"]["oppy"]["working_dir"] == "~/projects/OMTRA"
         assert config["brothers"]["oppy"]["description"] == "The architect"
-        assert "ssh -t masuda" in config["brothers"]["oppy"]["command"]
         assert config["mailbox"]["url"] == "https://example.com"
 
     def test_no_server(self):
@@ -189,7 +142,6 @@ brothers:
 
         try:
             config = load_config(path=config_path)
-            assert config["default_terminal_app"] == "terminal"
             assert "oppy" in config["brothers"]
             assert config["brothers"]["oppy"]["host"] == "masuda"
             assert config["mailbox"]["url"] == "https://example.com"
@@ -203,14 +155,3 @@ class TestFallbackConfig:
 
     def test_oppy_exists(self):
         assert "oppy" in FALLBACK_CONFIG["brothers"]
-
-    def test_default_terminal_app(self):
-        assert FALLBACK_CONFIG["default_terminal_app"] == "terminal"
-
-    def test_jerry_has_command(self):
-        assert "command" in FALLBACK_CONFIG["brothers"]["jerry"]
-        assert FALLBACK_CONFIG["brothers"]["jerry"]["command"].startswith("ssh")
-
-    def test_oppy_has_command(self):
-        assert "command" in FALLBACK_CONFIG["brothers"]["oppy"]
-        assert FALLBACK_CONFIG["brothers"]["oppy"]["command"].startswith("ssh")

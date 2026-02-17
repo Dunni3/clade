@@ -265,6 +265,3 @@ The brother hasn't called `update_task` yet. Either:
 - The session ended without updating the task (check mailbox for messages)
 - The brother's mailbox MCP tools aren't configured (no `update_task` tool available)
 
-## Deprecation Notice
-
-`spawn_terminal` and `connect_to_brother` still work for opening interactive terminal windows. For autonomous remote work, prefer `initiate_ssh_task` — it provides structured task tracking, avoids AppleScript/macOS dependencies, and the brother reports back automatically.

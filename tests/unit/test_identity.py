@@ -50,8 +50,7 @@ class TestGeneratePersonalIdentity:
 
     def test_tools_listed(self):
         result = generate_personal_identity("doot", "The Clade")
-        assert "spawn_terminal" in result
-        assert "connect_to_brother" in result
+        assert "list_brothers" in result
         assert "initiate_ssh_task" in result
         assert "send_message" in result
 
@@ -104,8 +103,6 @@ class TestGenerateConductorIdentity:
 
     def test_no_personal_tools(self):
         result = generate_conductor_identity("kamaji", "The Clade")
-        assert "spawn_terminal" not in result
-        assert "connect_to_brother" not in result
         assert "initiate_ssh_task" not in result
 
 
@@ -145,7 +142,6 @@ class TestGenerateWorkerIdentity:
         assert "send_message" in result
         assert "check_mailbox" in result
         # Should NOT have personal-only tools
-        assert "spawn_terminal" not in result
         assert "initiate_ssh_task" not in result
 
 

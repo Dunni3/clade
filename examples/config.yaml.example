@@ -8,29 +8,21 @@
 # All fields are optional. If no config file exists, clade
 # will use hardcoded defaults (jerry and oppy brothers).
 
-# Default terminal application to use ("terminal" or "iterm2")
-default_terminal_app: terminal
-
 # Brother configurations
 # Each brother needs:
 #   - host: SSH hostname
 #   - working_dir: Optional directory to cd into before launching claude
 #   - description: Human-readable description
-#   - command: (optional) Override the auto-generated SSH command
 brothers:
   jerry:
     host: cluster
     working_dir: null  # No working dir, just launch claude
     description: "Brother Jerry — GPU jobs on the cluster"
-    # Command is auto-generated if not specified:
-    # ssh -t cluster "bash -lc claude"
 
   oppy:
     host: masuda
     working_dir: "~/projects/mol_diffusion/OMTRA_oppy"
     description: "Brother Oppy — The architect on masuda"
-    # Command is auto-generated if not specified:
-    # ssh -t masuda "bash -lc 'cd ~/projects/mol_diffusion/OMTRA_oppy && claude'"
 
   # Example: add a new brother
   # dev-vm:

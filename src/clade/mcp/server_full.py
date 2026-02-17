@@ -8,8 +8,8 @@ from ..core.config import load_config
 from ..worker.client import EmberClient
 from .tools.ember_tools import create_ember_tools
 from .tools.mailbox_tools import create_mailbox_tools
+from .tools.brother_tools import create_brother_tools
 from .tools.task_tools import create_task_tools
-from .tools.terminal_tools import create_terminal_tools
 from .tools.thrum_tools import create_thrum_tools
 
 # Load configuration
@@ -18,8 +18,8 @@ config = load_config()
 # Initialize MCP server
 mcp = FastMCP("clade-personal")
 
-# Register terminal tools
-create_terminal_tools(mcp, config)
+# Register brother listing tools
+create_brother_tools(mcp, config)
 
 # Setup Hearth client if configured (HEARTH_* with MAILBOX_* fallback)
 _hearth_url = os.environ.get("HEARTH_URL") or os.environ.get("MAILBOX_URL")

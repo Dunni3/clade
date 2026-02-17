@@ -2,7 +2,7 @@
 # Used by clade-conductor MCP server (Kamaji) to delegate tasks via Ember.
 workers:
   testember:
-    ember_url: "http://ember:8100"
+    ember_url: "http://worker:8100"
     ember_api_key: "testkey-ember"
     hearth_api_key: "testkey-ember"
     working_dir: "/home/testuser"

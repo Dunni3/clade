@@ -46,8 +46,6 @@ def generate_personal_identity(
     # MCP tools
     lines.append("## Available Tools (clade-personal)")
     lines.append("")
-    lines.append("- `spawn_terminal` — Open a Terminal.app window")
-    lines.append("- `connect_to_brother` — SSH + Claude Code session to a brother")
     lines.append("- `list_brothers` — List available brother instances")
     lines.append("- `send_message` — Send a message via the Hearth")
     lines.append("- `check_mailbox` — Check for messages")

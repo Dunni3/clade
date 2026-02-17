@@ -8,7 +8,6 @@ class BrotherConfig(TypedDict):
 
     host: str
     working_dir: Optional[str]
-    command: str
     description: str
 
 
@@ -23,6 +22,5 @@ class MailboxConfig(TypedDict, total=False):
 class TerminalSpawnerConfig(TypedDict):
     """Complete configuration for the Clade."""
 
-    default_terminal_app: str
     brothers: dict[str, BrotherConfig]
     mailbox: Optional[MailboxConfig]

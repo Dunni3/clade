@@ -11,18 +11,15 @@ from .types import BrotherConfig, TerminalSpawnerConfig
 
 # Hardcoded fallback configuration for backward compatibility
 FALLBACK_CONFIG: TerminalSpawnerConfig = {
-    "default_terminal_app": "terminal",
     "brothers": {
         "jerry": {
             "host": "cluster",
             "working_dir": None,
-            "command": 'ssh -t cluster "bash -lc claude"',
             "description": "Brother Jerry — GPU jobs on the cluster",
         },
         "oppy": {
             "host": "masuda",
             "working_dir": "~/projects/mol_diffusion/OMTRA_oppy",
-            "command": "ssh -t masuda \"bash -lc 'cd ~/projects/mol_diffusion/OMTRA_oppy && claude'\"",
             "description": "Brother Oppy — The architect on masuda",
         },
     },
@@ -102,10 +99,8 @@ def _convert_clade_yaml(loaded: dict) -> TerminalSpawnerConfig:
         brother_dict: BrotherConfig = {
             "host": host,
             "working_dir": bro.get("working_dir"),
-            "command": "",
             "description": bro.get("description", ""),
         }
-        brother_dict["command"] = get_brother_command(brother_dict)
         brothers[name] = brother_dict
 
     server_sec = loaded.get("server", {})
@@ -114,7 +109,6 @@ def _convert_clade_yaml(loaded: dict) -> TerminalSpawnerConfig:
         mailbox = {"url": server_sec["url"]}
 
     return {
-        "default_terminal_app": "terminal",
         "brothers": brothers,
         "mailbox": mailbox,
     }
@@ -152,15 +146,9 @@ def load_config(path: Optional[Path] = None) -> TerminalSpawnerConfig:
 
         # Legacy config.yaml format
         config: TerminalSpawnerConfig = {
-            "default_terminal_app": loaded.get("default_terminal_app", "terminal"),
             "brothers": loaded.get("brothers", {}),
             "mailbox": loaded.get("mailbox"),
         }
-
-        # Generate commands for brothers if not provided
-        for name, brother in config["brothers"].items():
-            if "command" not in brother:
-                brother["command"] = get_brother_command(brother)
 
         return config
     except Exception as e:
@@ -171,23 +159,3 @@ def load_config(path: Optional[Path] = None) -> TerminalSpawnerConfig:
             UserWarning,
         )
         return FALLBACK_CONFIG.copy()
-
-
-def get_brother_command(brother: BrotherConfig) -> str:
-    """Generate SSH command from brother configuration.
-
-    Args:
-        brother: Brother configuration dictionary
-
-    Returns:
-        SSH command string to connect to the brother
-    """
-    host = brother["host"]
-    working_dir = brother.get("working_dir")
-
-    if working_dir:
-        # Need to cd to working dir first
-        return f'ssh -t {host} "bash -lc \'cd {working_dir} && claude\'"'
-    else:
-        # Just launch claude
-        return f'ssh -t {host} "bash -lc claude"'

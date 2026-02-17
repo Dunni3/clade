@@ -16,7 +16,7 @@ pip install -e .
 
 This installs:
 - `clade` — CLI for setup and management
-- `clade-personal` — Full MCP server (terminal spawning + mailbox + task delegation)
+- `clade-personal` — Full MCP server (mailbox + task delegation + brother listing)
 - `clade-worker` — Lite MCP server (mailbox + task visibility only)
 - `clade-ember` — Ember server (HTTP-based task execution on worker machines)
 
@@ -177,9 +177,7 @@ If you prefer to configure manually instead of using the CLI, edit `~/.claude.js
 
 After restarting Claude Code, verify your MCP tools are available:
 
-**Personal (full server) — 14 tools:**
-- `spawn_terminal` — Open new terminal window
-- `connect_to_brother` — SSH to a brother with Claude Code
+**Personal (full server) — 12 tools:**
 - `list_brothers` — List available brothers
 - `send_message` — Send message to brothers
 - `check_mailbox` — Check for messages
@@ -199,16 +197,6 @@ After restarting Claude Code, verify your MCP tools are available:
 - `check_ember_health`, `list_ember_tasks`
 
 ## Basic Usage
-
-### Spawn a Terminal Window
-```
-spawn_terminal(command="htop")
-```
-
-### Connect to a Brother
-```
-connect_to_brother(name="jerry")
-```
 
 ### Send a Message
 ```

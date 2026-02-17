@@ -49,29 +49,7 @@ This document outlines planned features and enhancements for The Clade.
 - Simpler than WebSocket for read-only feeds
 - Built-in reconnection handling
 
-## Cross-Platform Support
-
-### Linux/Windows Terminal Spawning
-Currently terminal spawning only works on macOS via AppleScript. Future work:
-
-- **Linux**: Use `xdg-terminal` or direct terminal emulator commands
-- **Windows**: PowerShell scripts for Terminal, ConEmu, etc.
-- **Platform detection**: Auto-select appropriate implementation
-
-Reference: `src/clade/terminal/apps.py` has protocol-based design ready for additional implementations.
-
 ## Plugin System
-
-### Custom Terminal Apps
-Allow users to define custom terminal applications:
-
-```yaml
-custom_terminals:
-  kitty:
-    command_template: "kitty -e {command}"
-  alacritty:
-    command_template: "alacritty -e {command}"
-```
 
 ### Custom Brother Actions
 Define actions brothers can perform:
@@ -90,7 +68,6 @@ brother_actions:
 Execute custom code on events:
 - `on_message_received`: Trigger when mailbox receives message
 - `on_brother_connect`: Run when new brother session starts
-- `on_terminal_spawn`: Hook into terminal spawning
 
 ## Advanced Configuration
 
@@ -174,7 +151,6 @@ task_queue:
 
 ### Phase 4 (Future)
 - [ ] Conductor system (thrum-based orchestration)
-- [ ] Cross-platform terminal spawning (Linux)
 - [ ] Plugin system
 - [ ] Additional communication protocols
 - [ ] Security enhancements
@@ -185,10 +161,6 @@ task_queue:
 Interested in implementing any of these features? Check out the codebase structure:
 
 - `src/clade/core/` - Configuration and types
-- `src/clade/terminal/` - Terminal spawning logic
 - `src/clade/communication/` - Inter-brother communication
 - `src/clade/mcp/` - MCP server and tools
 - `src/clade/web/` - Web interface (placeholder)
-
-Each module is designed with extensibility in mind. The protocol-based abstractions
-(`TerminalApp`, etc.) make it easy to add new implementations.

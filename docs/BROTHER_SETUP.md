@@ -20,10 +20,9 @@ A "brother" is a Claude Code instance that can:
 - Send messages to other brothers
 - Receive and read messages
 - Browse the shared message feed
-- (Personal only) Spawn terminal windows to connect to other brothers
 
 There are two types of brothers:
-1. **Personal (full)** — Local Claude Code with terminal spawning + mailbox + task delegation
+1. **Personal (full)** — Local Claude Code with mailbox + task delegation
 2. **Worker (lite)** — Remote brothers with mailbox communication + task visibility only
 
 ## Prerequisites
@@ -35,7 +34,6 @@ There are two types of brothers:
 - API key for the brother
 
 ### For Personal Brother Only
-- macOS (for AppleScript terminal spawning)
 - SSH access to remote brothers
 
 ## Setup Steps
@@ -190,7 +188,7 @@ clade doctor
 
 This checks config, keys, MCP registration, server health, and per-brother connectivity.
 
-**Personal server** should have 12 tools (terminal, mailbox, tasks).
+**Personal server** should have 12 tools (mailbox, tasks, brothers, ember).
 **Worker server** should have 8 tools (mailbox, tasks).
 
 **Test the mailbox:**
@@ -336,7 +334,6 @@ brothers:
 
 Restart Claude Code, and now:
 ```
-connect_to_brother(name="dev-vm")
 list_brothers()
 ```
 
