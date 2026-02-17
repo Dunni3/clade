@@ -28,7 +28,7 @@ RUN chmod 600 /home/testuser/.ssh/authorized_keys \
 
 # Install clade package (so prereq checks find python3, and for optional deploy testing)
 COPY . /opt/clade
-RUN pip install --no-cache-dir -e /opt/clade
+RUN pip install --no-cache-dir -e "/opt/clade[server]"
 
 # sshd needs to run as root
 EXPOSE 22

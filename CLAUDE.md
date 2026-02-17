@@ -344,8 +344,9 @@ We now use the research_notes system. Development logs, research notes, and expe
 
 ### Format
 
-**Naming convention**: `YYYY-MM-DD_HHMMSS_<slug>.md`
-- Date and time provide chronological sorting
+**Directory structure**: `research_notes/YYYY-MM-DD/<HHMMSS>_<slug>.md`
+- One subdirectory per day keeps the top level clean
+- Files within a day are prefixed with time for chronological sorting
 - Slug is a short kebab-case descriptor
 
 **Frontmatter** (YAML):
