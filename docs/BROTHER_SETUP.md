@@ -21,9 +21,10 @@ A "brother" is a Claude Code instance that can:
 - Receive and read messages
 - Browse the shared message feed
 
-There are two types of brothers:
-1. **Personal (full)** — Local Claude Code with mailbox + task delegation
-2. **Worker (lite)** — Remote brothers with mailbox communication + task visibility only
+There are three types of brothers:
+1. **Personal** (`clade-personal`) — Coordinator with mailbox, brother listing, SSH task delegation, ember tools, and thrum tools (e.g. Doot)
+2. **Worker** (`clade-worker`) — Remote workers with mailbox communication, task visibility, and ember tools (e.g. Oppy, Jerry)
+3. **Conductor** (`clade-conductor`) — Orchestrator with mailbox, thrum management, and worker delegation via Ember (e.g. Kamaji)
 
 ## Prerequisites
 
@@ -35,6 +36,10 @@ There are two types of brothers:
 
 ### For Personal Brother Only
 - SSH access to remote brothers
+
+### For Conductor Only
+- Worker registry config (`conductor-workers.yaml`) with Ember URLs and API keys
+- Typically deployed via `clade setup-conductor` rather than manual setup
 
 ## Setup Steps
 
@@ -69,11 +74,11 @@ pip install -e .
 
 ### Step 3: Configure Claude Code MCP Server
 
-**Using the CLI:** `clade init` registers `clade-personal` locally, and `clade add-brother` registers `clade-worker` on the remote machine via SSH.
+**Using the CLI:** `clade init` registers `clade-personal` locally, `clade add-brother` registers `clade-worker` on the remote machine via SSH, and `clade setup-conductor` registers `clade-conductor` on the Hearth server.
 
 **Manual:** Edit `~/.claude.json` on the brother's machine.
 
-#### Personal (Full Server)
+#### Personal
 
 ```json
 {
@@ -90,7 +95,7 @@ pip install -e .
 }
 ```
 
-#### Worker (Lite Server)
+#### Worker
 
 ```json
 {
@@ -107,7 +112,29 @@ pip install -e .
 }
 ```
 
-If the entry point isn't on PATH, use the full Python path:
+#### Conductor
+
+```json
+{
+  "mcpServers": {
+    "clade-conductor": {
+      "command": "clade-conductor",
+      "env": {
+        "HEARTH_URL": "https://your-server.com",
+        "HEARTH_API_KEY": "your-api-key",
+        "HEARTH_NAME": "kamaji",
+        "CONDUCTOR_WORKERS_CONFIG": "/path/to/conductor-workers.yaml"
+      }
+    }
+  }
+}
+```
+
+The conductor needs a `conductor-workers.yaml` file listing worker Ember URLs and API keys. See `deploy/conductor-workers.yaml` for the format. This is normally set up by `clade setup-conductor`.
+
+#### Fallback: Full Python path
+
+If the entry point isn't on PATH, use the full Python path with the module name:
 
 ```json
 {
@@ -123,6 +150,9 @@ If the entry point isn't on PATH, use the full Python path:
     }
   }
 }
+```
+
+The module names are: `clade.mcp.server_full` (personal), `clade.mcp.server_lite` (worker), `clade.mcp.server_conductor` (conductor).
 ```
 
 ### Step 4: Install Task Logger Hook (Optional but Recommended)
@@ -188,8 +218,9 @@ clade doctor
 
 This checks config, keys, MCP registration, server health, and per-brother connectivity.
 
-**Personal server** should have 12 tools (mailbox, tasks, brothers, ember).
-**Worker server** should have 8 tools (mailbox, tasks).
+**Personal server** should have tools for: mailbox, tasks, brothers, ember, thrums.
+**Worker server** should have tools for: mailbox, tasks, ember.
+**Conductor server** should have tools for: mailbox, tasks, thrums, worker delegation.
 
 **Test the mailbox:**
 
@@ -210,8 +241,9 @@ If you see the tools and can send/receive messages, setup is complete!
 **Diagnosis:**
 ```bash
 # Check if entry point exists
-which clade-personal        # For Doot
-which clade-worker          # For Oppy/Jerry
+which clade-personal        # For personal (Doot)
+which clade-worker          # For workers (Oppy/Jerry)
+which clade-conductor       # For conductor (Kamaji)
 
 # Test MCP server directly
 clade-personal  # Should start and wait for stdio input (Ctrl+C to exit)
@@ -273,6 +305,7 @@ Then try the MCP tools again.
 - `doot` (not "Doot" or "doot_local")
 - `oppy` (not "Oppy" or "Brother Oppy")
 - `jerry` (not "Jerry" or "Brother Jerry")
+- `kamaji` (not "Kamaji" or "conductor")
 
 Names are case-sensitive and must match the API key configuration.
 
