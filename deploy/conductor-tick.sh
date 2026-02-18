@@ -9,6 +9,14 @@ LOG_DIR="${HOME}/.local/share/clade/conductor-logs"
 TICK_PROMPT="${CONFIG_DIR}/conductor-tick.md"
 ENV_FILE="${CONFIG_DIR}/conductor.env"
 
+# Concurrency guard — only one tick at a time
+LOCK_FILE="${CONFIG_DIR}/conductor-tick.lock"
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+    echo "Conductor tick already running, skipping."
+    exit 0
+fi
+
 # Source environment
 if [[ -f "$ENV_FILE" ]]; then
     set -a

@@ -22,3 +22,7 @@ def parse_api_keys(raw: str) -> dict[str, str]:
 
 
 API_KEYS: dict[str, str] = parse_api_keys(API_KEYS_RAW)
+
+# Shell command to trigger a conductor tick (fire-and-forget).
+# None = disabled (no-op). Set to e.g. "bash /path/to/conductor-tick.sh" to enable.
+CONDUCTOR_TICK_CMD: str | None = os.environ.get("CONDUCTOR_TICK_CMD")

@@ -18,6 +18,14 @@ COPY . /opt/clade
 RUN pip install --no-cache-dir -r /opt/clade/hearth/requirements.txt \
     && pip install --no-cache-dir -e "/opt/clade"
 
+# Pre-bake conductor config for event-driven ticks
+RUN echo '{"mcpServers":{"clade-conductor":{"command":"clade-conductor"}}}' \
+    > /home/testuser/.config/clade/conductor-mcp.json
+COPY deploy/conductor-tick.sh /home/testuser/.config/clade/conductor-tick.sh
+COPY deploy/conductor-tick.md /home/testuser/.config/clade/conductor-tick.md
+RUN chmod +x /home/testuser/.config/clade/conductor-tick.sh \
+    && chown -R testuser:testuser /home/testuser/.config/clade/
+
 # Data directory for SQLite
 RUN mkdir -p /data
 ENV MAILBOX_DB_PATH=/data/hearth.db

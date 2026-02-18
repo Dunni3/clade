@@ -1,5 +1,7 @@
 """FastAPI application for the Hearth — the Clade's shared communication hub."""
 
+import logging
+import subprocess
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -8,6 +10,9 @@ from fastapi.responses import Response
 
 from . import db
 from .auth import ADMIN_NAMES, resolve_sender
+from .config import CONDUCTOR_TICK_CMD
+
+logger = logging.getLogger(__name__)
 from .models import (
     CreateTaskEventRequest,
     CreateTaskRequest,
@@ -57,6 +62,22 @@ def _now_utc() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _maybe_trigger_conductor_tick() -> None:
+    """Fire-and-forget: spawn the conductor tick if configured."""
+    if not CONDUCTOR_TICK_CMD:
+        return
+    try:
+        subprocess.Popen(
+            CONDUCTOR_TICK_CMD,
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception:
+        logger.warning("Failed to trigger conductor tick", exc_info=True)
 
 
 @app.get("/api/v1/health")
@@ -316,6 +337,11 @@ async def update_task(
     updated = await db.update_task(task_id, **kwargs)
     if updated is None:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    # Trigger conductor tick when a thrum-linked task reaches a terminal state
+    if req.status in ("completed", "failed") and task.get("thrum_id") is not None:
+        _maybe_trigger_conductor_tick()
+
     return updated
 
 
@@ -364,6 +390,7 @@ async def create_thrum(
         plan=req.plan,
         priority=req.priority,
     )
+    _maybe_trigger_conductor_tick()
     return CreateThrumResponse(id=thrum_id)
 
 

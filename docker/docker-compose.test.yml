@@ -46,6 +46,7 @@ services:
       HEARTH_API_KEY: testkey-kamaji
       HEARTH_NAME: kamaji
       CONDUCTOR_WORKERS_CONFIG: /opt/clade/docker/test-conductor-workers.yaml
+      CONDUCTOR_TICK_CMD: "runuser -u testuser -- bash /home/testuser/.config/clade/conductor-tick.sh"
     volumes:
       - hearth-data:/data
 
