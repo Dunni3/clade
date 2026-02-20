@@ -188,11 +188,46 @@ class TestExecuteEndpoint:
                                 headers=auth_headers,
                             )
                         mock_wrap.assert_called_once()
+                        # sender_name should default to "unknown" when not provided
+                        call_kwargs = mock_wrap.call_args
+                        assert call_kwargs.kwargs.get("sender_name") == "unknown" or \
+                            call_kwargs[1].get("sender_name") == "unknown"
                         # The wrapped prompt should be passed to launch
                         launch_kwargs = mock_launch.call_args
                         assert launch_kwargs.kwargs["prompt"] == "wrapped prompt" or \
                             launch_kwargs[1].get("prompt") == "wrapped prompt" or \
                             (len(launch_kwargs[0]) > 2 and launch_kwargs[0][2] == "wrapped prompt")
+
+    @pytest.mark.asyncio
+    async def test_execute_passes_sender_name(self, auth_headers, env_vars):
+        with patch.dict("os.environ", env_vars):
+            with patch("clade.worker.ember.launch_local_task") as mock_launch:
+                mock_launch.return_value = LocalTaskResult(
+                    success=True,
+                    session_name="task-oppy-test-123",
+                    message="Task launched",
+                )
+                with patch("clade.worker.ember.check_tmux_session", return_value=False):
+                    with patch("clade.worker.ember.wrap_prompt") as mock_wrap:
+                        mock_wrap.return_value = "wrapped prompt"
+                        async with httpx.AsyncClient(
+                            transport=httpx.ASGITransport(app=app),
+                            base_url="http://test",
+                        ) as client:
+                            await client.post(
+                                "/tasks/execute",
+                                json={
+                                    "prompt": "original",
+                                    "subject": "Test",
+                                    "task_id": 42,
+                                    "sender_name": "kamaji",
+                                },
+                                headers=auth_headers,
+                            )
+                        # sender_name should be passed through from request
+                        call_kwargs = mock_wrap.call_args
+                        assert call_kwargs.kwargs.get("sender_name") == "kamaji" or \
+                            call_kwargs[1].get("sender_name") == "kamaji"
 
 
 class TestActiveTasksEndpoint:

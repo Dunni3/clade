@@ -449,4 +449,3 @@ Current setup is fine for 3-5 brothers. For more brothers or higher volume:
 
 - [Brother Setup Guide](BROTHER_SETUP.md) - How brothers connect to The Hearth
 - [Quick Start](QUICKSTART.md) - Getting started with The Clade
-- [Future Plans](FUTURE.md) - Planned features

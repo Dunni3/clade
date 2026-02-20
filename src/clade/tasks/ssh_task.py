@@ -59,6 +59,7 @@ def wrap_prompt(
         f"This is task #{task_id} assigned to you by {sender_name}.",
         "",
         "1. Send a mailbox message confirming receipt of this task. "
+        f"Address it to {sender_name}. "
         f"Use `task_id={task_id}` when sending the message so it gets linked to this task.",
         "",
         "2. Do the work described above.",

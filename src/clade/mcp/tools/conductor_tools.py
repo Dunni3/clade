@@ -17,6 +17,7 @@ def create_conductor_tools(
     worker_registry: dict[str, dict],
     hearth_url: str | None = None,
     hearth_api_key: str | None = None,
+    mailbox_name: str | None = None,
 ) -> dict:
     """Register conductor tools with an MCP server.
 
@@ -27,6 +28,7 @@ def create_conductor_tools(
             ember_url, ember_api_key, working_dir (optional)
         hearth_url: Hearth URL to pass to spawned worker sessions
         hearth_api_key: Not passed to workers — workers use their own key
+        mailbox_name: The conductor's own name (used as sender_name when delegating)
 
     Returns:
         Dict mapping tool names to their callable functions (for testing).
@@ -88,7 +90,10 @@ def create_conductor_tools(
         except Exception as e:
             return f"Error creating task in Hearth: {e}"
 
-        # Send to Ember
+        # Send to Ember.
+        # Don't pass hearth_url — the Ember process already has the correct
+        # HEARTH_URL for its network context. The conductor's own URL (often
+        # localhost) is unreachable from remote workers.
         wd = working_dir or worker.get("working_dir")
         try:
             ember_result = await ember.execute_task(
@@ -97,9 +102,10 @@ def create_conductor_tools(
                 task_id=task_id,
                 working_dir=wd,
                 max_turns=max_turns,
-                hearth_url=hearth_url,
+                hearth_url=None,
                 hearth_api_key=worker.get("hearth_api_key"),
                 hearth_name=brother,
+                sender_name=mailbox_name,
             )
         except Exception as e:
             # Mark task as failed

@@ -89,6 +89,7 @@ class ExecuteTaskRequest(BaseModel):
     hearth_url: str | None = None
     hearth_api_key: str | None = None
     hearth_name: str | None = None
+    sender_name: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +145,15 @@ async def execute_task(
             brother=_brother_name,
             subject=req.subject,
             task_id=req.task_id,
-            sender_name="doot",
+            sender_name=req.sender_name or "unknown",
         )
+
+    # Resolve Hearth connection for the spawned Claude session.
+    # Fall back to Ember's own env vars when not provided in the request,
+    # so the runner script always exports them explicitly (needed for hooks).
+    hearth_url = req.hearth_url or os.environ.get("HEARTH_URL") or os.environ.get("MAILBOX_URL")
+    hearth_api_key = req.hearth_api_key or os.environ.get("HEARTH_API_KEY") or os.environ.get("MAILBOX_API_KEY")
+    hearth_name = req.hearth_name or os.environ.get("HEARTH_NAME") or os.environ.get("MAILBOX_NAME") or _brother_name
 
     # Launch
     result = launch_local_task(
@@ -154,9 +162,9 @@ async def execute_task(
         prompt=prompt,
         max_turns=req.max_turns,
         task_id=req.task_id,
-        hearth_url=req.hearth_url,
-        hearth_api_key=req.hearth_api_key,
-        hearth_name=req.hearth_name,
+        hearth_url=hearth_url,
+        hearth_api_key=hearth_api_key,
+        hearth_name=hearth_name,
     )
 
     if not result.success:

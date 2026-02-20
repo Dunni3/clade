@@ -113,6 +113,29 @@ class TestBuildRunnerScript:
             os.unlink(prompt_path)
             os.unlink(runner_path)
 
+    def test_env_vars_without_hearth_url(self):
+        """Ember delegation: task_id + api_key set, but no hearth_url override."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello",
+            task_id=7,
+            hearth_url=None,
+            hearth_api_key="worker-key",
+            hearth_name="testember",
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            # Task ID and API key are exported
+            assert "export CLAUDE_TASK_ID=7" in content
+            assert "export HEARTH_API_KEY='worker-key'" in content
+            assert "export HEARTH_NAME='testember'" in content
+            # HEARTH_URL is NOT overridden — worker's own env var is used
+            assert "HEARTH_URL" not in content
+            assert "MAILBOX_URL" not in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
     def test_self_cleanup(self):
         prompt_path, runner_path = build_runner_script(
             "sess", None, "hello"

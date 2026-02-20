@@ -157,6 +157,26 @@ class KeyInfo(BaseModel):
 # -- Thrums --
 
 
+# -- Members --
+
+
+class MemberActivity(BaseModel):
+    name: str
+    last_message_at: str | None = None
+    messages_sent: int = 0
+    active_tasks: int = 0
+    completed_tasks: int = 0
+    failed_tasks: int = 0
+    last_task_at: str | None = None
+
+
+class MemberActivityResponse(BaseModel):
+    members: list[MemberActivity]
+
+
+# -- Thrums --
+
+
 class CreateThrumRequest(BaseModel):
     title: str = ""
     goal: str = ""

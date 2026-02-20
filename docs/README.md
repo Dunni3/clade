@@ -39,12 +39,6 @@ Welcome to The Clade documentation! This directory contains comprehensive guides
   - Deployment guide
   - Architecture and file structure
 
-### Reference
-- **[FUTURE.md](FUTURE.md)** - Planned features and roadmap
-  - Additional protocols
-  - Cross-platform support
-  - Plugin system
-
 ## Quick Links
 
 ### For First-Time Setup
@@ -58,7 +52,6 @@ Welcome to The Clade documentation! This directory contains comprehensive guides
 - Updating brother configuration → [BROTHER_SETUP.md](BROTHER_SETUP.md)
 
 ### For Development
-- Future feature planning → [FUTURE.md](FUTURE.md)
 - Package structure → See `src/clade/`
 - Tests → See `tests/`
 

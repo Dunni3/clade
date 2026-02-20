@@ -387,6 +387,41 @@ class TestAPI:
         )
         assert resp.status_code == 422
 
+    @pytest.mark.asyncio
+    async def test_send_to_unknown_recipient_rejected(self, client):
+        resp = await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["nonexistent"], "body": "Hello"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 422
+        assert "nonexistent" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_send_to_mix_known_and_unknown_rejected(self, client):
+        resp = await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["oppy", "fakename"], "body": "Hello"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 422
+        assert "fakename" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_send_to_db_registered_recipient_accepted(self, client):
+        """Recipients registered via the API (not just env vars) should be accepted."""
+        await client.post(
+            "/api/v1/keys",
+            json={"name": "curie", "key": "key-curie"},
+            headers=DOOT_HEADERS,
+        )
+        resp = await client.post(
+            "/api/v1/messages",
+            json={"recipients": ["curie"], "body": "Hello curie"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+
 
 # ---------------------------------------------------------------------------
 # MailboxClient — unit tests with mocked HTTP
@@ -621,6 +656,20 @@ class TestMCPToolsWithMock:
 # ---------------------------------------------------------------------------
 # db.py — API keys
 # ---------------------------------------------------------------------------
+
+
+class TestDatabaseGetAllMemberNames:
+    @pytest.mark.asyncio
+    async def test_empty_db(self):
+        names = await mailbox_db.get_all_member_names()
+        assert names == set()
+
+    @pytest.mark.asyncio
+    async def test_with_keys(self):
+        await mailbox_db.insert_api_key("curie", "key-1")
+        await mailbox_db.insert_api_key("darwin", "key-2")
+        names = await mailbox_db.get_all_member_names()
+        assert names == {"curie", "darwin"}
 
 
 class TestDatabaseApiKeys:

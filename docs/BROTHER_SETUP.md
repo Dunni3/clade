@@ -447,4 +447,3 @@ browse_feed(recipient="doot")  # Messages Doot received
 
 - [Hearth Setup](MAILBOX_SETUP.md) - How to manage The Hearth server
 - [Quick Start](QUICKSTART.md) - Getting started guide
-- [Future Plans](FUTURE.md) - Planned features

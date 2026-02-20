@@ -47,13 +47,17 @@ def build_runner_script(
     # Build runner script
     lines = ["#!/bin/bash"]
 
-    # Export env vars for Hearth access
-    if task_id is not None and hearth_url and hearth_api_key:
+    # Export env vars for Hearth access.
+    # Each var is independent so callers can selectively override.
+    # When launched via Ember, the process already inherits correct env vars;
+    # only vars explicitly passed will be overridden.
+    if task_id is not None:
         lines.append(f"export CLAUDE_TASK_ID={task_id}")
+    if hearth_url:
         lines.append(f"export HEARTH_URL='{hearth_url}'")
-        lines.append(f"export HEARTH_API_KEY='{hearth_api_key}'")
-        # Legacy fallbacks
         lines.append(f"export MAILBOX_URL='{hearth_url}'")
+    if hearth_api_key:
+        lines.append(f"export HEARTH_API_KEY='{hearth_api_key}'")
         lines.append(f"export MAILBOX_API_KEY='{hearth_api_key}'")
     if hearth_name:
         lines.append(f"export HEARTH_NAME='{hearth_name}'")

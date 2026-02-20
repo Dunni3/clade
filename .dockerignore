@@ -1,0 +1,37 @@
+# Secrets — never bake into images
+CREDENTIALS.md
+.env
+.env.*
+
+# Git
+.git/
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Dev/IDE
+.vscode/
+.idea/
+*.swp
+.ruff_cache/
+
+# Research notes (large, not needed in containers)
+research_notes/
+
+# Frontend build artifacts (not needed in backend containers)
+frontend/node_modules/
+frontend/dist/
+
+# Test keys are NOT excluded — they're needed by Docker test builds
+# (They're gitignored and generated locally, not real secrets)
+
+# Marimo / Streamlit
+marimo/
+__marimo__/
+.streamlit/

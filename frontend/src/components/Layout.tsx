@@ -7,6 +7,8 @@ const navItems = [
   { to: '/', label: 'Inbox' },
   { to: '/feed', label: 'Feed' },
   { to: '/tasks', label: 'Tasks' },
+  { to: '/thrums', label: 'Thrums' },
+  { to: '/status', label: 'Status' },
   { to: '/compose', label: 'Compose' },
   { to: '/settings', label: 'Settings' },
 ];

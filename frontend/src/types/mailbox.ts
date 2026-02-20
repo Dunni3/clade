@@ -62,6 +62,7 @@ export interface TaskSummary {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  thrum_id: number | null;
 }
 
 export interface TaskEvent {
@@ -81,4 +82,36 @@ export interface TaskDetail extends TaskSummary {
   output: string | null;
   messages: FeedMessage[];
   events: TaskEvent[];
+}
+
+export interface ThrumSummary {
+  id: number;
+  creator: string;
+  title: string;
+  goal: string;
+  status: string;
+  priority: string;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface ThrumDetail extends ThrumSummary {
+  plan: string | null;
+  output: string | null;
+  tasks: TaskSummary[];
+}
+
+export interface MemberActivity {
+  name: string;
+  last_message_at: string | null;
+  messages_sent: number;
+  active_tasks: number;
+  completed_tasks: number;
+  failed_tasks: number;
+  last_task_at: string | null;
+}
+
+export interface MemberActivityResponse {
+  members: MemberActivity[];
 }

@@ -1,10 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { getTasks } from '../api/mailbox';
+import { getTasks, getMemberActivity } from '../api/mailbox';
 import { useAuthStore } from '../store/authStore';
 import type { TaskSummary } from '../types/mailbox';
 
-const BROTHERS = ['', 'ian', 'doot', 'oppy', 'jerry'];
 const STATUSES = ['', 'pending', 'launched', 'in_progress', 'completed', 'failed'];
 
 const statusColors: Record<string, string> = {
@@ -30,11 +29,19 @@ function formatDate(iso: string) {
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
+  const [members, setMembers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [assignee, setAssignee] = useState('');
   const [status, setStatus] = useState('');
   const apiKey = useAuthStore((s) => s.apiKey);
+
+  useEffect(() => {
+    if (!apiKey) return;
+    getMemberActivity()
+      .then((res) => setMembers(res.members.map((m) => m.name)))
+      .catch(() => {});
+  }, [apiKey]);
 
   const fetchTasks = useCallback(async () => {
     if (!apiKey) return;
@@ -70,7 +77,7 @@ export default function TasksPage() {
           className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200"
         >
           <option value="">All assignees</option>
-          {BROTHERS.filter(Boolean).map((b) => (
+          {members.map((b) => (
             <option key={b} value={b}>{b}</option>
           ))}
         </select>

@@ -4,35 +4,36 @@ A multi-container environment for testing the full `clade` CLI onboarding flow �
 
 ## Architecture
 
-Five containers on a shared Docker network:
+Three containers on a shared Docker network, matching production topology:
 
-| Container | Role | What it runs |
-|-----------|------|-------------|
-| `personal` | Personal brother (coordinator) | clade CLI, Claude Code, SSH client |
-| `worker` | Worker brother (SSH target) | sshd, Claude Code, python3, git, tmux |
-| `hearth` | Communication hub | FastAPI + uvicorn (hearth server), Claude Code |
-| `ember` | Ember server (HTTP task executor) | clade-ember (FastAPI on port 8100), tmux |
-| `conductor` | Conductor (Kamaji) | clade CLI, Claude Code (interactive shell) |
+| Container | Role | What it runs | Production equivalent |
+|-----------|------|-------------|----------------------|
+| `personal` | Coordinator (Doot) | clade CLI, Claude Code, SSH client | Mac laptop |
+| `worker` | Worker brother + Ember server | sshd + clade-ember (port 8100), Claude Code, tmux | masuda |
+| `hearth` | Hearth API + Conductor (Kamaji) | FastAPI + uvicorn (port 8000), Claude Code, conductor tick config | EC2 instance |
+| `frontend` | Web UI | Vite dev server (port 5173), proxies `/api` to hearth | nginx on EC2 |
 
 Docker Compose DNS lets all containers reach each other by service name.
 
 ```
-┌─────────────┐     SSH      ┌─────────────┐
-│  personal   │─────────────▶│   worker     │
-│  (clade CLI)│              │   (sshd)     │
-└──────┬──────┘              └─────────────┘
-       │
-       │ HTTP                ┌─────────────┐
-       ├────────────────────▶│   ember      │
-       │                     │  (clade-ember│
-       │                     │   port 8100) │
-       │                     └──────▲───────┘
-       │ HTTP                       │ HTTP
-       ▼                            │
-┌─────────────┐              ┌──────┴──────┐
-│   hearth    │◀─────────────│  conductor  │
-│  (FastAPI)  │    HTTP      │  (kamaji)   │
-└─────────────┘              └─────────────┘
+┌─────────────┐     SSH      ┌──────────────────┐
+│  personal   │─────────────▶│     worker        │
+│  (clade CLI)│              │  (sshd + Ember)   │
+│             │──── HTTP ───▶│   port 8100       │
+└──────┬──────┘              └────────▲──────────┘
+       │                              │
+       │ HTTP                         │ HTTP (delegate tasks)
+       ▼                              │
+┌──────────────────┐                  │
+│     hearth       │──────────────────┘
+│  (FastAPI +      │
+│   Kamaji config) │◀─── /api proxy ──┐
+│   port 8000      │                  │
+└──────────────────┘        ┌─────────┴────────┐
+                            │    frontend       │
+                            │  (Vite dev server)│
+                            │  localhost:5173   │
+                            └──────────────────┘
 ```
 
 ## Quick Start
@@ -43,16 +44,11 @@ bash scripts/test-compose.sh
 
 This will:
 1. Generate throwaway SSH keys in `test-keys/` (if not already present)
-2. Build all five container images
+2. Build all three container images
 3. Start the containers in the background
 4. Drop you into a bash shell on the `personal` container
 
-Claude Code is pre-installed but **not authenticated**. Run `claude login` inside each container to log in with your account. This must be done manually after each rebuild — login state does not persist across container rebuilds.
-
-```bash
-# Authenticate Claude Code (interactive — opens a browser URL to complete)
-claude login
-```
+Claude Code is pre-installed but **not authenticated**. See [Claude Code Authentication](#claude-code-authentication) below — the easiest approach is creating a `docker/.env` file with your API key before building.
 
 From there, run the onboarding flow:
 
@@ -71,11 +67,13 @@ All Docker files live in `docker/`:
 
 | File | Purpose |
 |------|---------|
-| `docker/Dockerfile.test` | Personal/conductor image — clade CLI, SSH client with pre-loaded key |
-| `docker/Dockerfile.test.worker` | Worker/ember image — sshd with authorized key, git, tmux |
-| `docker/Dockerfile.test.hearth` | Hearth server image — FastAPI + uvicorn + aiosqlite |
-| `docker/docker-compose.test.yml` | Wires the five services together |
-| `docker/test-conductor-workers.yaml` | Static worker registry for the conductor |
+| `docker/Dockerfile.test` | Personal image — clade CLI, SSH client with pre-loaded key |
+| `docker/Dockerfile.test.worker` | Worker image — sshd + Ember server, git, tmux |
+| `docker/Dockerfile.test.hearth` | Hearth image — FastAPI + uvicorn + conductor tick config |
+| `docker/entrypoint-worker.sh` | Worker entrypoint — starts sshd, then runs clade-ember as testuser |
+| `docker/Dockerfile.test.frontend` | Frontend image — Vite dev server with hot reload |
+| `docker/docker-compose.test.yml` | Wires the four services together |
+| `docker/test-conductor-workers.yaml` | Static worker registry for the conductor (points to `http://worker:8100`) |
 | `scripts/test-compose.sh` | Convenience launcher (keygen + build + start + attach) |
 | `test-keys/` | Generated SSH keypair (gitignored) |
 
@@ -92,20 +90,19 @@ The personal container also has `StrictHostKeyChecking no` configured for the `w
 
 ## API Keys
 
-The hearth container comes pre-configured with four test API keys:
+The hearth container comes pre-configured with three test API keys:
 
 | Key | Name | Used by |
 |-----|------|---------|
-| `testkey-personal` | `testpersonal` | Personal container (set via env vars) |
-| `testkey-worker` | `testworker` | Worker container |
-| `testkey-ember` | `testember` | Ember container (auth for incoming requests + Hearth access) |
-| `testkey-kamaji` | `kamaji` | Conductor container |
+| `testkey-personal` | `testpersonal` | Personal container (clade CLI + Hearth access) |
+| `testkey-ember` | `testember` | Worker container (Ember auth for incoming requests + Hearth access) |
+| `testkey-kamaji` | `kamaji` | Hearth container (conductor ticks via `clade-conductor`) |
 
 Additional keys generated by `clade init --server-key` and `clade add-brother` are dynamically registered with the Hearth via its `/api/v1/keys` endpoint.
 
 ## Ember Server
 
-The `ember` service runs the Ember HTTP server (`clade-ember`) using the worker image with an overridden command. It:
+The Ember runs on the `worker` container alongside sshd (started by `entrypoint-worker.sh`). It:
 
 - Listens on port 8100 inside the Docker network
 - Authenticates requests with `testkey-ember`
@@ -116,36 +113,40 @@ Test it from inside any container:
 
 ```bash
 # Health check (unauthenticated)
-curl http://ember:8100/health
+curl http://worker:8100/health
 
 # Execute a task (authenticated)
-curl -X POST http://ember:8100/tasks/execute \
+curl -X POST http://worker:8100/tasks/execute \
   -H "Authorization: Bearer testkey-ember" \
   -H "Content-Type: application/json" \
   -d '{"prompt": "echo hello", "subject": "test"}'
 
 # Check active tasks (authenticated)
-curl http://ember:8100/tasks/active \
+curl http://worker:8100/tasks/active \
   -H "Authorization: Bearer testkey-ember"
 ```
 
 ## Conductor (Kamaji)
 
-The `conductor` service provides an interactive shell for testing Conductor functionality. It has no long-running process — you `exec` into it to run conductor ticks manually or test the `clade-conductor` MCP server.
+The conductor runs on the `hearth` container — same as production where the Hearth and Conductor share an EC2 instance. The hearth image pre-bakes the conductor tick script, prompt, and MCP config into `/home/testuser/.config/clade/`.
+
+The Hearth fires conductor ticks automatically via `CONDUCTOR_TICK_CMD` on thrum creation and task completion. You can also trigger a tick manually:
 
 ```bash
-# From the host machine:
-docker compose -f docker/docker-compose.test.yml exec conductor bash
+# From the host machine — run a conductor tick as testuser:
+docker compose -f docker/docker-compose.test.yml exec -u testuser hearth \
+  bash /home/testuser/.config/clade/conductor-tick.sh
 
-# Inside the conductor container:
-# Check Ember health
-curl http://ember:8100/health
+# Check Ember health from the hearth container:
+docker compose -f docker/docker-compose.test.yml exec hearth \
+  curl -s http://worker:8100/health
 
 # The conductor's worker registry is at:
-cat /home/testuser/clade/docker/test-conductor-workers.yaml
+docker compose -f docker/docker-compose.test.yml exec hearth \
+  cat /opt/clade/docker/test-conductor-workers.yaml
 ```
 
-The conductor container has `CONDUCTOR_WORKERS_CONFIG` pointing to the test worker registry, which maps `testember` to `http://ember:8100`.
+The hearth container has `CONDUCTOR_WORKERS_CONFIG` pointing to the test worker registry, which maps `testember` to `http://worker:8100`.
 
 ## What Gets Tested
 
@@ -172,14 +173,16 @@ Runs diagnostics across all brothers and the server. Some expected failures in t
 ### Ember delegation
 From the personal container (or any container with the right env vars):
 1. Create a task in the Hearth
-2. Send it to the Ember via HTTP
+2. Send it to the Ember on the worker container via HTTP
 3. Ember launches a tmux session with Claude Code
 4. Task status updates flow through the Hearth
 
-### End-to-end thrum flow
-1. Create a thrum via the Hearth API from the personal container
-2. Exec into the conductor and run the conductor MCP tools (or manually call the delegation API)
-3. Verify the task appears on the Ember and updates propagate to the Hearth
+### End-to-end thrum flow (event-driven)
+1. Create a thrum via Claude Code on the personal container (using `clade-personal` MCP tools)
+2. Hearth auto-triggers a conductor tick via `CONDUCTOR_TICK_CMD`
+3. Conductor (Kamaji) picks up the thrum and delegates tasks to the worker's Ember
+4. Task completion triggers another conductor tick, which delegates the next step
+5. Thrum completes when all steps are done — no manual intervention needed
 
 ## Common Operations
 
@@ -190,14 +193,21 @@ docker compose -f docker/docker-compose.test.yml up --build -d
 # Attach to the personal container
 docker compose -f docker/docker-compose.test.yml exec personal bash
 
-# Attach to the conductor
-docker compose -f docker/docker-compose.test.yml exec conductor bash
+# Attach to the worker container (sshd + Ember)
+docker compose -f docker/docker-compose.test.yml exec worker bash
+
+# Attach to the hearth container (Hearth + Conductor)
+docker compose -f docker/docker-compose.test.yml exec hearth bash
+
+# Run a conductor tick manually (as testuser on the hearth container)
+docker compose -f docker/docker-compose.test.yml exec -u testuser hearth \
+  bash /home/testuser/.config/clade/conductor-tick.sh
 
 # View hearth logs
 docker compose -f docker/docker-compose.test.yml logs hearth
 
-# View ember logs
-docker compose -f docker/docker-compose.test.yml logs ember
+# View worker logs (sshd + Ember)
+docker compose -f docker/docker-compose.test.yml logs worker
 
 # SSH from personal to worker manually
 docker compose -f docker/docker-compose.test.yml exec personal ssh testuser@worker
@@ -214,29 +224,75 @@ rm -rf test-keys && bash scripts/test-compose.sh
 
 ## Claude Code Authentication
 
-Claude Code is installed on all containers at build time, but authentication must be done manually after each rebuild. Run `claude login` inside each container — it will print a URL to open in your browser to complete OAuth.
+Claude Code must be authenticated on every container that runs `claude -p`: **personal**, **worker**, and **hearth**. There are two options:
+
+### Option A: API Key (Recommended)
+
+Inject `ANTHROPIC_API_KEY` into all containers so Claude authenticates automatically — no browser login needed, survives rebuilds.
+
+Create `docker/.env` (gitignored):
+
+```bash
+echo "ANTHROPIC_API_KEY=sk-ant-YOUR-KEY-HERE" > docker/.env
+```
+
+That's it. The compose file uses `env_file` with `required: false` on all three services, so the key is automatically injected when the file exists and silently skipped when it doesn't. Rebuild and the key is available everywhere:
+
+```bash
+docker compose -f docker/docker-compose.test.yml down -v
+docker compose -f docker/docker-compose.test.yml up --build -d
+```
+
+Verify it's reaching the containers:
+
+```bash
+docker compose -f docker/docker-compose.test.yml exec personal env | grep ANTHROPIC_API_KEY
+docker compose -f docker/docker-compose.test.yml exec worker env | grep ANTHROPIC_API_KEY
+docker compose -f docker/docker-compose.test.yml exec hearth env | grep ANTHROPIC_API_KEY
+```
+
+The hearth container needs the key because conductor ticks run `runuser -u testuser -- bash conductor-tick.sh`, which invokes `claude -p`. The `runuser` command preserves env vars from the parent process (uvicorn).
+
+### Option B: Browser Login (Manual)
+
+If you don't have an API key, you can authenticate interactively after each rebuild. This must be repeated every time containers are rebuilt.
 
 ```bash
 # Personal — you're already here after test-compose.sh drops you in
 claude login
 
-# Worker — SSH from inside the personal container
-ssh testuser@worker
+# Worker — the Ember spawns Claude in tmux sessions as testuser
+docker compose -f docker/docker-compose.test.yml exec -it worker bash
+su - testuser
 claude login
+exit  # back to root
 
-# Hearth — use docker compose exec from the host machine
-docker compose -f docker/docker-compose.test.yml exec hearth bash
-claude login
-
-# Conductor — use docker compose exec from the host machine
-docker compose -f docker/docker-compose.test.yml exec conductor bash
+# Hearth — conductor ticks run Claude as testuser
+docker compose -f docker/docker-compose.test.yml exec -it -u testuser hearth bash
 claude login
 ```
 
-Login state lives in `~/.claude/` inside the container and is lost when the container is rebuilt. To persist it across rebuilds, you could volume-mount the auth directory, but this is generally not needed for quick test sessions.
+Login state lives in `~/.claude/` inside the container and is lost when the container is rebuilt.
+
+## Accessing the Frontend
+
+The `frontend` container runs the Vite dev server with hot reload, exposed at `http://localhost:5173`. It proxies `/api` requests to the `hearth` container automatically — no local Node.js or `npm run dev` needed.
+
+After `bash scripts/test-compose.sh`, just open `http://localhost:5173` in your browser.
+
+**Auth:** Use one of the test API keys (e.g. `testkey-personal`) on the Settings page.
+
+**What works:**
+- All Hearth API calls (messages, tasks, thrums, members, health)
+- Full page navigation (Inbox, Feed, Tasks, Thrums, Status, Compose, Settings)
+- Hot reload when editing files in `frontend/`
+
+**What doesn't work:**
+- The Ember (worker port 8100) is only reachable inside the Docker network (not exposed to host)
 
 ## Limitations
 
-- **Claude Code login is ephemeral**: `claude login` must be re-run after each container rebuild.
+- **Claude Code auth required**: All containers that run `claude -p` need authentication. Use `ANTHROPIC_API_KEY` (Option A) to avoid manual login after rebuilds, or `claude login` (Option B) if you don't have an API key.
 - **Hearth API key bootstrap**: The pre-configured test keys in `docker/docker-compose.test.yml` are used to bootstrap. Keys generated by `clade init --server-key` and `clade add-brother` are dynamically registered with the Hearth via its `/api/v1/keys` endpoint.
-- **Ember task execution requires Claude login**: The Ember launches Claude Code sessions, so `claude login` must be run on the ember container before tasks will actually execute. The Ember itself starts fine without auth.
+- **Ember task execution requires Claude auth**: The Ember launches Claude Code sessions — without auth, tasks will fail even though the Ember itself starts fine.
+- **Conductor ticks require Claude auth**: Conductor ticks run `claude -p` as testuser on the hearth container.

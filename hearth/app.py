@@ -10,7 +10,7 @@ from fastapi.responses import Response
 
 from . import db
 from .auth import ADMIN_NAMES, resolve_sender
-from .config import CONDUCTOR_TICK_CMD
+from .config import API_KEYS, CONDUCTOR_TICK_CMD
 
 logger = logging.getLogger(__name__)
 from .models import (
@@ -23,6 +23,7 @@ from .models import (
     FeedMessage,
     KeyInfo,
     MarkReadResponse,
+    MemberActivityResponse,
     MessageDetail,
     MessageSummary,
     ReadByEntry,
@@ -90,6 +91,18 @@ async def send_message(
     req: SendMessageRequest,
     sender: str = Depends(resolve_sender),
 ):
+    # Validate that all recipients are registered members
+    env_names = set(API_KEYS.values())
+    db_names = await db.get_all_member_names()
+    known_members = env_names | db_names
+    unknown = [r for r in req.recipients if r not in known_members]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown recipient(s): {', '.join(unknown)}. "
+            f"Known members: {', '.join(sorted(known_members))}",
+        )
+
     message_id = await db.insert_message(
         sender=sender,
         subject=req.subject,
@@ -371,6 +384,20 @@ async def list_keys(
 ):
     """List all registered API key names (never exposes key values)."""
     return await db.list_api_keys()
+
+
+# ---------------------------------------------------------------------------
+# Member activity endpoint
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/members/activity", response_model=MemberActivityResponse)
+async def member_activity(
+    _caller: str = Depends(resolve_sender),
+):
+    env_names = list(API_KEYS.values())
+    members = await db.get_member_activity(extra_names=env_names)
+    return MemberActivityResponse(members=members)
 
 
 # ---------------------------------------------------------------------------

@@ -45,6 +45,7 @@ create_conductor_tools(
     _worker_registry,
     hearth_url=_hearth_url,
     hearth_api_key=_hearth_api_key,
+    mailbox_name=_hearth_name,
 )
 
 

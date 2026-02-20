@@ -1,15 +1,8 @@
 """
-Future: FastAPI web dashboard for the Clade.
+Placeholder for a local web dashboard.
 
-Planned features:
-- Browse mailbox feed via web UI
-- View brother status and availability
-- Send messages via web form
-- Real-time updates via WebSocket
-- Admin interface for mailbox server
-
-This module is a placeholder for future development.
-See docs/FUTURE.md for implementation plans.
+The Hearth web UI (frontend/) serves as the primary web interface.
+This module would be for a local dashboard if needed in the future.
 """
 
 # Placeholder - not yet implemented

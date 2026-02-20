@@ -10,12 +10,16 @@ services:
         condition: service_started
       hearth:
         condition: service_started
+    env_file:
+      - path: .env
+        required: false
     environment:
       HEARTH_URL: http://hearth:8000
       HEARTH_API_KEY: testkey-personal
       HEARTH_NAME: testpersonal
       EMBER_URL: http://worker:8100
       EMBER_API_KEY: testkey-ember
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
 
   worker:
     build:
@@ -24,6 +28,9 @@ services:
     depends_on:
       hearth:
         condition: service_started
+    env_file:
+      - path: .env
+        required: false
     environment:
       EMBER_PORT: "8100"
       EMBER_HOST: "0.0.0.0"
@@ -32,11 +39,17 @@ services:
       HEARTH_API_KEY: testkey-ember
       HEARTH_URL: http://hearth:8000
       HEARTH_NAME: testember
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
 
   hearth:
     build:
       context: ..
       dockerfile: docker/Dockerfile.test.hearth
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
     environment:
       # Hearth server config
       MAILBOX_API_KEYS: "testkey-personal:testpersonal,testkey-ember:testember,testkey-kamaji:kamaji"
@@ -47,8 +60,21 @@ services:
       HEARTH_NAME: kamaji
       CONDUCTOR_WORKERS_CONFIG: /opt/clade/docker/test-conductor-workers.yaml
       CONDUCTOR_TICK_CMD: "runuser -u testuser -- bash /home/testuser/.config/clade/conductor-tick.sh"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - hearth-data:/data
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.test.frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      hearth:
+        condition: service_started
+    environment:
+      API_PROXY_TARGET: http://hearth:8000
 
 volumes:
   hearth-data:

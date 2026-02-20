@@ -653,6 +653,17 @@ async def list_api_keys() -> list[dict]:
         await db.close()
 
 
+async def get_all_member_names() -> set[str]:
+    """Return the set of all registered member names from the api_keys table."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT name FROM api_keys")
+        rows = await cursor.fetchall()
+        return {row["name"] for row in rows}
+    finally:
+        await db.close()
+
+
 async def delete_api_key(name: str) -> bool:
     """Remove an API key by name. Returns True if deleted."""
     db = await get_db()
@@ -799,6 +810,57 @@ async def delete_thrum(thrum_id: int) -> bool:
         cursor = await db.execute("DELETE FROM thrums WHERE id = ?", (thrum_id,))
         await db.commit()
         return cursor.rowcount > 0
+    finally:
+        await db.close()
+
+
+async def get_member_activity(extra_names: list[str] | None = None) -> list[dict]:
+    """Get activity summary per member (DB api_keys + optional extra names)."""
+    db = await get_db()
+    try:
+        # Get members from DB
+        cursor = await db.execute("SELECT name FROM api_keys ORDER BY name")
+        db_names = [row["name"] for row in await cursor.fetchall()]
+
+        # Merge with env-var members (deduplicated, sorted)
+        all_names = set(db_names)
+        if extra_names:
+            all_names.update(extra_names)
+        members = sorted(all_names)
+
+        result = []
+        for name in members:
+            # Message stats
+            cursor = await db.execute(
+                """SELECT COUNT(*) as cnt, MAX(created_at) as last_at
+                   FROM messages WHERE sender = ?""",
+                (name,),
+            )
+            msg_row = await cursor.fetchone()
+
+            # Task stats (as creator or assignee)
+            cursor = await db.execute(
+                """SELECT
+                     SUM(CASE WHEN status IN ('pending', 'launched', 'in_progress') THEN 1 ELSE 0 END) as active_tasks,
+                     SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_tasks,
+                     SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_tasks,
+                     MAX(created_at) as last_at
+                   FROM tasks WHERE creator = ? OR assignee = ?""",
+                (name, name),
+            )
+            task_row = await cursor.fetchone()
+
+            result.append({
+                "name": name,
+                "last_message_at": msg_row["last_at"],
+                "messages_sent": msg_row["cnt"],
+                "active_tasks": task_row["active_tasks"] or 0,
+                "completed_tasks": task_row["completed_tasks"] or 0,
+                "failed_tasks": task_row["failed_tasks"] or 0,
+                "last_task_at": task_row["last_at"],
+            })
+
+        return result
     finally:
         await db.close()
 

@@ -9,6 +9,9 @@ import type {
   UnreadCountResponse,
   TaskSummary,
   TaskDetail,
+  ThrumSummary,
+  ThrumDetail,
+  MemberActivityResponse,
 } from '../types/mailbox';
 
 export async function getInbox(unreadOnly = false, limit = 50): Promise<MessageSummary[]> {
@@ -78,5 +81,29 @@ export async function getTasks(params: {
 
 export async function getTask(id: number): Promise<TaskDetail> {
   const { data } = await apiClient.get<TaskDetail>(`/tasks/${id}`);
+  return data;
+}
+
+export async function getThrums(params: {
+  status?: string;
+  creator?: string;
+  limit?: number;
+} = {}): Promise<ThrumSummary[]> {
+  const { data } = await apiClient.get<ThrumSummary[]>('/thrums', { params });
+  return data;
+}
+
+export async function getThrum(id: number): Promise<ThrumDetail> {
+  const { data } = await apiClient.get<ThrumDetail>(`/thrums/${id}`);
+  return data;
+}
+
+export async function getHealthCheck(): Promise<{ status: string }> {
+  const { data } = await apiClient.get<{ status: string }>('/health');
+  return data;
+}
+
+export async function getMemberActivity(): Promise<MemberActivityResponse> {
+  const { data } = await apiClient.get<MemberActivityResponse>('/members/activity');
   return data;
 }

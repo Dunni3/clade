@@ -60,6 +60,16 @@ clade/
 │   ├── unit/                      # Fast, no network (config, client, ssh, cli, timestamp)
 │   └── integration/               # MCP tool + Hearth server integration tests
 ├── frontend/                      # Hearth web UI (Vite + React + TypeScript + Tailwind v4)
+├── docker/                        # Docker Compose test environment
+│   ├── Dockerfile.test            # Personal image — clade CLI, SSH client
+│   ├── Dockerfile.test.worker     # Worker image — sshd + Ember server
+│   ├── Dockerfile.test.hearth     # Hearth image — FastAPI + conductor config
+│   ├── Dockerfile.test.frontend   # Frontend image — Vite dev server
+│   ├── docker-compose.test.yml    # Four-service test environment
+│   ├── entrypoint-worker.sh       # Worker entrypoint — starts sshd + Ember
+│   └── test-conductor-workers.yaml # Static worker registry for test conductor
+├── scripts/                       # Convenience scripts
+│   └── test-compose.sh            # Docker test env launcher (keygen + build + attach)
 ├── deploy/                        # Deployment and infrastructure scripts
 │   ├── setup.sh                   # EC2 server provisioning
 │   ├── ec2.sh                     # EC2 instance management (start/stop/status/ssh)
@@ -75,6 +85,7 @@ clade/
 │   └── cluster-tailscale-start.sh # Submit/stop the Tailscale SLURM job
 ├── research_notes/                # Development logs and research (gitignored)
 ├── docs/                          # Documentation
+│   └── docker-testing.md          # Full Docker Compose test environment docs
 └── HEARTH_SETUP.md                # Self-setup guide for brothers
 ```
 
@@ -212,7 +223,7 @@ An **Ember** is a lightweight HTTP server running on a worker brother's machine 
 
 The **Conductor** (named Kamaji) is a periodic process that orchestrates multi-step workflows ("thrums") by delegating tasks to worker brothers via their Ember servers. It runs on the same EC2 host as the Hearth.
 
-**Architecture:** A systemd timer triggers a "tick" every 15 minutes. Each tick spawns a Claude Code session with the `clade-conductor` MCP server, which reads a prompt (`conductor-tick.md`) that instructs Kamaji to check mailbox, review active thrums, delegate tasks, and report status.
+**Architecture:** Ticks are triggered two ways: (1) a systemd timer fires every 15 minutes, and (2) **event-driven** — the Hearth fires a tick automatically on thrum creation and when a thrum-linked task reaches a terminal state (`completed`/`failed`). Each tick spawns a Claude Code session with the `clade-conductor` MCP server, which reads a prompt (`conductor-tick.md`) that instructs Kamaji to check mailbox, review active thrums, delegate tasks, and report status. The event-driven trigger uses the `CONDUCTOR_TICK_CMD` env var on the Hearth server (fire-and-forget via `subprocess.Popen`).
 
 **Thrums:** A thrum is a multi-step workflow tracked in the Hearth database. Lifecycle: `pending` -> `planning` -> `active` -> `completed` / `failed`. Each thrum can have a plan and linked tasks. The Conductor checks thrum progress each tick and delegates the next step when ready.
 
@@ -261,11 +272,17 @@ ssh <server-ssh> sudo systemctl start conductor-tick.service  # manual trigger
 
 - **API server:** FastAPI + SQLite on EC2 (`54.84.119.14`, HTTPS on 443)
 - **Web UI:** React SPA at `https://54.84.119.14` (source in `frontend/`)
+  - **Pages:** Inbox, Feed, Tasks, Task Detail, Thrums, Thrum Detail, Status, Compose, Settings
 - **5 members:** ian, doot, oppy, jerry, kamaji — each with their own API key
 - **Admins:** ian and doot can edit/delete any message; others only their own
 - **Env vars:** `HEARTH_URL`, `HEARTH_API_KEY`, `HEARTH_NAME` (with `MAILBOX_*` fallback for transition)
 - **Dynamic key registration:** API keys can be registered via `POST /api/v1/keys` (any authenticated user). The CLI does this automatically during `clade init --server-key`, `clade add-brother`, and `clade setup-conductor`. Auth checks env-var keys first (fast), then falls back to DB-registered keys.
+- **Recipient validation:** `POST /api/v1/messages` validates recipients against registered members (env-var keys + DB keys). Unknown recipients return 422.
+- **Health endpoint:** `GET /api/v1/health` — simple liveness check
+- **Members API:** `GET /api/v1/members/activity` — per-member stats (messages sent, active/completed/failed tasks, last activity timestamps)
+- **Task events:** `POST /api/v1/tasks/{task_id}/log` — log events (tool calls, progress updates) against a task. Events stored in `task_events` table and returned with task detail.
 - **Thrums API:** `/api/v1/thrums` endpoints for creating, listing, getting, and updating thrums (multi-step workflows). Used by the Conductor.
+- **Event-driven conductor ticks:** `CONDUCTOR_TICK_CMD` env var. When set, the Hearth fires the conductor tick (fire-and-forget) on thrum creation and thrum-linked task completion.
 
 ## Testing
 
@@ -275,6 +292,16 @@ python -m pytest tests/ -q
 ```
 
 **Important:** When mocking httpx responses in tests, use `MagicMock` (not `AsyncMock`) since `.json()` and `.raise_for_status()` are sync methods.
+
+### Docker Compose Test Environment
+
+A multi-container environment for full end-to-end testing of the CLI onboarding flow, Ember delegation, and Conductor orchestration without real SSH hosts or a deployed Hearth. See `docs/docker-testing.md` for full details.
+
+```bash
+bash scripts/test-compose.sh   # keygen + build + start + attach to personal container
+```
+
+Four containers: `personal` (coordinator), `worker` (sshd + Ember), `hearth` (FastAPI + conductor config), `frontend` (Vite dev server at `localhost:5173`). Pre-configured test API keys. Claude Code auth via `ANTHROPIC_API_KEY` in `docker/.env` (gitignored).
 
 ## Deployment
 

@@ -79,6 +79,10 @@ class TestWrapPrompt:
         result = wrap_prompt("Test", "jerry", "Test", 1, sender_name="doot")
         assert "doot" in result
 
+    def test_explicit_recipient_instruction(self):
+        result = wrap_prompt("Test", "oppy", "Review", 5, sender_name="kamaji")
+        assert "Address it to kamaji" in result
+
     def test_includes_subject(self):
         result = wrap_prompt("Test", "oppy", "Architecture review", 5)
         assert "Architecture review" in result

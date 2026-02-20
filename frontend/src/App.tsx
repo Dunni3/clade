@@ -6,6 +6,9 @@ import MessageDetailPage from './pages/MessageDetailPage';
 import ComposePage from './pages/ComposePage';
 import TasksPage from './pages/TasksPage';
 import TaskDetailPage from './pages/TaskDetailPage';
+import ThrumListPage from './pages/ThrumListPage';
+import ThrumDetailPage from './pages/ThrumDetailPage';
+import StatusPage from './pages/StatusPage';
 import SettingsPage from './pages/SettingsPage';
 import { useAuthStore } from './store/authStore';
 
@@ -58,6 +61,30 @@ export default function App() {
             element={
               <RequireAuth>
                 <TaskDetailPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/thrums"
+            element={
+              <RequireAuth>
+                <ThrumListPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/thrums/:id"
+            element={
+              <RequireAuth>
+                <ThrumDetailPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/status"
+            element={
+              <RequireAuth>
+                <StatusPage />
               </RequireAuth>
             }
           />

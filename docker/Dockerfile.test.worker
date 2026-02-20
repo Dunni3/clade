@@ -30,6 +30,16 @@ RUN chmod 600 /home/testuser/.ssh/authorized_keys \
 COPY . /opt/clade
 RUN pip install --no-cache-dir -e "/opt/clade[server]"
 
+# Install task activity logging hook for Claude Code.
+# The hook fires on PostToolUse/Stop events and POSTs summaries to the Hearth API,
+# giving live visibility into what a worker is doing during delegated tasks.
+RUN mkdir -p /home/testuser/.claude/hooks \
+    && cp /opt/clade/hooks/task_logger.sh /home/testuser/.claude/hooks/task_logger.sh \
+    && chmod +x /home/testuser/.claude/hooks/task_logger.sh \
+    && echo '{"hooks":{"PostToolUse":[{"matcher":"Bash|Edit|Write|Task","hooks":[{"type":"command","command":"/home/testuser/.claude/hooks/task_logger.sh","timeout":10}]}],"Stop":[{"hooks":[{"type":"command","command":"/home/testuser/.claude/hooks/task_logger.sh","timeout":10}]}]}}' \
+       > /home/testuser/.claude/settings.json \
+    && chown -R testuser:testuser /home/testuser/.claude
+
 # Entrypoint starts sshd + Ember server
 COPY docker/entrypoint-worker.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

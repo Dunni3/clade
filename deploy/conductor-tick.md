@@ -16,7 +16,7 @@ This is a periodic tick. Execute the following steps in order:
    - If they have a plan, consider moving to `active` and delegating the first task
    - If no plan, leave as-is (a human or another tick will add one)
 4. **Check worker health** — Verify all workers are reachable
-5. **Report** — If anything noteworthy happened, send a brief summary to `doot`
+5. **Report** — If anything noteworthy happened, send a brief summary to the personal coordinator
 
 ## Rules
 
