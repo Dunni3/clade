@@ -141,9 +141,7 @@ fi"""
         env_lines = (
             f"export CLAUDE_TASK_ID={task_id}\n"
             f"export HEARTH_URL='{mailbox_url}'\n"
-            f"export HEARTH_API_KEY='{mailbox_api_key}'\n"
-            f"export MAILBOX_URL='{mailbox_url}'\n"
-            f"export MAILBOX_API_KEY='{mailbox_api_key}'"
+            f"export HEARTH_API_KEY='{mailbox_api_key}'"
         )
 
     return f"""\

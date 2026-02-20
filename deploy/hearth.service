@@ -1,0 +1,17 @@
+[Unit]
+Description=Hearth API Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/hearth
+ExecStart=/opt/hearth/venv/bin/uvicorn hearth.app:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+# Configuration — edit these after deployment
+Environment="HEARTH_DB_PATH=/opt/hearth/data/hearth.db"
+Environment="HEARTH_API_KEYS=CHANGE_ME"
+
+[Install]
+WantedBy=multi-user.target

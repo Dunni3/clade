@@ -164,13 +164,13 @@ class TestBuildRemoteScript:
             mailbox_api_key="secret-key",
         )
         assert "export CLAUDE_TASK_ID=42" in script
-        assert "export MAILBOX_URL='https://example.com'" in script
-        assert "export MAILBOX_API_KEY='secret-key'" in script
+        assert "export HEARTH_URL='https://example.com'" in script
+        assert "export HEARTH_API_KEY='secret-key'" in script
 
     def test_no_env_vars_without_task_id(self):
         script = build_remote_script("sess", None, "dGVzdA==")
         assert "CLAUDE_TASK_ID" not in script
-        assert "MAILBOX_API_KEY" not in script
+        assert "HEARTH_API_KEY" not in script
 
     def test_no_env_vars_with_partial_args(self):
         script = build_remote_script(

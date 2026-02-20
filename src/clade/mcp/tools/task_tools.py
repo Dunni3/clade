@@ -9,7 +9,7 @@ from ...core.config import load_config
 from ...tasks.ssh_task import TaskResult, generate_session_name, initiate_task, wrap_prompt
 
 
-_NOT_CONFIGURED = "Mailbox not configured. Set MAILBOX_URL and MAILBOX_API_KEY env vars."
+_NOT_CONFIGURED = "Hearth not configured. Set HEARTH_URL and HEARTH_API_KEY env vars."
 
 
 def create_task_tools(
@@ -32,7 +32,7 @@ def create_task_tools(
         config = load_config()
 
     brothers = config.get("brothers", {})
-    mailbox_name = os.environ.get("MAILBOX_NAME")
+    mailbox_name = os.environ.get("HEARTH_NAME") or os.environ.get("MAILBOX_NAME")
 
     @mcp.tool()
     async def initiate_ssh_task(

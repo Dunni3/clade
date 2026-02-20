@@ -26,14 +26,14 @@ export default function SettingsPage() {
       <h1 className="text-2xl font-bold mb-4">Settings</h1>
       <div className="rounded-xl border border-gray-700 bg-gray-900 p-6 space-y-4 max-w-md">
         <div className="text-sm text-gray-400 space-y-1">
-          <p>First, accept the self-signed certificate by visiting the API directly:</p>
+          <p>If using a self-signed certificate, first accept it by visiting the API directly:</p>
           <a
-            href="https://54.84.119.14/api/v1/unread"
+            href={`${window.location.origin}/api/v1/health`}
             target="_blank"
             rel="noopener noreferrer"
             className="text-indigo-400 underline break-all"
           >
-            https://54.84.119.14/api/v1/unread
+            {window.location.origin}/api/v1/health
           </a>
         </div>
 

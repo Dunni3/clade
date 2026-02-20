@@ -6,7 +6,7 @@ from ...communication.mailbox_client import MailboxClient
 from ...utils.timestamp import format_timestamp
 
 
-_NOT_CONFIGURED = "Mailbox not configured. Set MAILBOX_URL and MAILBOX_API_KEY env vars."
+_NOT_CONFIGURED = "Hearth not configured. Set HEARTH_URL and HEARTH_API_KEY env vars."
 
 
 def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:

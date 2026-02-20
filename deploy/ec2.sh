@@ -2,9 +2,10 @@
 # Manage the Hearth EC2 instance (stop/start/status/ssh)
 set -euo pipefail
 
-INSTANCE_ID="i-049a5a49e7068655b"
+INSTANCE_ID="REPLACE_AFTER_PROVISIONING"
+REGION="us-east-1"
 SSH_KEY="$HOME/.ssh/moltbot-key.pem"
-ELASTIC_IP="54.84.119.14"
+ELASTIC_IP="REPLACE_AFTER_PROVISIONING"
 
 usage() {
     echo "Usage: $0 {start|stop|status|ssh}"
@@ -20,9 +21,9 @@ usage() {
 case "${1:-}" in
     start)
         echo "Starting instance $INSTANCE_ID..."
-        aws ec2 start-instances --instance-ids "$INSTANCE_ID" --output text
+        aws ec2 start-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --output text
         echo "Waiting for instance to be running..."
-        aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+        aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$REGION"
         echo "Instance is running at $ELASTIC_IP"
         echo "Waiting for SSH to be available..."
         for i in $(seq 1 30); do
@@ -35,11 +36,11 @@ case "${1:-}" in
         ;;
     stop)
         echo "Stopping instance $INSTANCE_ID..."
-        aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --output text
+        aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --output text
         echo "Instance is stopping. Hearth will be unavailable until you run '$0 start'."
         ;;
     status)
-        STATE=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+        STATE=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --region "$REGION" \
             --query "Reservations[0].Instances[0].State.Name" --output text)
         echo "Instance $INSTANCE_ID: $STATE"
         echo "Elastic IP: $ELASTIC_IP"

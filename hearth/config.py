@@ -2,11 +2,11 @@
 
 import os
 
-DB_PATH = os.environ.get("MAILBOX_DB_PATH", "mailbox.db")
+DB_PATH = os.environ.get("HEARTH_DB_PATH") or os.environ.get("MAILBOX_DB_PATH", "hearth.db")
 
 # API keys: comma-separated list of "key:name" pairs
 # e.g. "abc123:doot,def456:oppy,ghi789:jerry"
-API_KEYS_RAW = os.environ.get("MAILBOX_API_KEYS", "")
+API_KEYS_RAW = os.environ.get("HEARTH_API_KEYS") or os.environ.get("MAILBOX_API_KEYS", "")
 
 
 def parse_api_keys(raw: str) -> dict[str, str]:
