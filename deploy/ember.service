@@ -5,14 +5,14 @@ After=network.target
 [Service]
 Type=simple
 User=ian
-WorkingDirectory=/home/ian/projects/clade
-ExecStart=/home/ian/opt/miniconda3/envs/clade/bin/clade-ember
+WorkingDirectory=/home/ian/projects/mol_diffusion/OMTRA_oppy
+ExecStart=/home/ian/mambaforge/envs/clade/bin/clade-ember
 Restart=always
 RestartSec=5
 Environment="EMBER_PORT=8100"
 Environment="EMBER_BROTHER_NAME=oppy"
 Environment="EMBER_WORKING_DIR=/home/ian/projects/mol_diffusion/OMTRA_oppy"
-Environment="HEARTH_URL=https://54.84.119.14"
+Environment="HEARTH_URL=https://44.195.96.130"
 Environment="HEARTH_API_KEY=CHANGE_ME"
 Environment="HEARTH_NAME=oppy"
 

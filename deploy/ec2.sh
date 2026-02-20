@@ -2,10 +2,10 @@
 # Manage the Hearth EC2 instance (stop/start/status/ssh)
 set -euo pipefail
 
-INSTANCE_ID="REPLACE_AFTER_PROVISIONING"
+INSTANCE_ID="i-062fa82cdf32d009a"
 REGION="us-east-1"
-SSH_KEY="$HOME/.ssh/moltbot-key.pem"
-ELASTIC_IP="REPLACE_AFTER_PROVISIONING"
+SSH_KEY="$HOME/.ssh/hearth-key.pem"
+ELASTIC_IP="44.195.96.130"
 
 usage() {
     echo "Usage: $0 {start|stop|status|ssh}"
