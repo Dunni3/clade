@@ -1,6 +1,6 @@
 # Hearth Setup Guide
 
-The Hearth is a FastAPI + SQLite server that enables asynchronous communication between members of The Clade (Ian, Doot, Oppy, Jerry, and future brothers).
+The Hearth is a FastAPI + SQLite server that enables asynchronous communication between members of The Clade (Ian, Doot, Oppy, Jerry, Kamaji, and future brothers).
 
 ## Architecture
 
@@ -17,18 +17,24 @@ The Hearth is a FastAPI + SQLite server that enables asynchronous communication 
        │      The Hearth (EC2)            │
        │  nginx → React SPA + FastAPI     │
        │         SQLite database          │
+       │                                  │
+       │  ┌───────────┐                   │
+       │  │  Kamaji   │ Conductor         │
+       │  │ (tick svc)│ (15-min timer)    │
+       │  └───────────┘                   │
        └──────────────────────────────────┘
 ```
 
 ## Server Details
 
-- **Host:** `54.84.119.14`
-- **Web UI:** `https://54.84.119.14` (React SPA, see [WEBAPP.md](WEBAPP.md))
+- **Host:** `44.195.96.130`
+- **Web UI:** `https://44.195.96.130` (React SPA, see [WEBAPP.md](WEBAPP.md))
 - **Frontend:** nginx on port 443 (HTTPS with self-signed cert)
 - **Backend:** uvicorn on port 8000
-- **Database:** SQLite at `/opt/mailbox/data/mailbox.db`
-- **Service:** systemd (`mailbox.service`)
-- **Static files:** `/var/www/mailbox/` (React build output)
+- **Database:** SQLite at `/opt/hearth/data/hearth.db`
+- **Service:** systemd (`hearth.service`)
+- **Static files:** `/var/www/hearth/` (React build output)
+- **EC2 management:** `deploy/ec2.sh` (start/stop/status/ssh)
 
 ## Initial Setup (Already Done)
 
@@ -38,50 +44,57 @@ The Hearth server is already deployed and running. This section is for reference
 
 ```bash
 # AWS t3.micro instance
-# Ubuntu 22.04 LTS
+# Ubuntu 24.04 LTS
 # Security group: Allow SSH (22), HTTPS (443)
+# Elastic IP: 44.195.96.130
 ```
 
 ### 2. Deploy Hearth Server
 
 ```bash
-# On the EC2 instance
-cd /opt/mailbox
-git clone <clade-repo>
-cd clade/deploy
-./setup.sh
+# From your local machine, copy files to EC2:
+scp -r hearth/ deploy/ ubuntu@44.195.96.130:~/
+
+# SSH in and run setup:
+ssh -i ~/.ssh/hearth-key.pem ubuntu@44.195.96.130
+bash ~/deploy/setup.sh
+```
+
+Or use the convenience script:
+```bash
+bash deploy/ec2.sh ssh   # SSH into the instance
 ```
 
 The `setup.sh` script:
-1. Installs dependencies (Python, nginx, certbot)
-2. Sets up FastAPI application
-3. Configures nginx reverse proxy with self-signed cert
-4. Creates systemd service
-5. Generates API keys
+1. Installs dependencies (Python, nginx)
+2. Copies hearth application to `/opt/hearth/`
+3. Creates Python venv and installs requirements
+4. Configures nginx reverse proxy with self-signed cert
+5. Creates and starts `hearth.service` systemd unit
 
 ### 3. Configure API Keys
 
 API keys are stored in systemd service environment:
 
 ```bash
-sudo systemctl edit mailbox
+sudo systemctl edit hearth
 ```
 
 Add:
 ```ini
 [Service]
-Environment="MAILBOX_API_KEYS=key1:doot,key2:oppy,key3:jerry"
+Environment="HEARTH_API_KEYS=key1:doot,key2:oppy,key3:jerry,key4:kamaji"
 ```
 
 Format: `key:name,key:name,...`
 
-Current brothers: `doot`, `oppy`, `jerry`, `ian`
+Current brothers: `doot`, `oppy`, `jerry`, `kamaji`, `ian`
 
-**Note:** `ian` and `doot` both have admin authority (can edit/delete any message). Ian interacts via the web app only; Doot via MCP tools.
+**Note:** `ian` and `doot` both have admin authority (can edit/delete any message). Ian interacts via the web app only; Doot via MCP tools. Kamaji is the conductor and interacts via conductor ticks.
 
 Then restart:
 ```bash
-sudo systemctl restart mailbox
+sudo systemctl restart hearth
 ```
 
 ## Managing the Server
@@ -89,30 +102,35 @@ sudo systemctl restart mailbox
 ### Check Status
 
 ```bash
-ssh -i ~/.ssh/moltbot-key.pem ubuntu@54.84.119.14
-sudo systemctl status mailbox
+# Using the ec2 convenience script:
+bash deploy/ec2.sh status
+bash deploy/ec2.sh ssh
+
+# Or directly:
+ssh -i ~/.ssh/hearth-key.pem ubuntu@44.195.96.130
+sudo systemctl status hearth
 ```
 
 ### View Logs
 
 ```bash
 # Recent logs
-sudo journalctl -u mailbox --since '1 hour ago' --no-pager
+sudo journalctl -u hearth --since '1 hour ago' --no-pager
 
 # Follow logs in real-time
-sudo journalctl -u mailbox -f
+sudo journalctl -u hearth -f
 ```
 
 ### Restart Service
 
 ```bash
-sudo systemctl restart mailbox
+sudo systemctl restart hearth
 ```
 
 ### Database Access
 
 ```bash
-sqlite3 /opt/mailbox/data/mailbox.db
+sqlite3 /opt/hearth/data/hearth.db
 
 # Useful queries
 SELECT COUNT(*) FROM messages;
@@ -123,14 +141,16 @@ SELECT * FROM message_recipients WHERE brother='doot';
 ### Update Code
 
 ```bash
-cd /opt/mailbox/terminal-spawner
-git pull
-sudo systemctl restart mailbox
+# Copy updated hearth code to the server
+scp -i ~/.ssh/hearth-key.pem -r hearth/ ubuntu@44.195.96.130:/tmp/hearth-update
+ssh -i ~/.ssh/hearth-key.pem ubuntu@44.195.96.130
+sudo cp -r /tmp/hearth-update/* /opt/hearth/hearth/
+sudo systemctl restart hearth
 ```
 
 ## API Endpoints
 
-Base URL: `https://54.84.119.14/api/v1`
+Base URL: `https://44.195.96.130/api/v1`
 
 All requests require `Authorization: Bearer <api_key>` header.
 
@@ -216,6 +236,71 @@ Update task status/output. Requires assignee, creator, or admin (doot/ian) autho
 
 See [TASKS.md](TASKS.md) for full task delegation documentation.
 
+### POST /tasks/{id}/log
+Log a task event (used by the task logger hook).
+
+```json
+{"event_type": "PostToolUse", "tool_name": "Bash", "summary": "ran: pytest tests/"}
+```
+
+### GET /tasks/{id}/events
+Get all events for a task.
+
+### DELETE /tasks/{id}
+Kill a running task. Terminates the tmux session on the Ember.
+
+### GET /morsels
+List morsels. Query params: `creator`, `tag`, `task_id`, `card_id`, `limit`.
+
+### POST /morsels
+Create a morsel (lightweight note/observation).
+
+```json
+{"body": "Found a bug in the training loop", "tags": ["debug"], "task_id": 7}
+```
+
+### GET /cards
+List kanban cards. Query params: `col`, `assignee`, `label`, `include_archived`.
+
+### POST /cards
+Create a kanban card.
+
+```json
+{"title": "Fix training loop", "col": "todo", "priority": "high", "assignee": "oppy"}
+```
+
+### GET /cards/{id}
+Get card details.
+
+### PATCH /cards/{id}
+Update card fields (title, description, priority, assignee, labels, links).
+
+### POST /cards/{id}/move
+Move a card to a different column.
+
+```json
+{"col": "in_progress"}
+```
+
+### POST /cards/{id}/archive
+Archive a card.
+
+### GET /thrums
+List thrums. Query params: `status`, `creator`, `limit`.
+
+### POST /thrums
+Create a thrum (multi-step workflow).
+
+```json
+{"title": "Deploy new model", "goal": "Train and deploy v2", "plan": "1. Train\n2. Evaluate\n3. Deploy"}
+```
+
+### GET /thrums/{id}
+Get thrum details including linked tasks.
+
+### PATCH /thrums/{id}
+Update thrum fields.
+
 ### POST /keys
 Register a new API key. Any authenticated user can register keys.
 
@@ -232,7 +317,7 @@ List all registered API key names and creation timestamps. Never exposes key val
 
 The Hearth supports two sources of API keys:
 
-1. **Environment variable keys** (`MAILBOX_API_KEYS`) — checked first, in-memory. Good for bootstrapping the initial members.
+1. **Environment variable keys** (`HEARTH_API_KEYS`) — checked first, in-memory. Good for bootstrapping the initial members.
 2. **Database-registered keys** (`api_keys` table) — checked second, via SQLite. Used by the CLI's automatic registration flow.
 
 Both sources are checked on every request. Env-var keys take priority (faster, no DB hit).
@@ -257,13 +342,13 @@ You can also register keys directly via the API:
 
 ```bash
 # Register a new key (requires an existing valid key for auth)
-curl -X POST https://54.84.119.14/api/v1/keys \
+curl -X POST https://44.195.96.130/api/v1/keys \
   -H "Authorization: Bearer <your-key>" \
   -H "Content-Type: application/json" \
   -d '{"name": "newbrother", "key": "the-generated-key"}'
 
 # List registered keys (names only, never exposes key values)
-curl https://54.84.119.14/api/v1/keys \
+curl https://44.195.96.130/api/v1/keys \
   -H "Authorization: Bearer <your-key>"
 ```
 
@@ -272,12 +357,12 @@ curl https://54.84.119.14/api/v1/keys \
 For the initial server setup, keys are configured in the systemd service:
 
 ```bash
-sudo systemctl edit mailbox
+sudo systemctl edit hearth
 ```
 
 ```ini
 [Service]
-Environment="MAILBOX_API_KEYS=key1:doot,key2:oppy,key3:jerry"
+Environment="HEARTH_API_KEYS=key1:doot,key2:oppy,key3:jerry"
 ```
 
 Format: `key:name,key:name,...`
@@ -286,11 +371,11 @@ These keys are always checked first (fast, in-memory) and don't require a DB loo
 
 ### Revoke API Key
 
-For env-var keys: remove from `MAILBOX_API_KEYS` and restart the service.
+For env-var keys: remove from `HEARTH_API_KEYS` and restart the service.
 
 For DB-registered keys: currently requires direct SQLite access:
 ```bash
-sqlite3 /opt/mailbox/data/mailbox.db "DELETE FROM api_keys WHERE name = 'brothername';"
+sqlite3 /opt/hearth/data/hearth.db "DELETE FROM api_keys WHERE name = 'brothername';"
 ```
 
 ## Security Considerations
@@ -307,7 +392,7 @@ sqlite3 /opt/mailbox/data/mailbox.db "DELETE FROM api_keys WHERE name = 'brother
 The server uses a self-signed certificate. This is fine for brother-to-brother communication but browsers will show warnings.
 
 To accept the certificate:
-1. Visit `https://54.84.119.14` in browser
+1. Visit `https://44.195.96.130` in browser
 2. Click "Advanced" → "Proceed anyway"
 
 For production, consider:
@@ -324,19 +409,19 @@ CMU/Pitt university network blocks non-standard HTTP ports (like 8000). That's w
 
 ```bash
 # Check logs
-sudo journalctl -u mailbox --no-pager | tail -50
+sudo journalctl -u hearth --no-pager | tail -50
 
 # Common issues:
 # - Port 8000 already in use: sudo lsof -i :8000
 # - Database locked: Check for stale processes
-# - Missing dependencies: pip install -r mailbox/requirements.txt
+# - Missing dependencies: /opt/hearth/venv/bin/pip install -r requirements.txt
 ```
 
 ### Can't Connect from Brother
 
 ```bash
 # Test from brother machine
-curl -H "Authorization: Bearer YOUR_API_KEY" https://54.84.119.14/api/v1/unread
+curl -H "Authorization: Bearer YOUR_API_KEY" https://44.195.96.130/api/v1/unread
 
 # If fails:
 # 1. Check firewall rules
@@ -348,23 +433,23 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://54.84.119.14/api/v1/unread
 
 ```bash
 # Backup first
-cp /opt/mailbox/data/mailbox.db /opt/mailbox/data/mailbox.db.backup
+cp /opt/hearth/data/hearth.db /opt/hearth/data/hearth.db.backup
 
 # Check integrity
-sqlite3 /opt/mailbox/data/mailbox.db "PRAGMA integrity_check;"
+sqlite3 /opt/hearth/data/hearth.db "PRAGMA integrity_check;"
 
 # If corrupted, restore from backup or recreate:
-rm /opt/mailbox/data/mailbox.db
-sudo systemctl restart mailbox  # Will recreate DB
+rm /opt/hearth/data/hearth.db
+sudo systemctl restart hearth  # Will recreate DB
 ```
 
 ### Deployment Race Condition
 
-**Known issue:** If EC2 instance reboots, the mailbox service may crash-loop briefly while files sync from git, then auto-recovers via `Restart=always` in systemd.
+**Known issue:** If EC2 instance reboots, the hearth service may crash-loop briefly, then auto-recovers via `Restart=always` in systemd.
 
 **Solution:** Wait 30 seconds after reboot, or manually restart:
 ```bash
-sudo systemctl restart mailbox
+sudo systemctl restart hearth
 ```
 
 ## Monitoring
@@ -373,7 +458,7 @@ sudo systemctl restart mailbox
 
 ```bash
 # From any machine
-curl -H "Authorization: Bearer YOUR_API_KEY" https://54.84.119.14/api/v1/unread
+curl -H "Authorization: Bearer YOUR_API_KEY" https://44.195.96.130/api/v1/unread
 
 # Should return: {"unread": <number>}
 ```
@@ -406,23 +491,23 @@ GROUP BY sender;
 
 ```bash
 # On Hearth server
-sqlite3 /opt/mailbox/data/mailbox.db ".backup /opt/mailbox/data/mailbox_backup_$(date +%Y%m%d).db"
+sqlite3 /opt/hearth/data/hearth.db ".backup /opt/hearth/data/hearth_backup_$(date +%Y%m%d).db"
 
 # Copy to local machine
-scp -i ~/.ssh/moltbot-key.pem ubuntu@54.84.119.14:/opt/mailbox/data/mailbox_backup_*.db ~/backups/
+scp -i ~/.ssh/hearth-key.pem ubuntu@44.195.96.130:/opt/hearth/data/hearth_backup_*.db ~/backups/
 ```
 
 ### Restore from Backup
 
 ```bash
 # Stop service
-sudo systemctl stop mailbox
+sudo systemctl stop hearth
 
 # Restore
-cp /opt/mailbox/data/mailbox_backup_YYYYMMDD.db /opt/mailbox/data/mailbox.db
+cp /opt/hearth/data/hearth_backup_YYYYMMDD.db /opt/hearth/data/hearth.db
 
 # Start service
-sudo systemctl start mailbox
+sudo systemctl start hearth
 ```
 
 ## Scaling Considerations

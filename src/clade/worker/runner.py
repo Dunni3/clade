@@ -27,7 +27,7 @@ def build_runner_script(
     session_name: str,
     working_dir: str | None,
     prompt: str,
-    max_turns: int = 50,
+    max_turns: int | None = None,
     task_id: int | None = None,
     hearth_url: str | None = None,
     hearth_api_key: str | None = None,
@@ -71,10 +71,10 @@ def build_runner_script(
 
     # Run Claude, capturing exit code
     lines.append('echo "$(date -Iseconds) launching claude" >> "$LOGFILE"')
-    lines.append(
-        f'claude -p "$(cat {prompt_path})" '
-        f"--dangerously-skip-permissions --max-turns {max_turns}"
-    )
+    claude_cmd = f'claude -p "$(cat {prompt_path})" --dangerously-skip-permissions'
+    if max_turns is not None:
+        claude_cmd += f" --max-turns {max_turns}"
+    lines.append(claude_cmd)
     lines.append('EXIT_CODE=$?')
     lines.append('echo "$(date -Iseconds) claude exited with code $EXIT_CODE" >> "$LOGFILE"')
 
@@ -96,7 +96,7 @@ def launch_local_task(
     session_name: str,
     working_dir: str | None,
     prompt: str,
-    max_turns: int = 50,
+    max_turns: int | None = None,
     task_id: int | None = None,
     hearth_url: str | None = None,
     hearth_api_key: str | None = None,

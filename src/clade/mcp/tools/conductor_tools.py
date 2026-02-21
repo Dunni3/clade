@@ -53,7 +53,7 @@ def create_conductor_tools(
         subject: str = "",
         parent_task_id: int | None = None,
         working_dir: str | None = None,
-        max_turns: int = 50,
+        max_turns: int | None = None,
         card_id: int | None = None,
     ) -> str:
         """Delegate a task to a worker brother via their Ember server.
@@ -67,7 +67,7 @@ def create_conductor_tools(
             subject: Short description of the task.
             parent_task_id: Optional parent task ID for task tree linking. If not provided, auto-reads from TRIGGER_TASK_ID env var.
             working_dir: Override the worker's default working directory.
-            max_turns: Maximum Claude turns for the task.
+            max_turns: Optional maximum Claude turns. If not set, no turn limit is applied.
             card_id: Optional kanban card ID to link this task to. Creates a formal link so the card tracks which tasks are working on it.
         """
         if mailbox is None:

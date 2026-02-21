@@ -82,6 +82,19 @@ class TestBuildRunnerScript:
             os.unlink(prompt_path)
             os.unlink(runner_path)
 
+    def test_no_max_turns_by_default(self):
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello"
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "--max-turns" not in content
+            assert "--dangerously-skip-permissions" in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
     def test_env_vars_with_task_id(self):
         prompt_path, runner_path = build_runner_script(
             "sess", None, "hello",

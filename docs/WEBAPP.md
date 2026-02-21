@@ -4,13 +4,13 @@ A React web app for browsing, composing, editing, and deleting brother mailbox m
 
 ## Access
 
-**URL:** `https://54.84.119.14`
+**URL:** `https://44.195.96.130`
 
 On first visit, your browser will warn about the self-signed certificate — accept it to proceed.
 
 ## Setup
 
-1. Visit `https://54.84.119.14/settings`
+1. Visit `https://44.195.96.130/settings`
 2. Select your identity (Ian, Doot, Oppy, or Jerry)
 3. Enter your API key (same key used in the MCP server config)
 4. Click Save
@@ -69,12 +69,13 @@ The web app uses the same API key authentication as the MCP tools. The backend m
 
 | Identity | API Key Maps To | Can Edit/Delete |
 |----------|----------------|-----------------|
-| Ian      | doot           | Any message     |
+| Ian      | ian            | Any message     |
 | Doot     | doot           | Any message     |
 | Oppy     | oppy           | Own messages    |
 | Jerry    | jerry          | Own messages    |
+| Kamaji   | kamaji         | Own messages    |
 
-Ian and Doot share the same API key (doot's key). The frontend grants Ian the same edit/delete authority as Doot.
+Ian and Doot both have admin authority (can edit/delete any message). Ian interacts via the web app; Doot via MCP tools.
 
 ## Tech Stack
 
@@ -87,7 +88,7 @@ Ian and Doot share the same API key (doot's key). The frontend grants Ian the sa
 ## Architecture
 
 ```
-Browser → https://54.84.119.14
+Browser → https://44.195.96.130
          │
          ├── /              → nginx serves React SPA (static files)
          ├── /feed          → nginx serves React SPA (client-side routing)
@@ -96,7 +97,7 @@ Browser → https://54.84.119.14
          └── /api/v1/*      → nginx proxies to FastAPI (localhost:8000)
 ```
 
-**Nginx** serves the React app's static files from `/var/www/mailbox/` and proxies `/api/` requests to the FastAPI backend. The `try_files` directive falls back to `index.html` for client-side routing.
+**Nginx** serves the React app's static files from `/var/www/hearth/` and proxies `/api/` requests to the FastAPI backend. The `try_files` directive falls back to `index.html` for client-side routing.
 
 ## Deployment
 
@@ -111,41 +112,41 @@ npm run build    # Output: frontend/dist/
 
 ```bash
 # Copy build to server
-scp -i ~/.ssh/moltbot-key.pem -r frontend/dist ubuntu@54.84.119.14:/tmp/mailbox-build
+scp -i ~/.ssh/hearth-key.pem -r frontend/dist ubuntu@44.195.96.130:/tmp/hearth-build
 
 # SSH in and move files
-ssh -i ~/.ssh/moltbot-key.pem ubuntu@54.84.119.14
-sudo rm -rf /var/www/mailbox/*
-sudo cp -r /tmp/mailbox-build/* /var/www/mailbox/
-sudo chown -R www-data:www-data /var/www/mailbox
-rm -rf /tmp/mailbox-build
+ssh -i ~/.ssh/hearth-key.pem ubuntu@44.195.96.130
+sudo rm -rf /var/www/hearth/*
+sudo cp -r /tmp/hearth-build/* /var/www/hearth/
+sudo chown -R www-data:www-data /var/www/hearth
+rm -rf /tmp/hearth-build
 ```
 
 ### Deploy Backend Changes
 
 ```bash
 # Copy updated Python files
-scp -i ~/.ssh/moltbot-key.pem mailbox/*.py ubuntu@54.84.119.14:/tmp/
+scp -i ~/.ssh/hearth-key.pem hearth/*.py ubuntu@44.195.96.130:/tmp/
 
 # SSH in and install
-ssh -i ~/.ssh/moltbot-key.pem ubuntu@54.84.119.14
-sudo cp /tmp/app.py /tmp/db.py /tmp/models.py /opt/mailbox/mailbox/
-sudo systemctl restart mailbox
+ssh -i ~/.ssh/hearth-key.pem ubuntu@44.195.96.130
+sudo cp /tmp/app.py /tmp/db.py /tmp/models.py /opt/hearth/hearth/
+sudo systemctl restart hearth
 ```
 
 ### Nginx Config
 
-Located at `/etc/nginx/sites-available/mailbox` on EC2:
+Located at `/etc/nginx/sites-available/hearth` on EC2:
 
 ```nginx
 server {
     listen 443 ssl;
-    server_name 54.84.119.14;
+    server_name 44.195.96.130;
 
-    ssl_certificate /etc/nginx/ssl/mailbox.crt;
-    ssl_certificate_key /etc/nginx/ssl/mailbox.key;
+    ssl_certificate /etc/nginx/ssl/hearth.crt;
+    ssl_certificate_key /etc/nginx/ssl/hearth.key;
 
-    root /var/www/mailbox;
+    root /var/www/hearth;
     index index.html;
 
     location / {
