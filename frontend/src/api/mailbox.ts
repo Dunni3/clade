@@ -9,8 +9,6 @@ import type {
   UnreadCountResponse,
   TaskSummary,
   TaskDetail,
-  ThrumSummary,
-  ThrumDetail,
   MemberActivityResponse,
   EmberStatusResponse,
   TreeSummary,
@@ -88,17 +86,8 @@ export async function getTask(id: number): Promise<TaskDetail> {
   return data;
 }
 
-export async function getThrums(params: {
-  status?: string;
-  creator?: string;
-  limit?: number;
-} = {}): Promise<ThrumSummary[]> {
-  const { data } = await apiClient.get<ThrumSummary[]>('/thrums', { params });
-  return data;
-}
-
-export async function getThrum(id: number): Promise<ThrumDetail> {
-  const { data } = await apiClient.get<ThrumDetail>(`/thrums/${id}`);
+export async function killTask(id: number): Promise<TaskDetail> {
+  const { data } = await apiClient.post<TaskDetail>(`/tasks/${id}/kill`);
   return data;
 }
 

@@ -9,6 +9,7 @@ const statusColors: Record<string, string> = {
   failed: 'bg-red-500/20 text-red-300',
   in_progress: 'bg-amber-500/20 text-amber-300',
   pending: 'bg-gray-500/20 text-gray-300',
+  killed: 'bg-orange-500/20 text-orange-300',
 };
 
 function formatDate(iso: string) {
@@ -48,6 +49,7 @@ export default function TreeListPage() {
     { key: 'in_progress', label: 'in_progress' },
     { key: 'pending', label: 'pending' },
     { key: 'failed', label: 'failed' },
+    { key: 'killed', label: 'killed' },
   ];
 
   return (

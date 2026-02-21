@@ -62,7 +62,6 @@ export interface TaskSummary {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
-  thrum_id: number | null;
   parent_task_id: number | null;
   root_task_id: number | null;
 }
@@ -85,24 +84,6 @@ export interface TaskDetail extends TaskSummary {
   children: TaskSummary[];
   messages: FeedMessage[];
   events: TaskEvent[];
-}
-
-export interface ThrumSummary {
-  id: number;
-  creator: string;
-  title: string;
-  goal: string;
-  status: string;
-  priority: string;
-  created_at: string;
-  started_at: string | null;
-  completed_at: string | null;
-}
-
-export interface ThrumDetail extends ThrumSummary {
-  plan: string | null;
-  output: string | null;
-  tasks: TaskSummary[];
 }
 
 export interface MemberActivity {
@@ -139,6 +120,7 @@ export interface TreeSummary {
   failed: number;
   in_progress: number;
   pending: number;
+  killed: number;
 }
 
 export interface TreeNode {
@@ -150,7 +132,6 @@ export interface TreeNode {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
-  thrum_id: number | null;
   parent_task_id: number | null;
   root_task_id: number | null;
   prompt: string | null;

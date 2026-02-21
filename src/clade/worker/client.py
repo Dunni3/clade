@@ -65,6 +65,17 @@ class EmberClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def kill_task(self, task_id: int) -> dict:
+        """Kill a running task on the Ember."""
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.post(
+                f"{self.base_url}/tasks/{task_id}/kill",
+                headers=self.headers,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
     async def active_tasks(self) -> dict:
         """Get active task info and orphaned sessions."""
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:

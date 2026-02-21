@@ -155,6 +155,7 @@ def _deploy_config_files(
     workers_yaml: str,
     env_content: str,
     mcp_json: str,
+    ssh_key: str | None = None,
 ) -> SSHResult:
     """Write all config files to the remote host via SSH.
 
@@ -177,10 +178,10 @@ echo "{mcp_b64}" | base64 -d > "$CONFIG_DIR/conductor-mcp.json"
 chmod 600 "$CONFIG_DIR/conductor-mcp.json"
 echo "CONFIG_FILES_OK"
 """
-    return run_remote(ssh_host, script, timeout=15)
+    return run_remote(ssh_host, script, ssh_key=ssh_key, timeout=15)
 
 
-def _deploy_tick_files(ssh_host: str) -> SSHResult:
+def _deploy_tick_files(ssh_host: str, ssh_key: str | None = None) -> SSHResult:
     """Copy the tick script and prompt to the remote host."""
     # Read local deploy files
     deploy_dir = Path(__file__).resolve().parent.parent.parent.parent / "deploy"
@@ -201,10 +202,10 @@ chmod +x "$CONFIG_DIR/conductor-tick.sh"
 echo "{prompt_b64}" | base64 -d > "$CONFIG_DIR/conductor-tick.md"
 echo "TICK_FILES_OK"
 """
-    return run_remote(ssh_host, script, timeout=15)
+    return run_remote(ssh_host, script, ssh_key=ssh_key, timeout=15)
 
 
-def _deploy_systemd(ssh_host: str, remote_user: str) -> SSHResult:
+def _deploy_systemd(ssh_host: str, remote_user: str, ssh_key: str | None = None) -> SSHResult:
     """Deploy the systemd service and timer, then enable and start the timer."""
     # Expand ~ to /home/<user> for systemd
     home = f"/home/{remote_user}"
@@ -240,7 +241,7 @@ else
     systemctl status {SERVICE_NAME}.timer --no-pager 2>&1 || true
 fi
 """
-    return run_remote(ssh_host, script, timeout=30)
+    return run_remote(ssh_host, script, ssh_key=ssh_key, timeout=30)
 
 
 def deploy_conductor(
@@ -327,7 +328,7 @@ def deploy_conductor(
 
     # Step 7: Deploy config files
     click.echo("Writing config files to remote...")
-    result = _deploy_config_files(ssh_host, workers_yaml, env_content, mcp_json)
+    result = _deploy_config_files(ssh_host, workers_yaml, env_content, mcp_json, ssh_key=ssh_key)
     if result.success and "CONFIG_FILES_OK" in result.stdout:
         click.echo(click.style("  Config files written", fg="green"))
     else:
@@ -336,7 +337,7 @@ def deploy_conductor(
 
     # Step 8: Deploy tick script + prompt
     click.echo("Deploying tick script and prompt...")
-    result = _deploy_tick_files(ssh_host)
+    result = _deploy_tick_files(ssh_host, ssh_key=ssh_key)
     if result.success and "TICK_FILES_OK" in result.stdout:
         click.echo(click.style("  Tick files deployed", fg="green"))
     else:
@@ -345,7 +346,7 @@ def deploy_conductor(
 
     # Step 9: Deploy systemd service + timer
     click.echo("Deploying systemd service and timer...")
-    result = _deploy_systemd(ssh_host, remote_user)
+    result = _deploy_systemd(ssh_host, remote_user, ssh_key=ssh_key)
     if result.success and "SYSTEMD_OK" in result.stdout:
         click.echo(click.style("  Timer deployed and active", fg="green"))
     elif "SYSTEMD_FAIL" in (result.stdout or ""):
@@ -381,7 +382,7 @@ def deploy_conductor(
             workers=workers_info,
             brothers=brothers_info,
         )
-        result = write_identity_remote(ssh_host, identity)
+        result = write_identity_remote(ssh_host, identity, ssh_key=ssh_key)
         if result.success and "IDENTITY_OK" in result.stdout:
             click.echo(click.style("  Identity written", fg="green"))
         else:

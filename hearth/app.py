@@ -18,8 +18,6 @@ from .models import (
     CreateTaskEventRequest,
     CreateTaskRequest,
     CreateTaskResponse,
-    CreateThrumRequest,
-    CreateThrumResponse,
     EditMessageRequest,
     EmberEntry,
     FeedMessage,
@@ -37,13 +35,10 @@ from .models import (
     TaskDetail,
     TaskEvent,
     TaskSummary,
-    ThrumDetail,
-    ThrumSummary,
     TreeNode,
     TreeSummary,
     UnreadCountResponse,
     UpdateTaskRequest,
-    UpdateThrumRequest,
     UpsertEmberRequest,
 )
 
@@ -71,7 +66,9 @@ def _now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _maybe_trigger_conductor_tick(task_id: int | None = None) -> None:
+def _maybe_trigger_conductor_tick(
+    task_id: int | None = None, message_id: int | None = None
+) -> None:
     """Fire-and-forget: spawn the conductor tick if configured."""
     if not CONDUCTOR_TICK_CMD:
         return
@@ -79,6 +76,9 @@ def _maybe_trigger_conductor_tick(task_id: int | None = None) -> None:
         cmd = CONDUCTOR_TICK_CMD
         if task_id is not None:
             cmd = f"{cmd} {task_id}"
+        elif message_id is not None:
+            cmd = f"{cmd} --message {message_id}"
+        logger.info("Triggering conductor tick: %s", cmd)
         subprocess.Popen(
             cmd,
             shell=True,
@@ -119,6 +119,11 @@ async def send_message(
         recipients=req.recipients,
         task_id=req.task_id,
     )
+
+    # Trigger conductor tick when kamaji receives a message (not from himself)
+    if "kamaji" in req.recipients and sender != "kamaji":
+        _maybe_trigger_conductor_tick(message_id=message_id)
+
     return SendMessageResponse(id=message_id)
 
 
@@ -275,7 +280,6 @@ async def create_task(
             session_name=req.session_name,
             host=req.host,
             working_dir=req.working_dir,
-            thrum_id=req.thrum_id,
             parent_task_id=req.parent_task_id,
         )
     except ValueError as e:
@@ -355,7 +359,7 @@ async def update_task(
         kwargs["status"] = req.status
         if req.status == "in_progress" and task["started_at"] is None:
             kwargs["started_at"] = _now_utc()
-        if req.status in ("completed", "failed"):
+        if req.status in ("completed", "failed", "killed"):
             kwargs["completed_at"] = _now_utc()
     if req.output is not None:
         kwargs["output"] = req.output
@@ -365,9 +369,86 @@ async def update_task(
         raise HTTPException(status_code=404, detail="Task not found")
 
     # Trigger conductor tick when any task reaches a terminal state
+    # Note: "killed" is intentionally excluded — killed tasks must not trigger Kamaji
     if req.status in ("completed", "failed"):
         _maybe_trigger_conductor_tick(task_id=task_id)
 
+    return updated
+
+
+@app.post("/api/v1/tasks/{task_id}/kill", response_model=TaskDetail)
+async def kill_task(
+    task_id: int,
+    caller: str = Depends(resolve_sender),
+):
+    """Kill a running task: terminate tmux session on Ember, mark killed in DB."""
+    import httpx
+
+    task = await db.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Auth: only creator, admins can kill
+    if task["creator"] != caller and caller not in ADMIN_NAMES:
+        raise HTTPException(
+            status_code=403, detail="Only creator or admin can kill a task"
+        )
+
+    # Guard: only active tasks can be killed
+    if task["status"] not in ("pending", "launched", "in_progress"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot kill task with status '{task['status']}'"
+        )
+
+    ember_detail = ""
+    assignee = task["assignee"]
+
+    # Look up Ember URL: DB first, env fallback
+    ember_url = None
+    db_embers = await db.get_embers()
+    for entry in db_embers:
+        if entry["name"] == assignee:
+            ember_url = entry["ember_url"]
+            break
+    if ember_url is None:
+        ember_url = EMBER_URLS.get(assignee)
+
+    if ember_url:
+        # Look up assignee's API key for Ember auth
+        assignee_key = await db.get_api_key_for_name(assignee)
+        if assignee_key is None:
+            # Env fallback: search API_KEYS dict
+            for key, name in API_KEYS.items():
+                if name == assignee:
+                    assignee_key = key
+                    break
+
+        if assignee_key:
+            try:
+                async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
+                    resp = await client.post(
+                        f"{ember_url}/tasks/{task_id}/kill",
+                        headers={"Authorization": f"Bearer {assignee_key}"},
+                    )
+                    ember_result = resp.json()
+                    ember_detail = f"Ember: {ember_result.get('status', 'unknown')}"
+            except Exception as e:
+                ember_detail = f"Ember unreachable: {e}"
+        else:
+            ember_detail = "Ember: no API key found for assignee"
+    else:
+        ember_detail = "Ember: no URL configured for assignee"
+
+    # Mark killed in DB regardless of Ember result
+    output = f"Killed by {caller}. {ember_detail}".strip()
+    updated = await db.update_task(
+        task_id, status="killed", completed_at=_now_utc(), output=output
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Do NOT trigger conductor tick for killed tasks
     return updated
 
 
@@ -565,93 +646,3 @@ async def get_morsel(
     return morsel
 
 
-# ---------------------------------------------------------------------------
-# Thrum endpoints
-# ---------------------------------------------------------------------------
-
-
-@app.post("/api/v1/thrums", response_model=CreateThrumResponse)
-async def create_thrum(
-    req: CreateThrumRequest,
-    caller: str = Depends(resolve_sender),
-):
-    thrum_id = await db.insert_thrum(
-        creator=caller,
-        title=req.title,
-        goal=req.goal,
-        plan=req.plan,
-        priority=req.priority,
-    )
-    _maybe_trigger_conductor_tick()
-    return CreateThrumResponse(id=thrum_id)
-
-
-@app.get("/api/v1/thrums", response_model=list[ThrumSummary])
-async def list_thrums(
-    status: str | None = None,
-    creator: str | None = None,
-    limit: int = 50,
-    _caller: str = Depends(resolve_sender),
-):
-    return await db.get_thrums(status=status, creator=creator, limit=limit)
-
-
-@app.get("/api/v1/thrums/{thrum_id}", response_model=ThrumDetail)
-async def get_thrum(
-    thrum_id: int,
-    _caller: str = Depends(resolve_sender),
-):
-    thrum = await db.get_thrum(thrum_id)
-    if thrum is None:
-        raise HTTPException(status_code=404, detail="Thrum not found")
-    return thrum
-
-
-@app.patch("/api/v1/thrums/{thrum_id}", response_model=ThrumDetail)
-async def update_thrum(
-    thrum_id: int,
-    req: UpdateThrumRequest,
-    caller: str = Depends(resolve_sender),
-):
-    thrum = await db.get_thrum(thrum_id)
-    if thrum is None:
-        raise HTTPException(status_code=404, detail="Thrum not found")
-
-    if thrum["creator"] != caller and caller not in ADMIN_NAMES:
-        raise HTTPException(
-            status_code=403, detail="Only creator or admin can update"
-        )
-
-    kwargs: dict = {}
-    if req.status is not None:
-        kwargs["status"] = req.status
-        if req.status in ("planning", "active") and thrum["started_at"] is None:
-            kwargs["started_at"] = _now_utc()
-        if req.status in ("completed", "failed"):
-            kwargs["completed_at"] = _now_utc()
-    for field in ("title", "goal", "plan", "priority", "output"):
-        value = getattr(req, field)
-        if value is not None:
-            kwargs[field] = value
-
-    updated = await db.update_thrum(thrum_id, **kwargs)
-    if updated is None:
-        raise HTTPException(status_code=404, detail="Thrum not found")
-    return updated
-
-
-@app.delete("/api/v1/thrums/{thrum_id}", status_code=204)
-async def delete_thrum(
-    thrum_id: int,
-    caller: str = Depends(resolve_sender),
-):
-    """Delete a thrum (admin only)."""
-    if caller not in ADMIN_NAMES:
-        raise HTTPException(status_code=403, detail="Admin only")
-
-    thrum = await db.get_thrum(thrum_id)
-    if thrum is None:
-        raise HTTPException(status_code=404, detail="Thrum not found")
-
-    await db.delete_thrum(thrum_id)
-    return Response(status_code=204)

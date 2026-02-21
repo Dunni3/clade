@@ -322,15 +322,50 @@ class TestDatabaseTaskTrees:
         assert t["pending"] == 1  # root is still pending
 
     @pytest.mark.asyncio
-    async def test_backward_compat_no_parent(self):
-        """Tasks without parent still work as before."""
+    async def test_standalone_task_is_own_root(self):
+        """Tasks without parent are their own root (single-node tree)."""
         task_id = await mailbox_db.insert_task(
             creator="doot", assignee="oppy", prompt="Standalone"
         )
         task = await mailbox_db.get_task(task_id)
         assert task["parent_task_id"] is None
-        assert task["root_task_id"] is None
+        assert task["root_task_id"] == task_id
         assert task["children"] == []
+
+
+class TestDatabaseGetApiKeyForName:
+    @pytest.mark.asyncio
+    async def test_found(self):
+        await mailbox_db.insert_api_key("testbot", "secret-key-123")
+        key = await mailbox_db.get_api_key_for_name("testbot")
+        assert key == "secret-key-123"
+
+    @pytest.mark.asyncio
+    async def test_not_found(self):
+        key = await mailbox_db.get_api_key_for_name("nobody")
+        assert key is None
+
+
+class TestDatabaseTreesKilledCount:
+    @pytest.mark.asyncio
+    async def test_killed_count_in_tree_stats(self):
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root", subject="Root"
+        )
+        c1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C1", parent_task_id=root_id,
+        )
+        c2 = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="C2", parent_task_id=root_id,
+        )
+        await mailbox_db.update_task(c1, status="killed")
+        await mailbox_db.update_task(c2, status="completed")
+
+        trees = await mailbox_db.get_trees()
+        assert len(trees) == 1
+        t = trees[0]
+        assert t["killed"] == 1
+        assert t["completed"] == 1
 
 
 class TestDatabaseTaskLinkedMessages:
@@ -732,6 +767,148 @@ class TestAPITaskTrees:
 
 
 # ---------------------------------------------------------------------------
+# Kill task — API endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestAPIKillTask:
+    @pytest.mark.asyncio
+    async def test_kill_in_progress_task(self, client):
+        """Kill an in_progress task — should return 200 with status=killed."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff", "subject": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        # Move to in_progress
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/kill",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "killed"
+        assert data["completed_at"] is not None
+        assert "Killed by doot" in data["output"]
+
+    @pytest.mark.asyncio
+    async def test_kill_pending_task(self, client):
+        """Kill a pending task — should work since it's an active status."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/kill",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "killed"
+
+    @pytest.mark.asyncio
+    async def test_kill_completed_task_409(self, client):
+        """Cannot kill an already-completed task."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "completed"},
+            headers=OPPY_HEADERS,
+        )
+
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/kill",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_kill_by_non_creator_403(self, client):
+        """Only creator or admins can kill a task."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/kill",
+            headers=JERRY_HEADERS,
+        )
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_kill_not_found(self, client):
+        """Killing a non-existent task returns 404."""
+        resp = await client.post(
+            "/api/v1/tasks/9999/kill",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_kill_already_killed_409(self, client):
+        """Cannot kill a task that's already killed."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        # Kill it once
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/kill",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+
+        # Try to kill again — should be 409
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/kill",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_killed_sets_completed_at_via_patch(self, client):
+        """PATCH update_task with status=killed also sets completed_at."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "killed"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "killed"
+        assert data["completed_at"] is not None
+
+
+# ---------------------------------------------------------------------------
 # MailboxClient — task methods
 # ---------------------------------------------------------------------------
 
@@ -816,6 +993,26 @@ class TestMailboxClientTasks:
             result = await self.client.update_task(1, status="completed", output="All done")
             assert result["status"] == "completed"
             instance.patch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_kill_task(self):
+        mock_resp = self._make_mock_resp({
+            "id": 1, "creator": "doot", "assignee": "oppy", "subject": "Test",
+            "prompt": "Do stuff", "status": "killed",
+            "created_at": "2026-02-09T10:00:00Z",
+            "started_at": "2026-02-09T10:01:00Z",
+            "completed_at": "2026-02-09T10:30:00Z",
+            "session_name": None, "host": None, "working_dir": None,
+            "output": "Killed by doot", "messages": [],
+        })
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(post_resp=mock_resp)
+            MockClient.return_value = instance
+            result = await self.client.kill_task(1)
+            assert result["status"] == "killed"
+            instance.post.assert_called_once()
+            call_args = instance.post.call_args
+            assert "/tasks/1/kill" in str(call_args)
 
     @pytest.mark.asyncio
     async def test_send_message_with_task_id(self):
@@ -922,6 +1119,33 @@ class TestInitiateSSHTaskTool:
         assert call_kwargs["task_id"] == 10
         assert call_kwargs["mailbox_url"] == "https://54.84.119.14"
         assert call_kwargs["mailbox_api_key"] == "secret-key"
+
+
+class TestKillTaskTool:
+    @pytest.mark.asyncio
+    async def test_not_configured(self):
+        tools = _make_mailbox_tools(None)
+        result = await tools["kill_task"](1)
+        assert "not configured" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_success(self):
+        mock_client = AsyncMock()
+        mock_client.kill_task.return_value = {
+            "id": 5, "status": "killed", "assignee": "oppy",
+        }
+        tools = _make_mailbox_tools(mock_client)
+        result = await tools["kill_task"](5)
+        assert "Task #5 killed" in result
+        assert "oppy" in result
+
+    @pytest.mark.asyncio
+    async def test_error(self):
+        mock_client = AsyncMock()
+        mock_client.kill_task.side_effect = Exception("Connection refused")
+        tools = _make_mailbox_tools(mock_client)
+        result = await tools["kill_task"](1)
+        assert "Error" in result
 
 
 class TestListTasksTool:

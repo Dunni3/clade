@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getHealthCheck, getMemberActivity, getEmberStatus, getThrums, getTasks } from '../api/mailbox';
+import { getHealthCheck, getMemberActivity, getEmberStatus, getTasks } from '../api/mailbox';
 import { useAuthStore } from '../store/authStore';
-import type { MemberActivity, EmberInfo, ThrumSummary, TaskSummary } from '../types/mailbox';
+import type { MemberActivity, EmberInfo, TaskSummary } from '../types/mailbox';
 
 const memberColors: Record<string, string> = {
   ian: 'border-purple-500',
@@ -10,15 +10,6 @@ const memberColors: Record<string, string> = {
   oppy: 'border-emerald-500',
   jerry: 'border-amber-500',
   kamaji: 'border-cyan-500',
-};
-
-const thrumStatusColors: Record<string, string> = {
-  pending: 'bg-gray-500/20 text-gray-300',
-  planning: 'bg-blue-500/20 text-blue-300',
-  active: 'bg-amber-500/20 text-amber-300',
-  paused: 'bg-purple-500/20 text-purple-300',
-  completed: 'bg-emerald-500/20 text-emerald-300',
-  failed: 'bg-red-500/20 text-red-300',
 };
 
 const taskStatusColors: Record<string, string> = {
@@ -63,7 +54,6 @@ export default function StatusPage() {
   const [healthy, setHealthy] = useState<boolean | null>(null);
   const [members, setMembers] = useState<MemberActivity[]>([]);
   const [emberStatus, setEmberStatus] = useState<Record<string, EmberInfo>>({});
-  const [activeThrums, setActiveThrums] = useState<ThrumSummary[]>([]);
   const [activeTasks, setActiveTasks] = useState<TaskSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const apiKey = useAuthStore((s) => s.apiKey);
@@ -76,11 +66,6 @@ export default function StatusPage() {
       getHealthCheck().then(() => setHealthy(true)).catch(() => setHealthy(false)),
       getMemberActivity().then((res) => setMembers(res.members)).catch(() => {}),
       getEmberStatus().then((res) => setEmberStatus(res.embers)).catch(() => {}),
-      getThrums({ status: 'active', limit: 20 }).then((active) => {
-        getThrums({ status: 'planning', limit: 20 }).then((planning) => {
-          setActiveThrums([...active, ...planning]);
-        }).catch(() => setActiveThrums(active));
-      }).catch(() => {}),
       getTasks({ status: 'in_progress', limit: 20 }).then(setActiveTasks).catch(() => {}),
     ]).finally(() => setLoading(false));
   }, [apiKey]);
@@ -146,33 +131,6 @@ export default function StatusPage() {
           <p className="text-gray-500 text-sm col-span-full">No members found.</p>
         )}
       </div>
-
-      {/* Active Thrums */}
-      <h2 className="text-lg font-semibold text-gray-200 mb-3">
-        Active Thrums {activeThrums.length > 0 && <span className="text-sm font-normal text-gray-500">({activeThrums.length})</span>}
-      </h2>
-      {activeThrums.length === 0 ? (
-        <p className="text-gray-500 text-sm mb-6">No active thrums.</p>
-      ) : (
-        <div className="space-y-2 mb-6">
-          {activeThrums.map((thrum) => (
-            <Link
-              key={thrum.id}
-              to={`/thrums/${thrum.id}`}
-              className="block rounded-lg border border-gray-800 p-3 transition-colors hover:bg-gray-800/50"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono text-gray-500">#{thrum.id}</span>
-                <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${thrumStatusColors[thrum.status] || 'bg-gray-700 text-gray-300'}`}>
-                  {thrum.status}
-                </span>
-                <span className="text-sm text-gray-300 truncate">{thrum.title || '(no title)'}</span>
-                <span className="text-xs text-gray-500 ml-auto">{thrum.creator}</span>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
 
       {/* Active Tasks */}
       <h2 className="text-lg font-semibold text-gray-200 mb-3">

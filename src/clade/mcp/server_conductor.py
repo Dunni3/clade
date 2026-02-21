@@ -1,4 +1,4 @@
-"""Conductor MCP server — Kamaji's server for orchestrating thrums and delegating tasks."""
+"""Conductor MCP server — Kamaji's server for orchestrating task trees and delegating tasks."""
 
 import os
 
@@ -8,7 +8,6 @@ from mcp.server.fastmcp import FastMCP
 from ..communication.mailbox_client import MailboxClient
 from .tools.conductor_tools import create_conductor_tools
 from .tools.mailbox_tools import create_mailbox_tools
-from .tools.thrum_tools import create_thrum_tools
 
 # Initialize MCP server
 mcp = FastMCP("clade-conductor")
@@ -25,9 +24,6 @@ if _hearth_url and _hearth_api_key:
 
 # Register shared mailbox tools
 create_mailbox_tools(mcp, _mailbox)
-
-# Register thrum tools
-create_thrum_tools(mcp, _mailbox)
 
 # Load worker registry
 _worker_registry: dict[str, dict] = {}

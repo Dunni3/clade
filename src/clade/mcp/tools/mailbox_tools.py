@@ -217,8 +217,6 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
                 lines.append(f"Parent task: #{t['parent_task_id']}")
             if t.get("root_task_id"):
                 lines.append(f"Root task: #{t['root_task_id']}")
-            if t.get("thrum_id"):
-                lines.append(f"Thrum: #{t['thrum_id']}")
             if t.get("host"):
                 lines.append(f"Host: {t['host']}")
             if t.get("session_name"):
@@ -268,23 +266,40 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             return f"Error updating task: {e}"
 
     @mcp.tool()
+    async def kill_task(task_id: int) -> str:
+        """Kill a running task. Terminates the tmux session on the Ember and marks the task as killed.
+
+        Args:
+            task_id: The task ID to kill.
+        """
+        if mailbox is None:
+            return _NOT_CONFIGURED
+        try:
+            result = await mailbox.kill_task(task_id)
+            return (
+                f"Task #{result['id']} killed.\n"
+                f"  Status: {result['status']}\n"
+                f"  Assignee: {result['assignee']}"
+            )
+        except Exception as e:
+            return f"Error killing task: {e}"
+
+    @mcp.tool()
     async def deposit_morsel(
         body: str,
         tags: list[str] | None = None,
         task_id: int | None = None,
-        thrum_id: int | None = None,
         brother: str | None = None,
     ) -> str:
         """Deposit a morsel — a short note, observation, or log entry.
 
-        Morsels are lightweight records that can be tagged and linked to tasks,
-        thrums, or brothers for later retrieval.
+        Morsels are lightweight records that can be tagged and linked to tasks
+        or brothers for later retrieval.
 
         Args:
             body: The morsel content.
             tags: Optional list of tags (e.g. ["conductor-tick", "debug"]).
             task_id: Optional task ID to link this morsel to.
-            thrum_id: Optional thrum ID to link this morsel to.
             brother: Optional brother name to link this morsel to.
         """
         if mailbox is None:
@@ -293,8 +308,6 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             links = []
             if task_id is not None:
                 links.append({"object_type": "task", "object_id": str(task_id)})
-            if thrum_id is not None:
-                links.append({"object_type": "thrum", "object_id": str(thrum_id)})
             if brother is not None:
                 links.append({"object_type": "brother", "object_id": brother})
             result = await mailbox.create_morsel(
@@ -312,7 +325,6 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         creator: str | None = None,
         tag: str | None = None,
         task_id: int | None = None,
-        thrum_id: int | None = None,
         limit: int = 20,
     ) -> str:
         """List morsels, optionally filtered by creator, tag, or linked object.
@@ -321,7 +333,6 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             creator: Filter by creator name.
             tag: Filter by tag.
             task_id: Filter by linked task ID.
-            thrum_id: Filter by linked thrum ID.
             limit: Maximum number of morsels to return.
         """
         if mailbox is None:
@@ -332,9 +343,6 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             if task_id is not None:
                 object_type = "task"
                 object_id = task_id
-            elif thrum_id is not None:
-                object_type = "thrum"
-                object_id = thrum_id
             morsels = await mailbox.get_morsels(
                 creator=creator,
                 tag=tag,
@@ -424,6 +432,7 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         "list_tasks": list_tasks,
         "get_task": get_task,
         "update_task": update_task,
+        "kill_task": kill_task,
         "deposit_morsel": deposit_morsel,
         "list_morsels": list_morsels,
         "list_trees": list_trees,

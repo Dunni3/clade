@@ -12,7 +12,8 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import dagre from 'dagre';
-import { getTree } from '../api/mailbox';
+import { getTree, killTask } from '../api/mailbox';
+import KillConfirmModal from '../components/KillConfirmModal';
 import MorselPanel from '../components/MorselPanel';
 import type { TreeNode } from '../types/mailbox';
 
@@ -22,6 +23,7 @@ const statusColors: Record<string, string> = {
   in_progress: 'border-amber-500 bg-amber-500/10',
   completed: 'border-emerald-500 bg-emerald-500/10',
   failed: 'border-red-500 bg-red-500/10',
+  killed: 'border-orange-500 bg-orange-500/10',
 };
 
 const statusBadgeColors: Record<string, string> = {
@@ -30,6 +32,7 @@ const statusBadgeColors: Record<string, string> = {
   in_progress: 'bg-amber-500/20 text-amber-300',
   completed: 'bg-emerald-500/20 text-emerald-300',
   failed: 'bg-red-500/20 text-red-300',
+  killed: 'bg-orange-500/20 text-orange-300',
 };
 
 function formatDate(iso: string) {
@@ -131,6 +134,8 @@ export default function TreeDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
+  const [showKillModal, setShowKillModal] = useState(false);
+  const [killLoading, setKillLoading] = useState(false);
 
   const fetchTree = useCallback(async () => {
     if (!rootId) return;
@@ -153,6 +158,21 @@ export default function TreeDetailPage() {
 
   const { nodes, edges } = layoutTree(tree);
   const selectedTask = selectedNodeId ? findNode(tree, selectedNodeId) : null;
+  const selectedIsActive = selectedTask && ['pending', 'launched', 'in_progress'].includes(selectedTask.status);
+
+  const handleKill = async () => {
+    if (!selectedTask) return;
+    setKillLoading(true);
+    try {
+      await killTask(selectedTask.id);
+      await fetchTree();
+    } catch {
+      await fetchTree();
+    } finally {
+      setKillLoading(false);
+      setShowKillModal(false);
+    }
+  };
 
   return (
     <div>
@@ -194,9 +214,19 @@ export default function TreeDetailPage() {
                 {selectedTask.creator} &rarr; {selectedTask.assignee}
               </span>
             </div>
-            <Link to={`/tasks/${selectedTask.id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
-              Full detail &rarr;
-            </Link>
+            <div className="flex items-center gap-2">
+              {selectedIsActive && (
+                <button
+                  onClick={() => setShowKillModal(true)}
+                  className="inline-block rounded px-2 py-0.5 text-xs font-medium bg-orange-500/20 text-orange-300 hover:bg-orange-500/30 transition-colors"
+                >
+                  Kill
+                </button>
+              )}
+              <Link to={`/tasks/${selectedTask.id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
+                Full detail &rarr;
+              </Link>
+            </div>
           </div>
           <h2 className="text-sm font-semibold text-gray-200 mb-2">{selectedTask.subject || '(no subject)'}</h2>
           <div className="flex flex-wrap gap-4 text-xs text-gray-500 mb-3">
@@ -216,11 +246,22 @@ export default function TreeDetailPage() {
               <pre className="text-xs text-gray-500 whitespace-pre-wrap overflow-x-auto max-h-40 overflow-y-auto">{selectedTask.output}</pre>
             </div>
           )}
+          <MorselPanel objectType="task" objectId={selectedTask.id} />
         </div>
       )}
 
-      {/* Root task morsels */}
-      <MorselPanel objectType="task" objectId={tree.id} />
+      {/* Root task morsels (when no task selected) */}
+      {!selectedTask && <MorselPanel objectType="task" objectId={tree.id} />}
+
+      {selectedTask && (
+        <KillConfirmModal
+          open={showKillModal}
+          subject={selectedTask.subject}
+          onConfirm={handleKill}
+          onCancel={() => setShowKillModal(false)}
+          loading={killLoading}
+        />
+      )}
     </div>
   );
 }

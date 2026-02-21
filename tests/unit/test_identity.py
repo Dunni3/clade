@@ -76,10 +76,6 @@ class TestGenerateConductorIdentity:
         assert "delegate_task" in result
         assert "check_worker_health" in result
         assert "list_worker_tasks" in result
-        assert "create_thrum" in result
-        assert "list_thrums" in result
-        assert "get_thrum" in result
-        assert "update_thrum" in result
         assert "send_message" in result
 
     def test_with_workers(self):

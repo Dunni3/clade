@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { getTask } from '../api/mailbox';
+import { getTask, killTask } from '../api/mailbox';
+import KillConfirmModal from '../components/KillConfirmModal';
 import MorselPanel from '../components/MorselPanel';
 import type { TaskDetail, FeedMessage, TaskEvent } from '../types/mailbox';
 
@@ -13,6 +14,7 @@ const statusColors: Record<string, string> = {
   in_progress: 'bg-amber-500/20 text-amber-300',
   completed: 'bg-emerald-500/20 text-emerald-300',
   failed: 'bg-red-500/20 text-red-300',
+  killed: 'bg-orange-500/20 text-orange-300',
 };
 
 const senderColors: Record<string, string> = {
@@ -68,7 +70,7 @@ function buildTimeline(task: TaskDetail): TimelineItem[] {
     items.push({ type: 'event', timestamp: task.started_at, label: 'Task started' });
   }
   if (task.completed_at) {
-    const verb = task.status === 'failed' ? 'Task failed' : 'Task completed';
+    const verb = task.status === 'failed' ? 'Task failed' : task.status === 'killed' ? 'Task killed' : 'Task completed';
     items.push({ type: 'event', timestamp: task.completed_at, label: verb });
   }
 
@@ -142,6 +144,8 @@ export default function TaskDetailPage() {
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [showTools, setShowTools] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
+  const [showKillModal, setShowKillModal] = useState(false);
+  const [killLoading, setKillLoading] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchTask = useCallback(async () => {
@@ -203,6 +207,20 @@ export default function TaskDetailPage() {
     setShowTools(!showTools);
   };
 
+  const handleKill = async () => {
+    setKillLoading(true);
+    try {
+      await killTask(task.id);
+      await fetchTask();
+    } catch {
+      // Refetch anyway to show latest state
+      await fetchTask();
+    } finally {
+      setKillLoading(false);
+      setShowKillModal(false);
+    }
+  };
+
   return (
     <div>
       <button onClick={() => navigate(-1)} className="text-sm text-gray-400 hover:text-gray-200 mb-4 inline-block">
@@ -219,10 +237,18 @@ export default function TaskDetailPage() {
                 {task.status}
               </span>
               {isActive && (
-                <span className="inline-flex items-center gap-1 text-xs text-blue-400">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
-                  live
-                </span>
+                <>
+                  <span className="inline-flex items-center gap-1 text-xs text-blue-400">
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+                    live
+                  </span>
+                  <button
+                    onClick={() => setShowKillModal(true)}
+                    className="inline-block rounded px-2 py-0.5 text-xs font-medium bg-orange-500/20 text-orange-300 hover:bg-orange-500/30 transition-colors"
+                  >
+                    Kill
+                  </button>
+                </>
               )}
               <span className="text-xs text-gray-500">
                 {task.creator} &rarr; {task.assignee}
@@ -408,6 +434,14 @@ export default function TaskDetailPage() {
           <p className="text-gray-500 text-sm">No timeline events.</p>
         )}
       </div>
+
+      <KillConfirmModal
+        open={showKillModal}
+        subject={task.subject}
+        onConfirm={handleKill}
+        onCancel={() => setShowKillModal(false)}
+        loading={killLoading}
+      />
     </div>
   );
 }

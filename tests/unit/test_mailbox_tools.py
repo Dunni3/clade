@@ -225,7 +225,6 @@ class TestGetTaskEnhanced:
             "completed_at": "2026-02-20T11:00:00Z",
             "parent_task_id": 5,
             "root_task_id": 1,
-            "thrum_id": None,
             "host": None,
             "session_name": None,
             "working_dir": None,
@@ -244,29 +243,3 @@ class TestGetTaskEnhanced:
         assert "Children (2):" in result
         assert "#11 [completed] Sub-task A" in result
         assert "#12 [in_progress] Sub-task B" in result
-
-    @pytest.mark.asyncio
-    async def test_shows_thrum_id(self):
-        mock_mailbox = AsyncMock()
-        mock_mailbox.get_task.return_value = {
-            "id": 15,
-            "status": "in_progress",
-            "subject": "Thrum-linked task",
-            "assignee": "oppy",
-            "creator": "kamaji",
-            "created_at": "2026-02-20T10:00:00Z",
-            "completed_at": None,
-            "parent_task_id": None,
-            "root_task_id": None,
-            "thrum_id": 3,
-            "host": None,
-            "session_name": None,
-            "working_dir": None,
-            "output": None,
-            "prompt": "Work on thrum step",
-            "children": [],
-        }
-        tools = _make_tools(mock_mailbox)
-        result = await tools["get_task"](15)
-        assert "Task #15" in result
-        assert "Thrum: #3" in result

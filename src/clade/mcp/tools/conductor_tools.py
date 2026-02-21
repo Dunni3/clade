@@ -51,7 +51,6 @@ def create_conductor_tools(
         brother: str,
         prompt: str,
         subject: str = "",
-        thrum_id: int | None = None,
         parent_task_id: int | None = None,
         working_dir: str | None = None,
         max_turns: int = 50,
@@ -65,7 +64,6 @@ def create_conductor_tools(
             brother: Worker name (e.g. "oppy").
             prompt: The task prompt/instructions.
             subject: Short description of the task.
-            thrum_id: Optional thrum ID to link this task to.
             parent_task_id: Optional parent task ID for task tree linking. If not provided, auto-reads from TRIGGER_TASK_ID env var.
             working_dir: Override the worker's default working directory.
             max_turns: Maximum Claude turns for the task.
@@ -97,7 +95,6 @@ def create_conductor_tools(
                 assignee=brother,
                 prompt=prompt,
                 subject=subject,
-                thrum_id=thrum_id,
                 parent_task_id=parent_task_id,
             )
             task_id = task_result["id"]

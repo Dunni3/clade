@@ -6,8 +6,6 @@ import MessageDetailPage from './pages/MessageDetailPage';
 import ComposePage from './pages/ComposePage';
 import TasksPage from './pages/TasksPage';
 import TaskDetailPage from './pages/TaskDetailPage';
-import ThrumListPage from './pages/ThrumListPage';
-import ThrumDetailPage from './pages/ThrumDetailPage';
 import TreeListPage from './pages/TreeListPage';
 import TreeDetailPage from './pages/TreeDetailPage';
 import MorselFeedPage from './pages/MorselFeedPage';
@@ -64,22 +62,6 @@ export default function App() {
             element={
               <RequireAuth>
                 <TaskDetailPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/thrums"
-            element={
-              <RequireAuth>
-                <ThrumListPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/thrums/:id"
-            element={
-              <RequireAuth>
-                <ThrumDetailPage />
               </RequireAuth>
             }
           />

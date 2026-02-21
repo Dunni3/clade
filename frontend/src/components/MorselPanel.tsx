@@ -33,13 +33,6 @@ function renderLink(link: MorselLink, index: number) {
       </Link>
     );
   }
-  if (link.object_type === 'thrum') {
-    return (
-      <Link key={index} to={`/thrums/${link.object_id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
-        thrum #{link.object_id}
-      </Link>
-    );
-  }
   return (
     <span key={index} className="text-xs text-gray-400">
       {link.object_type} {link.object_id}

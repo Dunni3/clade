@@ -7,6 +7,7 @@ launches Claude Code sessions in local tmux sessions.
 from __future__ import annotations
 
 import os
+import subprocess
 import time
 from dataclasses import dataclass, field
 
@@ -72,6 +73,27 @@ class AspenRegistry:
         """Reap dead sessions and return active count."""
         self.reap()
         return len(self._aspens)
+
+    def find_by_task_id(self, task_id: int) -> Aspen | None:
+        """Find an aspen by its task_id. Linear scan."""
+        for aspen in self._aspens.values():
+            if aspen.task_id == task_id:
+                return aspen
+        return None
+
+    def remove(self, session_name: str) -> Aspen | None:
+        """Remove an aspen from the registry and record it in history."""
+        aspen = self._aspens.pop(session_name, None)
+        if aspen is not None:
+            self._history.append({
+                "task_id": aspen.task_id,
+                "session_name": aspen.session_name,
+                "subject": aspen.subject,
+                "started_at": aspen.started_at,
+                "ended_at": time.time(),
+                "killed": True,
+            })
+        return aspen
 
     def list_info(self) -> list[dict]:
         """Reap dead sessions and return info dicts for all active aspens."""
@@ -196,6 +218,31 @@ async def execute_task(
         "task_id": req.task_id,
         "message": result.message,
     }
+
+
+@app.post("/tasks/{task_id}/kill")
+async def kill_task(
+    task_id: int,
+    _token: str = Depends(verify_token),
+):
+    """Kill a running task by terminating its tmux session."""
+    aspen = _state.find_by_task_id(task_id)
+    if aspen is None:
+        _state.reap()
+        return {"status": "not_found", "task_id": task_id}
+
+    session_name = aspen.session_name
+    try:
+        subprocess.run(
+            ["tmux", "kill-session", "-t", session_name],
+            capture_output=True,
+            timeout=10,
+        )
+    except Exception:
+        pass  # Best-effort — session may already be dead
+
+    _state.remove(session_name)
+    return {"status": "killed", "session_name": session_name, "task_id": task_id}
 
 
 @app.get("/tasks/active")

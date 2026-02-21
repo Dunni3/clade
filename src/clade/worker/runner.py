@@ -44,8 +44,13 @@ def build_runner_script(
     with os.fdopen(prompt_fd, "w") as f:
         f.write(prompt)
 
-    # Build runner script
+    # Build runner script with logging for debugging dead sessions
+    log_path = f"/tmp/claude_runner_{session_name}.log"
     lines = ["#!/bin/bash"]
+
+    # Log file for post-mortem debugging
+    lines.append(f'LOGFILE="{log_path}"')
+    lines.append('echo "$(date -Iseconds) runner started (pid $$)" > "$LOGFILE"')
 
     # Export env vars for Hearth access.
     # Each var is independent so callers can selectively override.
@@ -64,14 +69,18 @@ def build_runner_script(
     if working_dir:
         lines.append(f"cd {working_dir} || exit 1")
 
-    # Run Claude
+    # Run Claude, capturing exit code
+    lines.append('echo "$(date -Iseconds) launching claude" >> "$LOGFILE"')
     lines.append(
         f'claude -p "$(cat {prompt_path})" '
         f"--dangerously-skip-permissions --max-turns {max_turns}"
     )
+    lines.append('EXIT_CODE=$?')
+    lines.append('echo "$(date -Iseconds) claude exited with code $EXIT_CODE" >> "$LOGFILE"')
 
-    # Self-cleanup
+    # Self-cleanup (keep log on failure for debugging)
     lines.append(f'rm -f "{prompt_path}" "$0"')
+    lines.append('[ "$EXIT_CODE" -eq 0 ] && rm -f "$LOGFILE"')
 
     runner_fd, runner_path = tempfile.mkstemp(
         prefix="claude_runner_", suffix=".sh", dir="/tmp"
