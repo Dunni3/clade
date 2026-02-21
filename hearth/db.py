@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS kanban_cards (
     assignee    TEXT,
     creator     TEXT NOT NULL,
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    project     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS kanban_card_labels (
@@ -144,6 +145,17 @@ async def init_db() -> None:
         try:
             await db.execute(
                 "ALTER TABLE tasks ADD COLUMN root_task_id INTEGER REFERENCES tasks(id)"
+            )
+        except Exception:
+            pass
+        # Migration: add project column to kanban_cards
+        try:
+            await db.execute(
+                "ALTER TABLE kanban_cards ADD COLUMN project TEXT"
+            )
+            # Backfill: tag all existing cards as project='clade'
+            await db.execute(
+                "UPDATE kanban_cards SET project = 'clade' WHERE project IS NULL"
             )
         except Exception:
             pass
@@ -1266,12 +1278,13 @@ async def insert_card(
     assignee: str | None = None,
     labels: list[str] | None = None,
     links: list[dict] | None = None,
+    project: str | None = None,
 ) -> int:
     db = await get_db()
     try:
         cursor = await db.execute(
-            "INSERT INTO kanban_cards (creator, title, description, col, priority, assignee) VALUES (?, ?, ?, ?, ?, ?)",
-            (creator, title, description, col, priority, assignee),
+            "INSERT INTO kanban_cards (creator, title, description, col, priority, assignee, project) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (creator, title, description, col, priority, assignee, project),
         )
         card_id = cursor.lastrowid
         if labels:
@@ -1296,7 +1309,7 @@ async def get_card(card_id: int) -> dict | None:
     db = await get_db()
     try:
         cursor = await db.execute(
-            "SELECT id, title, description, col, priority, assignee, creator, created_at, updated_at FROM kanban_cards WHERE id = ?",
+            "SELECT id, title, description, col, priority, assignee, creator, created_at, updated_at, project FROM kanban_cards WHERE id = ?",
             (card_id,),
         )
         row = await cursor.fetchone()
@@ -1325,6 +1338,7 @@ async def get_cards(
     creator: str | None = None,
     priority: str | None = None,
     label: str | None = None,
+    project: str | None = None,
     include_archived: bool = False,
     limit: int = 200,
     offset: int = 0,
@@ -1354,11 +1368,14 @@ async def get_cards(
                 "c.id IN (SELECT card_id FROM kanban_card_labels WHERE label = ?)"
             )
             params.append(label)
+        if project:
+            where_clauses.append("c.project = ?")
+            params.append(project)
 
         where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
         sql = f"""
-            SELECT c.id, c.title, c.description, c.col, c.priority, c.assignee, c.creator, c.created_at, c.updated_at
+            SELECT c.id, c.title, c.description, c.col, c.priority, c.assignee, c.creator, c.created_at, c.updated_at, c.project
             FROM kanban_cards c
             {where_sql}
             ORDER BY
@@ -1414,14 +1431,14 @@ async def get_cards(
 async def update_card(card_id: int, **kwargs) -> dict | None:
     """Update a card. Pass only the fields to change.
 
-    Supported kwargs: title, description, col, priority, assignee, labels.
+    Supported kwargs: title, description, col, priority, assignee, labels, project.
     """
     db = await get_db()
     try:
         updates: list[str] = []
         params: list = []
 
-        for field in ("title", "description", "col", "priority", "assignee"):
+        for field in ("title", "description", "col", "priority", "assignee", "project"):
             if field in kwargs:
                 updates.append(f"{field} = ?")
                 params.append(kwargs[field])

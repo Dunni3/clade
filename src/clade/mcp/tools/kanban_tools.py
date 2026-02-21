@@ -22,6 +22,7 @@ def create_kanban_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         assignee: str | None = None,
         labels: list[str] | None = None,
         links: list[dict] | None = None,
+        project: str | None = None,
     ) -> str:
         """Create a kanban card.
 
@@ -33,6 +34,7 @@ def create_kanban_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             assignee: Who is responsible for this card.
             labels: Optional labels/tags for categorization.
             links: Optional links to other objects. Each dict has `object_type` and `object_id` keys.
+            project: Optional project name (e.g. "clade", "omtra") for board scoping.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -54,6 +56,7 @@ def create_kanban_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
                 assignee=assignee,
                 labels=labels,
                 links=coerced_links,
+                project=project,
             )
             return f"Card #{card['id']} created: {card['title']} [{card['col']}]"
         except Exception as e:
@@ -65,6 +68,7 @@ def create_kanban_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         assignee: str | None = None,
         label: str | None = None,
         include_archived: bool = False,
+        project: str | None = None,
     ) -> str:
         """Show kanban board cards, grouped by column.
 
@@ -73,6 +77,7 @@ def create_kanban_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             assignee: Filter by assignee.
             label: Filter by label.
             include_archived: Include archived cards (excluded by default).
+            project: Filter by project (e.g. "clade", "omtra").
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -82,6 +87,7 @@ def create_kanban_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
                 assignee=assignee,
                 label=label,
                 include_archived=include_archived,
+                project=project,
             )
             if not cards:
                 return "No cards found."
@@ -124,6 +130,8 @@ def create_kanban_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
                 f"Priority: {c['priority']}",
                 f"Creator: {c['creator']}",
             ]
+            if c.get("project"):
+                lines.append(f"Project: {c['project']}")
             if c.get("assignee"):
                 lines.append(f"Assignee: {c['assignee']}")
             if c.get("labels"):
@@ -166,6 +174,7 @@ def create_kanban_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         assignee: str | None = ...,  # type: ignore[assignment]
         labels: list[str] | None = ...,  # type: ignore[assignment]
         links: list[dict] | None = ...,  # type: ignore[assignment]
+        project: str | None = ...,  # type: ignore[assignment]
     ) -> str:
         """Update a kanban card's fields (use move_card to change column).
 
@@ -177,6 +186,7 @@ def create_kanban_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             assignee: New assignee (set to null to unassign).
             labels: New labels (replaces existing).
             links: New links (replaces existing). Each dict has `object_type` and `object_id` keys.
+            project: Project name (e.g. "clade", "omtra"). Set to null to clear.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -192,6 +202,8 @@ def create_kanban_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
                 kwargs["priority"] = priority
             if assignee is not ...:
                 kwargs["assignee"] = assignee
+            if project is not ...:
+                kwargs["project"] = project
             if labels is not ...:
                 kwargs["labels"] = labels
             if links is not ...:

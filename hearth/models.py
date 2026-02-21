@@ -274,6 +274,7 @@ class CreateCardRequest(BaseModel):
     assignee: str | None = None
     labels: list[str] = []
     links: list[CardLink] = []
+    project: str | None = None
 
 
 class UpdateCardRequest(BaseModel):
@@ -284,6 +285,7 @@ class UpdateCardRequest(BaseModel):
     assignee: str | None = None
     labels: list[str] | None = None
     links: list[CardLink] | None = None
+    project: str | None = None
 
 
 class CardSummary(BaseModel):
@@ -298,3 +300,4 @@ class CardSummary(BaseModel):
     updated_at: str
     labels: list[str] = []
     links: list[CardLink] = []
+    project: str | None = None

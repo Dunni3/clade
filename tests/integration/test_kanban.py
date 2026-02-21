@@ -60,7 +60,40 @@ class TestDatabaseCards:
         assert card["col"] == "backlog"
         assert card["priority"] == "normal"
         assert card["assignee"] is None
+        assert card["project"] is None
         assert card["labels"] == []
+
+    @pytest.mark.asyncio
+    async def test_insert_with_project(self):
+        card_id = await hearth_db.insert_card(
+            creator="doot", title="Clade card", project="clade"
+        )
+        card = await hearth_db.get_card(card_id)
+        assert card["project"] == "clade"
+
+    @pytest.mark.asyncio
+    async def test_list_filter_project(self):
+        await hearth_db.insert_card(creator="doot", title="Clade", project="clade")
+        await hearth_db.insert_card(creator="doot", title="OMTRA", project="omtra")
+        await hearth_db.insert_card(creator="doot", title="No project")
+
+        cards = await hearth_db.get_cards(project="clade")
+        assert len(cards) == 1
+        assert cards[0]["title"] == "Clade"
+
+        cards = await hearth_db.get_cards(project="omtra")
+        assert len(cards) == 1
+        assert cards[0]["title"] == "OMTRA"
+
+    @pytest.mark.asyncio
+    async def test_update_project(self):
+        card_id = await hearth_db.insert_card(creator="doot", title="Test")
+        updated = await hearth_db.update_card(card_id, project="omtra")
+        assert updated["project"] == "omtra"
+
+        # Clear project
+        updated = await hearth_db.update_card(card_id, project=None)
+        assert updated["project"] is None
 
     @pytest.mark.asyncio
     async def test_insert_with_labels(self):
@@ -473,6 +506,56 @@ class TestAPICards:
         assert resp.json()["links"][0]["object_type"] == "tree"
 
     @pytest.mark.asyncio
+    async def test_create_card_with_project(self, client):
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={"title": "Clade card", "project": "clade"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["project"] == "clade"
+
+    @pytest.mark.asyncio
+    async def test_list_cards_filter_project(self, client):
+        await client.post(
+            "/api/v1/kanban/cards",
+            json={"title": "Clade", "project": "clade"},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            "/api/v1/kanban/cards",
+            json={"title": "OMTRA", "project": "omtra"},
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get(
+            "/api/v1/kanban/cards",
+            params={"project": "clade"},
+            headers=DOOT_HEADERS,
+        )
+        cards = resp.json()
+        assert len(cards) == 1
+        assert cards[0]["title"] == "Clade"
+
+    @pytest.mark.asyncio
+    async def test_update_card_project(self, client):
+        create_resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={"title": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        card_id = create_resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/kanban/cards/{card_id}",
+            json={"project": "omtra"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["project"] == "omtra"
+
+    @pytest.mark.asyncio
     async def test_no_auth(self, client):
         resp = await client.post(
             "/api/v1/kanban/cards",
@@ -715,3 +798,67 @@ class TestKanbanMCPTools:
 
         result = await tools["update_card"](1, title="New Title")
         assert "updated" in result
+
+    @pytest.mark.asyncio
+    async def test_create_card_with_project(self):
+        from unittest.mock import AsyncMock
+        from mcp.server.fastmcp import FastMCP
+        from clade.mcp.tools.kanban_tools import create_kanban_tools
+
+        mailbox = AsyncMock()
+        mailbox.create_card.return_value = {"id": 1, "title": "Test", "col": "backlog"}
+
+        mcp = FastMCP("test")
+        tools = create_kanban_tools(mcp, mailbox)
+
+        result = await tools["create_card"]("Test", project="clade")
+        assert "Card #1 created" in result
+        mailbox.create_card.assert_called_once()
+        call_kwargs = mailbox.create_card.call_args[1]
+        assert call_kwargs["project"] == "clade"
+
+    @pytest.mark.asyncio
+    async def test_list_board_with_project(self):
+        from unittest.mock import AsyncMock
+        from mcp.server.fastmcp import FastMCP
+        from clade.mcp.tools.kanban_tools import create_kanban_tools
+
+        mailbox = AsyncMock()
+        mailbox.get_cards.return_value = [
+            {"id": 1, "title": "A", "col": "backlog", "priority": "normal", "assignee": None, "labels": [], "project": "clade"},
+        ]
+
+        mcp = FastMCP("test")
+        tools = create_kanban_tools(mcp, mailbox)
+
+        result = await tools["list_board"](project="clade")
+        assert "#1" in result
+        call_kwargs = mailbox.get_cards.call_args[1]
+        assert call_kwargs["project"] == "clade"
+
+    @pytest.mark.asyncio
+    async def test_get_card_shows_project(self):
+        from unittest.mock import AsyncMock
+        from mcp.server.fastmcp import FastMCP
+        from clade.mcp.tools.kanban_tools import create_kanban_tools
+
+        mailbox = AsyncMock()
+        mailbox.get_card.return_value = {
+            "id": 1,
+            "title": "Test",
+            "description": "",
+            "col": "backlog",
+            "priority": "normal",
+            "assignee": None,
+            "creator": "doot",
+            "labels": [],
+            "created_at": "2026-02-21T00:00:00Z",
+            "updated_at": "2026-02-21T00:00:00Z",
+            "project": "omtra",
+        }
+
+        mcp = FastMCP("test")
+        tools = create_kanban_tools(mcp, mailbox)
+
+        result = await tools["get_card"](1)
+        assert "Project: omtra" in result

@@ -184,6 +184,7 @@ export interface CardSummary {
   updated_at: string;
   labels: string[];
   links: CardLink[];
+  project: string | null;
 }
 
 export interface CreateCardRequest {
@@ -194,6 +195,7 @@ export interface CreateCardRequest {
   assignee?: string | null;
   labels?: string[];
   links?: CardLink[];
+  project?: string | null;
 }
 
 export interface UpdateCardRequest {
@@ -204,4 +206,5 @@ export interface UpdateCardRequest {
   assignee?: string | null;
   labels?: string[];
   links?: CardLink[];
+  project?: string | null;
 }

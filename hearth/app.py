@@ -824,6 +824,7 @@ async def create_card(
         assignee=req.assignee,
         labels=req.labels or None,
         links=links,
+        project=req.project,
     )
     card = await db.get_card(card_id)
     return card
@@ -836,6 +837,7 @@ async def list_cards(
     creator: str | None = None,
     priority: str | None = None,
     label: str | None = None,
+    project: str | None = None,
     include_archived: bool = False,
     limit: int = 200,
     offset: int = 0,
@@ -847,6 +849,7 @@ async def list_cards(
         creator=creator,
         priority=priority,
         label=label,
+        project=project,
         include_archived=include_archived,
         limit=limit,
         offset=offset,
@@ -889,6 +892,8 @@ async def update_card(
         kwargs["priority"] = req.priority
     if "assignee" in req.model_fields_set:
         kwargs["assignee"] = req.assignee
+    if "project" in req.model_fields_set:
+        kwargs["project"] = req.project
     if "labels" in req.model_fields_set:
         kwargs["labels"] = req.labels
     if "links" in req.model_fields_set:

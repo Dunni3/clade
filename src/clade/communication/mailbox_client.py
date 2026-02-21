@@ -342,6 +342,7 @@ class MailboxClient:
         assignee: str | None = None,
         labels: list[str] | None = None,
         links: list[dict] | None = None,
+        project: str | None = None,
     ) -> dict:
         payload: dict = {"title": title, "description": description, "col": col, "priority": priority}
         if assignee is not None:
@@ -350,6 +351,8 @@ class MailboxClient:
             payload["labels"] = labels
         if links:
             payload["links"] = links
+        if project is not None:
+            payload["project"] = project
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.post(
                 self._url("/kanban/cards"),
@@ -367,6 +370,7 @@ class MailboxClient:
         creator: str | None = None,
         priority: str | None = None,
         label: str | None = None,
+        project: str | None = None,
         include_archived: bool = False,
         limit: int = 200,
         offset: int = 0,
@@ -382,6 +386,8 @@ class MailboxClient:
             params["priority"] = priority
         if label:
             params["label"] = label
+        if project:
+            params["project"] = project
         if include_archived:
             params["include_archived"] = True
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:

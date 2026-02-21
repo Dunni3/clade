@@ -53,6 +53,7 @@ export default function KanbanPage() {
   const [filterAssignee, setFilterAssignee] = useState('');
   const [filterLabel, setFilterLabel] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
+  const [filterProject, setFilterProject] = useState('');
 
   // Create form state
   const [newTitle, setNewTitle] = useState('');
@@ -61,6 +62,7 @@ export default function KanbanPage() {
   const [newPriority, setNewPriority] = useState<string>('normal');
   const [newAssignee, setNewAssignee] = useState('');
   const [newLabels, setNewLabels] = useState('');
+  const [newProject, setNewProject] = useState('');
 
   // Peek drawer state
   const [peekObject, setPeekObject] = useState<{ type: string; id: string } | null>(null);
@@ -74,6 +76,7 @@ export default function KanbanPage() {
   const [editPriority, setEditPriority] = useState('');
   const [editAssignee, setEditAssignee] = useState('');
   const [editLabels, setEditLabels] = useState('');
+  const [editProject, setEditProject] = useState('');
 
   const fetchCards = async () => {
     try {
@@ -82,6 +85,7 @@ export default function KanbanPage() {
         assignee: filterAssignee || undefined,
         label: filterLabel || undefined,
         priority: filterPriority || undefined,
+        project: filterProject || undefined,
       });
       setCards(data);
     } catch {
@@ -93,7 +97,7 @@ export default function KanbanPage() {
 
   useEffect(() => {
     fetchCards();
-  }, [showArchived, filterAssignee, filterLabel, filterPriority]);
+  }, [showArchived, filterAssignee, filterLabel, filterPriority, filterProject]);
 
   // Fetch linked task details when a card is selected
   useEffect(() => {
@@ -141,6 +145,7 @@ export default function KanbanPage() {
       priority: newPriority,
       assignee: newAssignee.trim() || undefined,
       labels: newLabels.trim() ? newLabels.split(',').map(l => l.trim()).filter(Boolean) : undefined,
+      project: newProject.trim() || undefined,
     };
     await createCard(req);
     setNewTitle('');
@@ -149,6 +154,7 @@ export default function KanbanPage() {
     setNewPriority('normal');
     setNewAssignee('');
     setNewLabels('');
+    setNewProject('');
     setShowCreateForm(false);
     fetchCards();
   };
@@ -176,6 +182,7 @@ export default function KanbanPage() {
       priority: editPriority,
       assignee: editAssignee.trim() || null,
       labels: editLabels.trim() ? editLabels.split(',').map(l => l.trim()).filter(Boolean) : [],
+      project: editProject.trim() || null,
     });
     setEditingCard(false);
     setSelectedCard(null);
@@ -188,6 +195,7 @@ export default function KanbanPage() {
     setEditPriority(card.priority);
     setEditAssignee(card.assignee || '');
     setEditLabels(card.labels.join(', '));
+    setEditProject(card.project || '');
     setEditingCard(true);
   };
 
@@ -225,6 +233,13 @@ export default function KanbanPage() {
 
       {/* Filters */}
       <div className="flex gap-2 mb-4">
+        <input
+          type="text"
+          placeholder="Filter project..."
+          value={filterProject}
+          onChange={e => setFilterProject(e.target.value)}
+          className="px-2 py-1 text-sm bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-500"
+        />
         <input
           type="text"
           placeholder="Filter assignee..."
@@ -297,6 +312,13 @@ export default function KanbanPage() {
             />
             <input
               type="text"
+              placeholder="Project"
+              value={newProject}
+              onChange={e => setNewProject(e.target.value)}
+              className="px-2 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-500"
+            />
+            <input
+              type="text"
               placeholder="Labels (comma-separated)"
               value={newLabels}
               onChange={e => setNewLabels(e.target.value)}
@@ -342,6 +364,11 @@ export default function KanbanPage() {
                         {card.priority !== 'normal' && (
                           <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${PRIORITY_COLORS[card.priority]}`}>
                             {card.priority}
+                          </span>
+                        )}
+                        {card.project && (
+                          <span className="px-1.5 py-0.5 rounded text-xs bg-teal-900 text-teal-300">
+                            {card.project}
                           </span>
                         )}
                         {card.assignee && (
@@ -424,6 +451,13 @@ export default function KanbanPage() {
                   />
                   <input
                     type="text"
+                    placeholder="Project"
+                    value={editProject}
+                    onChange={e => setEditProject(e.target.value)}
+                    className="px-2 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded text-gray-200 placeholder-gray-500"
+                  />
+                  <input
+                    type="text"
                     placeholder="Labels (comma-separated)"
                     value={editLabels}
                     onChange={e => setEditLabels(e.target.value)}
@@ -449,6 +483,7 @@ export default function KanbanPage() {
                   <div>Column: <span className="text-gray-100">{COLUMN_LABELS[selectedCard.col]}</span></div>
                   <div>Priority: <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${PRIORITY_COLORS[selectedCard.priority]}`}>{selectedCard.priority}</span></div>
                   <div>Creator: <span className="text-gray-100">{selectedCard.creator}</span></div>
+                  {selectedCard.project && <div>Project: <span className="text-teal-400">{selectedCard.project}</span></div>}
                   {selectedCard.assignee && <div>Assignee: <span className="text-indigo-400">@{selectedCard.assignee}</span></div>}
                   {selectedCard.labels.length > 0 && (
                     <div className="flex items-center gap-1">
