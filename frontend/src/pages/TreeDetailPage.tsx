@@ -246,6 +246,19 @@ export default function TreeDetailPage() {
               <pre className="text-xs text-gray-500 whitespace-pre-wrap overflow-x-auto max-h-40 overflow-y-auto">{selectedTask.output}</pre>
             </div>
           )}
+          {selectedTask.linked_cards && selectedTask.linked_cards.length > 0 && (
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
+              {selectedTask.linked_cards.map(card => (
+                <Link
+                  key={card.id}
+                  to={`/board?card=${card.id}`}
+                  className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 transition-colors"
+                >
+                  Card #{card.id}: {card.title}
+                </Link>
+              ))}
+            </div>
+          )}
           <MorselPanel objectType="task" objectId={selectedTask.id} />
         </div>
       )}

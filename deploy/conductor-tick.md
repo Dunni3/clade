@@ -45,6 +45,7 @@ Check the environment variables `TRIGGER_TASK_ID` and `TRIGGER_MESSAGE_ID`.
 - **Retry limits:** Failed tasks may be retried at most 2 times. After 2 failures, note the failure and move on.
 - **Worker load:** Check active aspens via `check_worker_health` before delegating. If a worker is overloaded, prefer idle workers or wait.
 - **Killed tasks:** Tasks with status `killed` were intentionally stopped by a human or admin. NEVER retry killed tasks. NEVER delegate follow-up children from a killed task. If a tree has a killed branch, leave it dead.
+- **Card linking:** When delegating a task that relates to a kanban card, **always** pass the `card_id` parameter to `delegate_task()`. This creates a formal link so you can track which tasks are working on which cards. Check `list_board()` to see if there's a relevant card before delegating. If you're creating tasks for a new initiative, create a card first, then link the tasks to it.
 - Keep messages concise and factual.
 - If a worker is unreachable, note it and move on. Do not retry endlessly.
 - If there's nothing to do, deposit a brief "all quiet" morsel and exit cleanly.

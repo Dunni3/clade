@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { getCards, createCard, updateCard, deleteCard } from '../api/mailbox';
-import type { CardSummary, CreateCardRequest } from '../types/mailbox';
+import { useSearchParams, Link } from 'react-router-dom';
+import { getCards, createCard, updateCard, deleteCard, getTask } from '../api/mailbox';
+import type { CardSummary, CreateCardRequest, TaskSummary } from '../types/mailbox';
 import PeekDrawer from '../components/PeekDrawer';
 
 const COLUMNS = ['backlog', 'todo', 'in_progress', 'done'] as const;
@@ -21,6 +21,15 @@ const PRIORITY_COLORS: Record<string, string> = {
   high: 'bg-orange-600 text-white',
   normal: 'bg-gray-600 text-gray-200',
   low: 'bg-gray-700 text-gray-400',
+};
+
+const TASK_STATUS_COLORS: Record<string, string> = {
+  pending: 'bg-gray-500/20 text-gray-300',
+  launched: 'bg-blue-500/20 text-blue-300',
+  in_progress: 'bg-amber-500/20 text-amber-300',
+  completed: 'bg-emerald-500/20 text-emerald-300',
+  failed: 'bg-red-500/20 text-red-300',
+  killed: 'bg-orange-500/20 text-orange-300',
 };
 
 function getAdjacentColumns(col: string): { prev: string | null; next: string | null } {
@@ -56,6 +65,9 @@ export default function KanbanPage() {
   // Peek drawer state
   const [peekObject, setPeekObject] = useState<{ type: string; id: string } | null>(null);
 
+  // Linked task statuses (for card detail modal)
+  const [linkedTasks, setLinkedTasks] = useState<Record<string, TaskSummary>>({});
+
   // Edit form state
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -82,6 +94,28 @@ export default function KanbanPage() {
   useEffect(() => {
     fetchCards();
   }, [showArchived, filterAssignee, filterLabel, filterPriority]);
+
+  // Fetch linked task details when a card is selected
+  useEffect(() => {
+    if (!selectedCard) {
+      setLinkedTasks({});
+      return;
+    }
+    const taskLinks = selectedCard.links.filter(l => l.object_type === 'task');
+    if (taskLinks.length === 0) return;
+    (async () => {
+      const results: Record<string, TaskSummary> = {};
+      for (const link of taskLinks) {
+        try {
+          const task = await getTask(Number(link.object_id));
+          results[link.object_id] = task;
+        } catch {
+          // ignore fetch failures
+        }
+      }
+      setLinkedTasks(results);
+    })();
+  }, [selectedCard?.id]);
 
   // Auto-open card from ?card=N query param
   useEffect(() => {
@@ -427,34 +461,71 @@ export default function KanbanPage() {
                 {selectedCard.description && (
                   <p className="text-sm text-gray-400 mb-4 whitespace-pre-wrap">{selectedCard.description}</p>
                 )}
-                {selectedCard.links && selectedCard.links.length > 0 && (
-                  <div className="mb-4">
-                    <div className="text-xs text-gray-500 mb-1.5">Linked</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {selectedCard.links.map((link, i) => {
-                        const key = `${link.object_type}-${link.object_id}-${i}`;
-                        const label = `${link.object_type} #${link.object_id}`;
-                        const colorMap: Record<string, string> = {
-                          task: 'bg-indigo-900/50 text-indigo-300 hover:bg-indigo-900',
-                          morsel: 'bg-amber-900/50 text-amber-300 hover:bg-amber-900',
-                          tree: 'bg-cyan-900/50 text-cyan-300 hover:bg-cyan-900',
-                          message: 'bg-purple-900/50 text-purple-300 hover:bg-purple-900',
-                          card: 'bg-emerald-900/50 text-emerald-300 hover:bg-emerald-900',
-                        };
-                        const colors = colorMap[link.object_type] || 'bg-gray-700 text-gray-300';
-                        return (
-                          <button
-                            key={key}
-                            onClick={() => setPeekObject({ type: link.object_type, id: link.object_id })}
-                            className={`px-2 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer ${colors}`}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
+                {selectedCard.links && selectedCard.links.length > 0 && (() => {
+                  const taskLinks = selectedCard.links.filter(l => l.object_type === 'task');
+                  const otherLinks = selectedCard.links.filter(l => l.object_type !== 'task');
+                  return (
+                    <div className="mb-4">
+                      {/* Task links with status */}
+                      {taskLinks.length > 0 && (
+                        <div className="mb-3">
+                          <div className="text-xs text-gray-500 mb-1.5">Tasks</div>
+                          <div className="space-y-1">
+                            {taskLinks.map((link, i) => {
+                              const task = linkedTasks[link.object_id];
+                              return (
+                                <div key={`task-${link.object_id}-${i}`} className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => setPeekObject({ type: 'task', id: link.object_id })}
+                                    className="text-xs font-medium text-indigo-300 hover:text-indigo-200 transition-colors"
+                                  >
+                                    Task #{link.object_id}
+                                  </button>
+                                  {task && (
+                                    <>
+                                      <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${TASK_STATUS_COLORS[task.status] || 'bg-gray-700 text-gray-300'}`}>
+                                        {task.status}
+                                      </span>
+                                      <span className="text-xs text-gray-500 truncate">{task.subject}</span>
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      {/* Other links */}
+                      {otherLinks.length > 0 && (
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1.5">Linked</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {otherLinks.map((link, i) => {
+                              const key = `${link.object_type}-${link.object_id}-${i}`;
+                              const label = `${link.object_type} #${link.object_id}`;
+                              const colorMap: Record<string, string> = {
+                                morsel: 'bg-amber-900/50 text-amber-300 hover:bg-amber-900',
+                                tree: 'bg-cyan-900/50 text-cyan-300 hover:bg-cyan-900',
+                                message: 'bg-purple-900/50 text-purple-300 hover:bg-purple-900',
+                                card: 'bg-emerald-900/50 text-emerald-300 hover:bg-emerald-900',
+                              };
+                              const colors = colorMap[link.object_type] || 'bg-gray-700 text-gray-300';
+                              return (
+                                <button
+                                  key={key}
+                                  onClick={() => setPeekObject({ type: link.object_type, id: link.object_id })}
+                                  className={`px-2 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer ${colors}`}
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
                 <div className="flex gap-2">
                   <button onClick={() => openEdit(selectedCard)} className="px-3 py-1.5 bg-gray-700 text-gray-300 text-sm rounded hover:bg-gray-600">
                     Edit

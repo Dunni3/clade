@@ -54,6 +54,7 @@ def create_conductor_tools(
         parent_task_id: int | None = None,
         working_dir: str | None = None,
         max_turns: int = 50,
+        card_id: int | None = None,
     ) -> str:
         """Delegate a task to a worker brother via their Ember server.
 
@@ -67,6 +68,7 @@ def create_conductor_tools(
             parent_task_id: Optional parent task ID for task tree linking. If not provided, auto-reads from TRIGGER_TASK_ID env var.
             working_dir: Override the worker's default working directory.
             max_turns: Maximum Claude turns for the task.
+            card_id: Optional kanban card ID to link this task to. Creates a formal link so the card tracks which tasks are working on it.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -101,6 +103,13 @@ def create_conductor_tools(
         except Exception as e:
             return f"Error creating task in Hearth: {e}"
 
+        # Link task to card if card_id provided
+        if card_id is not None:
+            try:
+                await mailbox.add_card_link(card_id, "task", str(task_id))
+            except Exception:
+                pass  # Non-fatal: task still created, link just not established
+
         # Send to Ember.
         # Don't pass hearth_url — the Ember process already has the correct
         # HEARTH_URL for its network context. The conductor's own URL (often
@@ -133,12 +142,15 @@ def create_conductor_tools(
             pass
 
         session = ember_result.get("session_name", "?")
-        return (
-            f"Task #{task_id} delegated to {brother}.\n"
-            f"  Subject: {subject or '(none)'}\n"
-            f"  Session: {session}\n"
-            f"  Status: launched"
-        )
+        result_lines = [
+            f"Task #{task_id} delegated to {brother}.",
+            f"  Subject: {subject or '(none)'}",
+            f"  Session: {session}",
+            f"  Status: launched",
+        ]
+        if card_id is not None:
+            result_lines.append(f"  Linked to card: #{card_id}")
+        return "\n".join(result_lines)
 
     @mcp.tool()
     async def check_worker_health(brother: str | None = None) -> str:

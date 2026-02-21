@@ -75,6 +75,13 @@ export interface TaskEvent {
   created_at: string;
 }
 
+export interface LinkedCardInfo {
+  id: number;
+  title: string;
+  col: string;
+  priority: string;
+}
+
 export interface TaskDetail extends TaskSummary {
   prompt: string;
   session_name: string | null;
@@ -84,6 +91,7 @@ export interface TaskDetail extends TaskSummary {
   children: TaskSummary[];
   messages: FeedMessage[];
   events: TaskEvent[];
+  linked_cards: LinkedCardInfo[];
 }
 
 export interface MemberActivity {
@@ -140,6 +148,7 @@ export interface TreeNode {
   working_dir: string | null;
   output: string | null;
   children: TreeNode[];
+  linked_cards?: LinkedCardInfo[];
 }
 
 export interface MorselLink {

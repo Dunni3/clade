@@ -104,6 +104,13 @@ class TaskSummary(BaseModel):
     root_task_id: int | None = None
 
 
+class LinkedCardInfo(BaseModel):
+    id: int
+    title: str
+    col: str
+    priority: str
+
+
 class TaskDetail(TaskSummary):
     prompt: str
     session_name: str | None = None
@@ -113,6 +120,7 @@ class TaskDetail(TaskSummary):
     messages: list[FeedMessage] = []
     events: list["TaskEvent"] = []
     children: list[TaskSummary] = []
+    linked_cards: list[LinkedCardInfo] = []
 
 
 class CreateTaskResponse(BaseModel):
@@ -206,6 +214,7 @@ class TreeNode(BaseModel):
     working_dir: str | None = None
     output: str | None = None
     children: list["TreeNode"] = []
+    linked_cards: list[LinkedCardInfo] = []
 
 
 TreeNode.model_rebuild()
