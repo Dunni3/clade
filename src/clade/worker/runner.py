@@ -78,6 +78,18 @@ def build_runner_script(
     lines.append('EXIT_CODE=$?')
     lines.append('echo "$(date -Iseconds) claude exited with code $EXIT_CODE" >> "$LOGFILE"')
 
+    # Auto-mark task failed if session exits without brother updating status
+    if task_id is not None:
+        lines.append("")
+        lines.append("# Auto-mark task failed if session exited without completing")
+        lines.append('if [ -n "$CLAUDE_TASK_ID" ] && [ -n "$HEARTH_URL" ] && [ -n "$HEARTH_API_KEY" ]; then')
+        lines.append('    curl -sf -X PATCH "$HEARTH_URL/api/v1/tasks/$CLAUDE_TASK_ID" \\')
+        lines.append('        -H "Authorization: Bearer $HEARTH_API_KEY" \\')
+        lines.append('        -H "Content-Type: application/json" \\')
+        lines.append('        -d "{\\"status\\":\\"failed\\",\\"output\\":\\"Session exited with code $EXIT_CODE\\"}" \\')
+        lines.append('        >/dev/null 2>&1 || true')
+        lines.append("fi")
+
     # Self-cleanup (keep log on failure for debugging)
     lines.append(f'rm -f "{prompt_path}" "$0"')
     lines.append('[ "$EXIT_CODE" -eq 0 ] && rm -f "$LOGFILE"')

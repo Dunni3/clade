@@ -62,10 +62,9 @@ def wrap_prompt(
         f"Address it to {sender_name}. "
         f"Use `task_id={task_id}` when sending the message so it gets linked to this task.",
         "",
-        "2. Do the work described above.",
+        f"2. Update your task status to 'in_progress' using `update_task` with task_id={task_id}.",
         "",
-        "3. If you sense you're running low on turns and the task isn't done, "
-        f"send a status update via mailbox (with `task_id={task_id}`) summarizing progress so far.",
+        "3. Do the work described above.",
         "",
         "4. When finished, send a completion message via mailbox "
         f"(with `task_id={task_id}`) describing what was done.",
@@ -137,12 +136,23 @@ fi"""
 
     # Export env vars for hook-based task logging (only if all three are provided)
     env_lines = ""
+    exit_handler = ""
     if task_id is not None and mailbox_url and mailbox_api_key:
         env_lines = (
             f"export CLAUDE_TASK_ID={task_id}\n"
             f"export HEARTH_URL='{mailbox_url}'\n"
             f"export HEARTH_API_KEY='{mailbox_api_key}'"
         )
+        exit_handler = """\
+EXIT_CODE=\\$?
+# Auto-mark task failed if session exited without completing
+if [ -n "\\$CLAUDE_TASK_ID" ] && [ -n "\\$HEARTH_URL" ] && [ -n "\\$HEARTH_API_KEY" ]; then
+    curl -sf -X PATCH "\\$HEARTH_URL/api/v1/tasks/\\$CLAUDE_TASK_ID" \\
+        -H "Authorization: Bearer \\$HEARTH_API_KEY" \\
+        -H "Content-Type: application/json" \\
+        -d "{{\\"status\\":\\"failed\\",\\"output\\":\\"Session exited with code \\$EXIT_CODE\\"}}" \\
+        >/dev/null 2>&1 || true
+fi"""
 
     return f"""\
 #!/bin/bash
@@ -161,6 +171,7 @@ cat > "$RUNNER" << RUNNEREOF
 {env_lines}
 {cd_cmd}
 claude -p "\\$(cat $PROMPT_FILE)" --dangerously-skip-permissions{f' --max-turns {max_turns}' if max_turns is not None else ''}
+{exit_handler}
 rm -f "$PROMPT_FILE" "$RUNNER"
 RUNNEREOF
 chmod +x "$RUNNER"

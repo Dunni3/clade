@@ -90,9 +90,14 @@ class TestWrapPrompt:
     def test_includes_protocol_steps(self):
         result = wrap_prompt("Test", "oppy", "Test", 1)
         assert "confirming receipt" in result
-        assert "running low on turns" in result
+        assert "in_progress" in result
         assert "completion message" in result
         assert "update_task" in result
+
+    def test_in_progress_step(self):
+        result = wrap_prompt("Test", "oppy", "Test", 42)
+        assert "in_progress" in result
+        assert "task_id=42" in result
 
     def test_empty_subject(self):
         result = wrap_prompt("Test", "oppy", "", 1)
@@ -184,6 +189,23 @@ class TestBuildRemoteScript:
             mailbox_api_key=None,
         )
         assert "CLAUDE_TASK_ID" not in script
+
+    def test_exit_handler_in_runner(self):
+        """Runner heredoc contains the exit handler curl block."""
+        script = build_remote_script(
+            "sess", None, "dGVzdA==",
+            task_id=42,
+            mailbox_url="https://example.com",
+            mailbox_api_key="secret-key",
+        )
+        assert "Auto-mark task failed" in script
+        assert "curl -sf -X PATCH" in script
+        assert "EXIT_CODE" in script
+
+    def test_no_exit_handler_without_env_vars(self):
+        """No exit handler when task env vars aren't set."""
+        script = build_remote_script("sess", None, "dGVzdA==")
+        assert "Auto-mark task failed" not in script
 
 
 # ---------------------------------------------------------------------------

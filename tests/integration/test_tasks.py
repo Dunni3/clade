@@ -615,6 +615,80 @@ class TestAPITasks:
         assert resp.json()["status"] == "cancelled"
 
     @pytest.mark.asyncio
+    async def test_terminal_state_guard_completed_to_failed(self, client):
+        """Cannot change status of a completed task (e.g. runner exit handler)."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        # Complete the task
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "completed", "output": "Done"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Try to mark failed (simulates runner exit handler)
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "failed", "output": "Session exited with code 0"},
+            headers=OPPY_HEADERS,
+        )
+        assert resp.status_code == 409
+        assert "terminal state" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_terminal_state_guard_failed_to_completed(self, client):
+        """Cannot change status of a failed task."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "failed"},
+            headers=OPPY_HEADERS,
+        )
+
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "completed"},
+            headers=OPPY_HEADERS,
+        )
+        assert resp.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_terminal_state_allows_output_update(self, client):
+        """Non-status updates (output) still work on terminal tasks."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "completed", "output": "Done"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Output-only update should still work
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"output": "Updated output"},
+            headers=OPPY_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["output"] == "Updated output"
+
+    @pytest.mark.asyncio
     async def test_task_with_linked_messages(self, client):
         resp = await client.post(
             "/api/v1/tasks",

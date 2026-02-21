@@ -360,6 +360,14 @@ async def update_task(
             status_code=403, detail="Only assignee, creator, or admin can update"
         )
 
+    # Guard: prevent status changes on tasks already in a terminal state
+    TERMINAL_STATES = {"completed", "failed", "killed"}
+    if req.status is not None and task["status"] in TERMINAL_STATES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot change status of task in terminal state '{task['status']}'"
+        )
+
     # Handle parent_task_id reparenting
     if req.parent_task_id is not None:
         try:
