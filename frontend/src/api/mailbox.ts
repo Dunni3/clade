@@ -147,6 +147,7 @@ export async function getCards(params: {
   creator?: string;
   priority?: string;
   label?: string;
+  project?: string;
   include_archived?: boolean;
   limit?: number;
   offset?: number;
