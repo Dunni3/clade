@@ -41,6 +41,11 @@ def create_kanban_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         if priority not in PRIORITIES:
             return f"Invalid priority '{priority}'. Must be one of: {', '.join(PRIORITIES)}"
         try:
+            coerced_links = (
+                [{"object_type": l["object_type"], "object_id": str(l["object_id"])} for l in links]
+                if links
+                else links
+            )
             card = await mailbox.create_card(
                 title=title,
                 description=description,
@@ -48,7 +53,7 @@ def create_kanban_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
                 priority=priority,
                 assignee=assignee,
                 labels=labels,
-                links=links,
+                links=coerced_links,
             )
             return f"Card #{card['id']} created: {card['title']} [{card['col']}]"
         except Exception as e:
@@ -190,7 +195,11 @@ def create_kanban_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             if labels is not ...:
                 kwargs["labels"] = labels
             if links is not ...:
-                kwargs["links"] = links
+                kwargs["links"] = (
+                    [{"object_type": l["object_type"], "object_id": str(l["object_id"])} for l in links]
+                    if links
+                    else links
+                )
             card = await mailbox.update_card(card_id, **kwargs)
             return f"Card #{card['id']} updated: {card['title']} [{card['col']}]"
         except Exception as e:
