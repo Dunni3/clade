@@ -257,8 +257,8 @@ export default function TaskDetailPage() {
             <h1 className="text-xl font-semibold text-gray-100">
               {task.subject || '(no subject)'}
             </h1>
-            {(task.parent_task_id || task.root_task_id || (task.children && task.children.length > 0)) && (
-              <div className="flex items-center gap-3 mt-1.5">
+            {(task.parent_task_id || task.root_task_id || (task.children && task.children.length > 0) || (task.linked_cards && task.linked_cards.length > 0)) && (
+              <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                 {task.parent_task_id && (
                   <Link to={`/tasks/${task.parent_task_id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
                     Parent: #{task.parent_task_id}
@@ -272,6 +272,15 @@ export default function TaskDetailPage() {
                 {task.children && task.children.length > 0 && (
                   <span className="text-xs text-gray-500">Children: {task.children.length}</span>
                 )}
+                {task.linked_cards && task.linked_cards.map(card => (
+                  <Link
+                    key={card.id}
+                    to={`/board?card=${card.id}`}
+                    className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 transition-colors"
+                  >
+                    Card #{card.id}: {card.title}
+                  </Link>
+                ))}
               </div>
             )}
           </div>

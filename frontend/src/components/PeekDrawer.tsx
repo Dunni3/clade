@@ -140,6 +140,22 @@ function TaskPeek({ id }: { id: number }) {
           {task.root_task_id && task.root_task_id !== task.id && <> | Tree #{task.root_task_id}</>}
         </div>
       )}
+      {task.linked_cards && task.linked_cards.length > 0 && (
+        <div>
+          <div className="text-xs text-gray-500 mb-1">Cards</div>
+          <div className="flex flex-wrap gap-1">
+            {task.linked_cards.map(card => (
+              <Link
+                key={card.id}
+                to={`/board?card=${card.id}`}
+                className="px-2 py-0.5 rounded text-xs font-medium bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 transition-colors"
+              >
+                #{card.id}: {card.title}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="pt-2">
         <Link to={`/tasks/${task.id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
           Open full page &rarr;

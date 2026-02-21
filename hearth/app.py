@@ -24,6 +24,7 @@ from .models import (
     EmberEntry,
     FeedMessage,
     KeyInfo,
+    LinkedCardInfo,
     MarkReadResponse,
     MemberActivityResponse,
     MessageDetail,
@@ -652,6 +653,26 @@ async def get_morsel(
 # ---------------------------------------------------------------------------
 # Kanban endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/kanban/cards/by-link", response_model=list[CardSummary])
+async def get_cards_by_link(
+    object_type: str,
+    object_id: str,
+    _caller: str = Depends(resolve_sender),
+):
+    """Get all cards that link to a specific object (reverse lookup)."""
+    card_infos = await db.get_cards_for_objects(object_type, [object_id])
+    card_ids = [c["id"] for c in card_infos.get(object_id, [])]
+    if not card_ids:
+        return []
+    # Fetch full card details
+    results = []
+    for cid in card_ids:
+        card = await db.get_card(cid)
+        if card:
+            results.append(card)
+    return results
 
 
 @app.post("/api/v1/kanban/cards", response_model=CardSummary, status_code=201)

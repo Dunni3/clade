@@ -223,6 +223,13 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
                 lines.append(f"Session: {t['session_name']}")
             if t.get("working_dir"):
                 lines.append(f"Working dir: {t['working_dir']}")
+            linked_cards = t.get("linked_cards", [])
+            if linked_cards:
+                lines.append(f"\nLinked cards ({len(linked_cards)}):")
+                for card in linked_cards:
+                    lines.append(
+                        f"  Card #{card['id']}: {card['title']} [{card['col']}]"
+                    )
             children = t.get("children", [])
             if children:
                 lines.append(f"\nChildren ({len(children)}):")

@@ -406,6 +406,21 @@ class MailboxClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def add_card_link(
+        self,
+        card_id: int,
+        object_type: str,
+        object_id: str,
+    ) -> dict:
+        """Add a link to a card without replacing existing links."""
+        card = await self.get_card(card_id)
+        existing_links = card.get("links", [])
+        new_link = {"object_type": object_type, "object_id": object_id}
+        if new_link not in existing_links:
+            existing_links.append(new_link)
+            return await self.update_card(card_id, links=existing_links)
+        return card
+
     async def archive_card(self, card_id: int) -> dict:
         return await self.update_card(card_id, col="archived")
 

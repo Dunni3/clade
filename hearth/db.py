@@ -643,6 +643,17 @@ async def get_task(task_id: int) -> dict | None:
         event_rows = await cursor.fetchall()
         task["events"] = [dict(r) for r in event_rows]
 
+        # Get linked cards (reverse lookup: cards that link to this task)
+        cursor = await db.execute(
+            """SELECT c.id, c.title, c.col, c.priority
+               FROM kanban_card_links cl
+               JOIN kanban_cards c ON cl.card_id = c.id
+               WHERE cl.object_type = 'task' AND cl.object_id = ?""",
+            (task_id_str,),
+        )
+        card_rows = await cursor.fetchall()
+        task["linked_cards"] = [dict(r) for r in card_rows]
+
         return task
     finally:
         await db.close()
@@ -857,6 +868,37 @@ async def update_task(
 # ---------------------------------------------------------------------------
 
 
+async def get_cards_for_objects(
+    object_type: str, object_ids: list[str]
+) -> dict[str, list[dict]]:
+    """Reverse lookup: find cards linked to a set of objects.
+
+    Returns a dict mapping object_id -> list of card summaries.
+    """
+    if not object_ids:
+        return {}
+    db = await get_db()
+    try:
+        placeholders = ",".join("?" * len(object_ids))
+        cursor = await db.execute(
+            f"""SELECT cl.object_id, c.id, c.title, c.col, c.priority
+                FROM kanban_card_links cl
+                JOIN kanban_cards c ON cl.card_id = c.id
+                WHERE cl.object_type = ? AND cl.object_id IN ({placeholders})""",
+            [object_type] + object_ids,
+        )
+        rows = await cursor.fetchall()
+        result: dict[str, list[dict]] = {}
+        for r in rows:
+            oid = r["object_id"]
+            result.setdefault(oid, []).append(
+                {"id": r["id"], "title": r["title"], "col": r["col"], "priority": r["priority"]}
+            )
+        return result
+    finally:
+        await db.close()
+
+
 async def get_tree(root_task_id: int) -> dict | None:
     """Fetch a full task tree rooted at root_task_id."""
     db = await get_db()
@@ -890,6 +932,12 @@ async def get_tree(root_task_id: int) -> dict | None:
             parent_id = d["parent_task_id"]
             if parent_id in nodes:
                 nodes[parent_id]["children"].append(d)
+
+        # Fetch linked cards for all tasks in the tree
+        all_task_ids = [str(tid) for tid in nodes.keys()]
+        card_map = await get_cards_for_objects("task", all_task_ids)
+        for tid, node in nodes.items():
+            node["linked_cards"] = card_map.get(str(tid), [])
 
         return root
     finally:
