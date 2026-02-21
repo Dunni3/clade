@@ -127,6 +127,10 @@ class TestBuildRemoteScript:
         script = build_remote_script("sess", None, "dGVzdA==", max_turns=25)
         assert "--max-turns 25" in script
 
+    def test_no_max_turns_by_default(self):
+        script = build_remote_script("sess", None, "dGVzdA==")
+        assert "--max-turns" not in script
+
     def test_contains_task_launched_marker(self):
         script = build_remote_script("sess", None, "dGVzdA==")
         assert 'echo "TASK_LAUNCHED"' in script

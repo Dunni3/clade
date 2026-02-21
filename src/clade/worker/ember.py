@@ -85,7 +85,7 @@ class ExecuteTaskRequest(BaseModel):
     subject: str = ""
     task_id: int | None = None
     working_dir: str | None = None
-    max_turns: int = 50
+    max_turns: int | None = None
     hearth_url: str | None = None
     hearth_api_key: str | None = None
     hearth_name: str | None = None

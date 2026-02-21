@@ -51,7 +51,7 @@ def create_conductor_tools(
         subject: str = "",
         thrum_id: int | None = None,
         working_dir: str | None = None,
-        max_turns: int = 50,
+        max_turns: int | None = None,
     ) -> str:
         """Delegate a task to a worker brother via their Ember server.
 
@@ -64,7 +64,7 @@ def create_conductor_tools(
             subject: Short description of the task.
             thrum_id: Optional thrum ID to link this task to.
             working_dir: Override the worker's default working directory.
-            max_turns: Maximum Claude turns for the task.
+            max_turns: Optional maximum Claude turns. If not set, no turn limit is applied.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
