@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { getCards, createCard, updateCard, deleteCard, getTask } from '../api/mailbox';
 import type { CardSummary, CreateCardRequest, TaskSummary } from '../types/mailbox';
 import PeekDrawer from '../components/PeekDrawer';
