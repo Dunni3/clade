@@ -206,18 +206,31 @@ class MailboxClient:
         task_id: int,
         status: str | None = None,
         output: str | None = None,
+        parent_task_id: int | None = None,
     ) -> dict:
         payload: dict = {}
         if status is not None:
             payload["status"] = status
         if output is not None:
             payload["output"] = output
+        if parent_task_id is not None:
+            payload["parent_task_id"] = parent_task_id
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.patch(
                 self._url(f"/tasks/{task_id}"),
                 json=payload,
                 headers=self.headers,
                 timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def retry_task(self, task_id: int) -> dict:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.post(
+                self._url(f"/tasks/{task_id}/retry"),
+                headers=self.headers,
+                timeout=30,
             )
             resp.raise_for_status()
             return resp.json()

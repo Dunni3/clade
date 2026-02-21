@@ -250,6 +250,7 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         task_id: int,
         status: str | None = None,
         output: str | None = None,
+        parent_task_id: int | None = None,
     ) -> str:
         """Update a task's status and/or output summary.
 
@@ -259,18 +260,47 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             task_id: The task ID to update.
             status: New status (e.g. "in_progress", "completed", "failed").
             output: Output summary describing what was done or what went wrong.
+            parent_task_id: Optional parent task ID to reparent this task under.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
         try:
-            result = await mailbox.update_task(task_id, status=status, output=output)
-            return (
-                f"Task #{result['id']} updated.\n"
-                f"  Status: {result['status']}\n"
-                f"  Assignee: {result['assignee']}"
+            result = await mailbox.update_task(
+                task_id, status=status, output=output, parent_task_id=parent_task_id
             )
+            lines = [
+                f"Task #{result['id']} updated.",
+                f"  Status: {result['status']}",
+                f"  Assignee: {result['assignee']}",
+            ]
+            if result.get("parent_task_id"):
+                lines.append(f"  Parent: #{result['parent_task_id']}")
+            if result.get("root_task_id"):
+                lines.append(f"  Root: #{result['root_task_id']}")
+            return "\n".join(lines)
         except Exception as e:
             return f"Error updating task: {e}"
+
+    @mcp.tool()
+    async def retry_task(task_id: int) -> str:
+        """Retry a failed task. Creates a child task with the same prompt and sends it to the Ember.
+
+        Args:
+            task_id: The task ID to retry (must be in 'failed' status).
+        """
+        if mailbox is None:
+            return _NOT_CONFIGURED
+        try:
+            result = await mailbox.retry_task(task_id)
+            return (
+                f"Retry task #{result['id']} created.\n"
+                f"  Subject: {result.get('subject', '(no subject)')}\n"
+                f"  Status: {result['status']}\n"
+                f"  Assignee: {result['assignee']}\n"
+                f"  Parent: #{result.get('parent_task_id', '?')}"
+            )
+        except Exception as e:
+            return f"Error retrying task: {e}"
 
     @mcp.tool()
     async def kill_task(task_id: int) -> str:
@@ -449,6 +479,7 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         "get_task": get_task,
         "update_task": update_task,
         "kill_task": kill_task,
+        "retry_task": retry_task,
         "deposit_morsel": deposit_morsel,
         "list_morsels": list_morsels,
         "list_trees": list_trees,

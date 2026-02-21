@@ -899,6 +899,88 @@ async def get_cards_for_objects(
         await db.close()
 
 
+async def count_children(task_id: int) -> int:
+    """Count direct children of a task."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT COUNT(*) as cnt FROM tasks WHERE parent_task_id = ?",
+            (task_id,),
+        )
+        row = await cursor.fetchone()
+        return row["cnt"]
+    finally:
+        await db.close()
+
+
+async def update_task_parent(task_id: int, parent_task_id: int) -> None:
+    """Reparent a task under a new parent.
+
+    Validates parent exists, detects cycles, computes new root_task_id,
+    and cascades root_task_id to all descendants.
+
+    Raises ValueError on invalid parent or cycle.
+    """
+    db = await get_db()
+    try:
+        # Validate parent exists
+        cursor = await db.execute(
+            "SELECT id, root_task_id FROM tasks WHERE id = ?",
+            (parent_task_id,),
+        )
+        parent = await cursor.fetchone()
+        if parent is None:
+            raise ValueError(f"Parent task {parent_task_id} does not exist")
+
+        # Validate task exists
+        cursor = await db.execute(
+            "SELECT id FROM tasks WHERE id = ?", (task_id,)
+        )
+        task = await cursor.fetchone()
+        if task is None:
+            raise ValueError(f"Task {task_id} does not exist")
+
+        # Cycle detection: walk up from new parent, check if task_id appears
+        cursor = await db.execute(
+            """WITH RECURSIVE ancestors(id) AS (
+                 SELECT ?
+                 UNION ALL
+                 SELECT t.parent_task_id FROM tasks t JOIN ancestors a ON t.id = a.id
+                 WHERE t.parent_task_id IS NOT NULL
+               )
+               SELECT id FROM ancestors WHERE id = ?""",
+            (parent_task_id, task_id),
+        )
+        if await cursor.fetchone() is not None:
+            raise ValueError(
+                f"Cannot reparent task {task_id} under {parent_task_id}: would create a cycle"
+            )
+
+        # Compute new root_task_id
+        new_root = parent["root_task_id"] if parent["root_task_id"] is not None else parent["id"]
+
+        # Update the task
+        await db.execute(
+            "UPDATE tasks SET parent_task_id = ?, root_task_id = ? WHERE id = ?",
+            (parent_task_id, new_root, task_id),
+        )
+
+        # Cascade root_task_id to all descendants
+        await db.execute(
+            """WITH RECURSIVE desc(id) AS (
+                 SELECT id FROM tasks WHERE parent_task_id = ?
+                 UNION ALL
+                 SELECT t.id FROM tasks t JOIN desc d ON t.parent_task_id = d.id
+               )
+               UPDATE tasks SET root_task_id = ? WHERE id IN (SELECT id FROM desc)""",
+            (task_id, new_root),
+        )
+
+        await db.commit()
+    finally:
+        await db.close()
+
+
 async def get_tree(root_task_id: int) -> dict | None:
     """Fetch a full task tree rooted at root_task_id."""
     db = await get_db()

@@ -1386,3 +1386,500 @@ class TestAPITaskEvents:
             headers=DOOT_HEADERS,
         )
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Database — update_task_parent and count_children
+# ---------------------------------------------------------------------------
+
+
+class TestDatabaseUpdateTaskParent:
+    @pytest.mark.asyncio
+    async def test_update_task_parent(self):
+        """Reparent a standalone task under another."""
+        a = await mailbox_db.insert_task(creator="doot", assignee="oppy", prompt="A")
+        b = await mailbox_db.insert_task(creator="doot", assignee="oppy", prompt="B")
+
+        await mailbox_db.update_task_parent(b, a)
+
+        task_b = await mailbox_db.get_task(b)
+        assert task_b["parent_task_id"] == a
+        assert task_b["root_task_id"] == a
+
+    @pytest.mark.asyncio
+    async def test_update_task_parent_cascades(self):
+        """Reparenting a subtree cascades root_task_id to all descendants."""
+        # Build tree: A -> B -> C
+        a = await mailbox_db.insert_task(creator="doot", assignee="oppy", prompt="A", subject="A")
+        b = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="B", parent_task_id=a
+        )
+        c = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C", parent_task_id=b
+        )
+
+        # Create a separate tree: D
+        d = await mailbox_db.insert_task(creator="doot", assignee="oppy", prompt="D", subject="D")
+
+        # Reparent B (and its subtree) under D
+        await mailbox_db.update_task_parent(b, d)
+
+        task_b = await mailbox_db.get_task(b)
+        task_c = await mailbox_db.get_task(c)
+        assert task_b["parent_task_id"] == d
+        assert task_b["root_task_id"] == d
+        assert task_c["root_task_id"] == d  # cascaded
+
+    @pytest.mark.asyncio
+    async def test_update_task_parent_invalid(self):
+        """Non-existent parent raises ValueError."""
+        a = await mailbox_db.insert_task(creator="doot", assignee="oppy", prompt="A")
+        with pytest.raises(ValueError, match="does not exist"):
+            await mailbox_db.update_task_parent(a, 9999)
+
+    @pytest.mark.asyncio
+    async def test_update_task_parent_circular(self):
+        """Reparenting A under B when B is already under A raises ValueError."""
+        a = await mailbox_db.insert_task(creator="doot", assignee="oppy", prompt="A", subject="A")
+        b = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="B", parent_task_id=a
+        )
+        with pytest.raises(ValueError, match="cycle"):
+            await mailbox_db.update_task_parent(a, b)
+
+
+class TestDatabaseCountChildren:
+    @pytest.mark.asyncio
+    async def test_count_children(self):
+        parent = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Parent"
+        )
+        await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C1", parent_task_id=parent
+        )
+        await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C2", parent_task_id=parent
+        )
+        await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="C3", parent_task_id=parent
+        )
+
+        count = await mailbox_db.count_children(parent)
+        assert count == 3
+
+    @pytest.mark.asyncio
+    async def test_count_children_none(self):
+        task = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Leaf"
+        )
+        count = await mailbox_db.count_children(task)
+        assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# Retry task — API endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestAPIRetryTask:
+    @pytest.mark.asyncio
+    async def test_retry_failed_task(self, client):
+        """Retry a failed task — child created with correct parent/root/subject."""
+        # Create and fail a task
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff", "subject": "Original job"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "failed", "output": "Something broke"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Register an Ember URL and API key so the retry can find them
+        await mailbox_db.upsert_ember("oppy", "http://fake-ember:8100")
+        await mailbox_db.insert_api_key("oppy", "oppy-ember-key")
+
+        # Mock the Ember HTTP call
+        with patch("hearth.app.httpx.AsyncClient") as MockClient:
+            mock_instance = AsyncMock()
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.return_value = None
+            mock_resp.json.return_value = {"status": "accepted"}
+            mock_instance.post.return_value = mock_resp
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_instance
+
+            resp = await client.post(
+                f"/api/v1/tasks/{task_id}/retry",
+                headers=DOOT_HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["parent_task_id"] == task_id
+        assert data["root_task_id"] == task_id
+        assert data["subject"] == "Retry #1: Original job"
+        assert data["status"] == "launched"
+        assert data["assignee"] == "oppy"
+        assert data["prompt"] == "Do stuff"
+
+    @pytest.mark.asyncio
+    async def test_retry_non_failed_409(self, client):
+        """Cannot retry a task that isn't failed."""
+        for status in ["pending", "completed", "killed"]:
+            resp = await client.post(
+                "/api/v1/tasks",
+                json={"assignee": "oppy", "prompt": "Test"},
+                headers=DOOT_HEADERS,
+            )
+            task_id = resp.json()["id"]
+            if status != "pending":
+                await client.patch(
+                    f"/api/v1/tasks/{task_id}",
+                    json={"status": status},
+                    headers=OPPY_HEADERS,
+                )
+
+            resp = await client.post(
+                f"/api/v1/tasks/{task_id}/retry",
+                headers=DOOT_HEADERS,
+            )
+            assert resp.status_code == 409, f"Expected 409 for status={status}"
+
+    @pytest.mark.asyncio
+    async def test_retry_numbering(self, client):
+        """Two retries produce Retry #1 and Retry #2."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff", "subject": "The job"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "failed"},
+            headers=OPPY_HEADERS,
+        )
+
+        await mailbox_db.upsert_ember("oppy", "http://fake-ember:8100")
+        await mailbox_db.insert_api_key("oppy", "oppy-ember-key")
+
+        subjects = []
+        for _ in range(2):
+            # Re-fail the original (retry only works on failed tasks)
+            # Actually we retry the same failed task twice
+            with patch("hearth.app.httpx.AsyncClient") as MockClient:
+                mock_instance = AsyncMock()
+                mock_resp = MagicMock()
+                mock_resp.raise_for_status.return_value = None
+                mock_resp.json.return_value = {"status": "accepted"}
+                mock_instance.post.return_value = mock_resp
+                mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+                mock_instance.__aexit__ = AsyncMock(return_value=False)
+                MockClient.return_value = mock_instance
+
+                resp = await client.post(
+                    f"/api/v1/tasks/{task_id}/retry",
+                    headers=DOOT_HEADERS,
+                )
+                assert resp.status_code == 200
+                subjects.append(resp.json()["subject"])
+
+        assert subjects[0] == "Retry #1: The job"
+        assert subjects[1] == "Retry #2: The job"
+
+    @pytest.mark.asyncio
+    async def test_retry_no_ember_422(self, client):
+        """No Ember configured — child task created but marked failed, returns 422."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff", "subject": "Job"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "failed"},
+            headers=OPPY_HEADERS,
+        )
+
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/retry",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 422
+        assert "No Ember URL" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_retry_not_found(self, client):
+        resp = await client.post(
+            "/api/v1/tasks/9999/retry",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_retry_forbidden(self, client):
+        """Only assignee, creator, or admin can retry."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "failed"},
+            headers=OPPY_HEADERS,
+        )
+
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/retry",
+            headers=JERRY_HEADERS,
+        )
+        assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# PATCH parent_task_id — API endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestAPIPatchParentTaskId:
+    @pytest.mark.asyncio
+    async def test_patch_parent_task_id(self, client):
+        """Reparent a standalone task via PATCH."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Parent", "subject": "Parent"},
+            headers=DOOT_HEADERS,
+        )
+        parent_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Child", "subject": "Child"},
+            headers=DOOT_HEADERS,
+        )
+        child_id = resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/tasks/{child_id}",
+            json={"parent_task_id": parent_id},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["parent_task_id"] == parent_id
+        assert data["root_task_id"] == parent_id
+
+    @pytest.mark.asyncio
+    async def test_patch_parent_cascade(self, client):
+        """Reparenting a subtree cascades root_task_id to descendants."""
+        # Build tree: A -> B -> C
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "A", "subject": "A"},
+            headers=DOOT_HEADERS,
+        )
+        a_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "B", "parent_task_id": a_id},
+            headers=DOOT_HEADERS,
+        )
+        b_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "C", "parent_task_id": b_id},
+            headers=DOOT_HEADERS,
+        )
+        c_id = resp.json()["id"]
+
+        # Create D
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "D", "subject": "D"},
+            headers=DOOT_HEADERS,
+        )
+        d_id = resp.json()["id"]
+
+        # Reparent B under D
+        resp = await client.patch(
+            f"/api/v1/tasks/{b_id}",
+            json={"parent_task_id": d_id},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["root_task_id"] == d_id
+
+        # Verify C's root also cascaded
+        resp = await client.get(f"/api/v1/tasks/{c_id}", headers=DOOT_HEADERS)
+        assert resp.json()["root_task_id"] == d_id
+
+    @pytest.mark.asyncio
+    async def test_patch_parent_invalid_422(self, client):
+        """Non-existent parent returns 422."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Task"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"parent_task_id": 9999},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_patch_parent_and_status(self, client):
+        """Both parent_task_id and status in same request."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Parent", "subject": "Parent"},
+            headers=DOOT_HEADERS,
+        )
+        parent_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Child"},
+            headers=DOOT_HEADERS,
+        )
+        child_id = resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/tasks/{child_id}",
+            json={"parent_task_id": parent_id, "status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["parent_task_id"] == parent_id
+        assert data["status"] == "in_progress"
+
+
+# ---------------------------------------------------------------------------
+# MailboxClient — retry_task and update_task with parent_task_id
+# ---------------------------------------------------------------------------
+
+
+class TestMailboxClientRetryTask:
+    def setup_method(self):
+        self.client = MailboxClient("http://localhost:8000", "test-key")
+
+    def _make_mock_resp(self, json_data, status_code=200):
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.json.return_value = json_data
+        resp.raise_for_status.return_value = None
+        return resp
+
+    def _make_async_client(self, post_resp=None, patch_resp=None):
+        instance = AsyncMock()
+        if post_resp is not None:
+            instance.post.return_value = post_resp
+        if patch_resp is not None:
+            instance.patch.return_value = patch_resp
+        instance.__aenter__ = AsyncMock(return_value=instance)
+        instance.__aexit__ = AsyncMock(return_value=False)
+        return instance
+
+    @pytest.mark.asyncio
+    async def test_retry_task_client(self):
+        mock_resp = self._make_mock_resp({
+            "id": 10, "creator": "doot", "assignee": "oppy",
+            "subject": "Retry #1: Original", "status": "launched",
+            "prompt": "Do stuff", "parent_task_id": 5, "root_task_id": 5,
+            "created_at": "2026-02-21T10:00:00Z",
+            "started_at": None, "completed_at": None,
+        })
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(post_resp=mock_resp)
+            MockClient.return_value = instance
+            result = await self.client.retry_task(5)
+            assert result["id"] == 10
+            assert result["status"] == "launched"
+            instance.post.assert_called_once()
+            call_args = instance.post.call_args
+            assert "/tasks/5/retry" in str(call_args)
+
+    @pytest.mark.asyncio
+    async def test_update_task_with_parent(self):
+        mock_resp = self._make_mock_resp({
+            "id": 2, "creator": "doot", "assignee": "oppy", "subject": "Task",
+            "prompt": "Do stuff", "status": "pending",
+            "created_at": "2026-02-21T10:00:00Z",
+            "started_at": None, "completed_at": None,
+            "parent_task_id": 1, "root_task_id": 1,
+        })
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(patch_resp=mock_resp)
+            MockClient.return_value = instance
+            result = await self.client.update_task(2, parent_task_id=1)
+            assert result["parent_task_id"] == 1
+            call_kwargs = instance.patch.call_args
+            payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
+            assert payload["parent_task_id"] == 1
+
+
+# ---------------------------------------------------------------------------
+# MCP tools — retry_task and update_task with parent_task_id
+# ---------------------------------------------------------------------------
+
+
+class TestRetryTaskTool:
+    @pytest.mark.asyncio
+    async def test_not_configured(self):
+        tools = _make_mailbox_tools(None)
+        result = await tools["retry_task"](1)
+        assert "not configured" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_success(self):
+        mock_client = AsyncMock()
+        mock_client.retry_task.return_value = {
+            "id": 10, "subject": "Retry #1: Job", "status": "launched",
+            "assignee": "oppy", "parent_task_id": 5,
+        }
+        tools = _make_mailbox_tools(mock_client)
+        result = await tools["retry_task"](5)
+        assert "Retry task #10 created" in result
+        assert "Retry #1: Job" in result
+        assert "launched" in result
+        assert "oppy" in result
+
+    @pytest.mark.asyncio
+    async def test_error(self):
+        mock_client = AsyncMock()
+        mock_client.retry_task.side_effect = Exception("409: Cannot retry")
+        tools = _make_mailbox_tools(mock_client)
+        result = await tools["retry_task"](1)
+        assert "Error" in result
+
+
+class TestUpdateTaskParentTool:
+    @pytest.mark.asyncio
+    async def test_update_task_with_parent(self):
+        mock_client = AsyncMock()
+        mock_client.update_task.return_value = {
+            "id": 2, "status": "pending", "assignee": "oppy",
+            "parent_task_id": 1, "root_task_id": 1,
+        }
+        tools = _make_mailbox_tools(mock_client)
+        result = await tools["update_task"](2, parent_task_id=1)
+        assert "Task #2 updated" in result
+        assert "Parent: #1" in result
+        assert "Root: #1" in result
+        mock_client.update_task.assert_called_once_with(
+            2, status=None, output=None, parent_task_id=1
+        )

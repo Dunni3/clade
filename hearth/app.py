@@ -1,9 +1,11 @@
 """FastAPI application for the Hearth — the Clade's shared communication hub."""
 
+import asyncio
 import logging
 import subprocess
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -358,6 +360,13 @@ async def update_task(
             status_code=403, detail="Only assignee, creator, or admin can update"
         )
 
+    # Handle parent_task_id reparenting
+    if req.parent_task_id is not None:
+        try:
+            await db.update_task_parent(task_id, req.parent_task_id)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
     kwargs: dict = {}
     if req.status is not None:
         kwargs["status"] = req.status
@@ -368,9 +377,13 @@ async def update_task(
     if req.output is not None:
         kwargs["output"] = req.output
 
-    updated = await db.update_task(task_id, **kwargs)
-    if updated is None:
-        raise HTTPException(status_code=404, detail="Task not found")
+    if kwargs:
+        updated = await db.update_task(task_id, **kwargs)
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+    else:
+        # Re-fetch to pick up parent_task_id changes
+        updated = await db.get_task(task_id)
 
     # Trigger conductor tick when any task reaches a terminal state
     # Note: "killed" is intentionally excluded — killed tasks must not trigger Kamaji
@@ -386,8 +399,6 @@ async def kill_task(
     caller: str = Depends(resolve_sender),
 ):
     """Kill a running task: terminate tmux session on Ember, mark killed in DB."""
-    import httpx
-
     task = await db.get_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -456,6 +467,128 @@ async def kill_task(
     return updated
 
 
+@app.post("/api/v1/tasks/{task_id}/retry", response_model=TaskDetail)
+async def retry_task(
+    task_id: int,
+    caller: str = Depends(resolve_sender),
+):
+    """Retry a failed task: create a child task with the same prompt and send to Ember."""
+    task = await db.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Auth: assignee, creator, or admins
+    if caller not in (task["assignee"], task["creator"]) and caller not in ADMIN_NAMES:
+        raise HTTPException(
+            status_code=403, detail="Only assignee, creator, or admin can retry"
+        )
+
+    # Guard: only failed tasks can be retried
+    if task["status"] != "failed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot retry task with status '{task['status']}' — only failed tasks can be retried"
+        )
+
+    # Build retry subject
+    child_count = await db.count_children(task_id)
+    retry_num = child_count + 1
+    original_subject = task["subject"] or "(no subject)"
+    retry_subject = f"Retry #{retry_num}: {original_subject}"
+
+    # Create child task
+    try:
+        child_id = await db.insert_task(
+            creator=caller,
+            assignee=task["assignee"],
+            prompt=task["prompt"],
+            subject=retry_subject,
+            host=task.get("host"),
+            working_dir=task.get("working_dir"),
+            parent_task_id=task_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # Look up Ember URL: DB first, env fallback
+    assignee = task["assignee"]
+    ember_url = None
+    db_embers = await db.get_embers()
+    for entry in db_embers:
+        if entry["name"] == assignee:
+            ember_url = entry["ember_url"]
+            break
+    if ember_url is None:
+        ember_url = EMBER_URLS.get(assignee)
+
+    if not ember_url:
+        # No Ember configured — mark child failed
+        await db.update_task(
+            child_id, status="failed",
+            output=f"No Ember URL configured for {assignee}",
+            completed_at=_now_utc(),
+        )
+        child = await db.get_task(child_id)
+        raise HTTPException(
+            status_code=422,
+            detail=f"No Ember URL configured for {assignee}. Child task #{child_id} created but marked failed.",
+        )
+
+    # Look up assignee's API key for Ember auth
+    assignee_key = await db.get_api_key_for_name(assignee)
+    if assignee_key is None:
+        for key, name in API_KEYS.items():
+            if name == assignee:
+                assignee_key = key
+                break
+
+    if not assignee_key:
+        await db.update_task(
+            child_id, status="failed",
+            output=f"No API key found for {assignee}",
+            completed_at=_now_utc(),
+        )
+        child = await db.get_task(child_id)
+        raise HTTPException(
+            status_code=422,
+            detail=f"No API key found for {assignee}. Child task #{child_id} created but marked failed.",
+        )
+
+    # Send to Ember
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=30.0) as http_client:
+            resp = await http_client.post(
+                f"{ember_url}/tasks/execute",
+                json={
+                    "prompt": task["prompt"],
+                    "task_id": child_id,
+                    "subject": retry_subject,
+                    "sender_name": caller,
+                    "working_dir": task.get("working_dir"),
+                },
+                headers={"Authorization": f"Bearer {assignee_key}"},
+            )
+            resp.raise_for_status()
+    except Exception as e:
+        await db.update_task(
+            child_id, status="failed",
+            output=f"Ember request failed: {e}",
+            completed_at=_now_utc(),
+        )
+        child = await db.get_task(child_id)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Ember request failed: {e}. Child task #{child_id} created but marked failed.",
+        )
+
+    # Mark child as launched
+    await db.update_task(child_id, status="launched")
+    child = await db.get_task(child_id)
+
+    # Do NOT trigger conductor tick — retry is the follow-up action itself
+    return child
+
+
 # ---------------------------------------------------------------------------
 # API Key registration endpoints
 # ---------------------------------------------------------------------------
@@ -508,9 +641,6 @@ async def ember_status(
     _caller: str = Depends(resolve_sender),
 ):
     """Proxy health checks to known Ember servers (env + DB merged, DB wins)."""
-    import asyncio
-    import httpx
-
     # Merge env-var entries with DB entries (DB wins on conflict)
     merged: dict[str, str] = dict(EMBER_URLS)
     db_embers = await db.get_embers()

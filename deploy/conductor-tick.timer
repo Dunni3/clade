@@ -1,8 +1,8 @@
 [Unit]
-Description=Run Conductor tick hourly
+Description=Run Conductor tick every 30 minutes
 
 [Timer]
-OnCalendar=hourly
+OnCalendar=*:0/30
 Persistent=true
 RandomizedDelaySec=60
 

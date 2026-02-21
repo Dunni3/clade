@@ -34,15 +34,15 @@ ExecStart={tick_script_path}
 EnvironmentFile={env_file_path}
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=300
+TimeoutStartSec=600
 """
 
 TIMER_TEMPLATE = """\
 [Unit]
-Description=Run Conductor tick every 15 minutes
+Description=Run Conductor tick every 30 minutes
 
 [Timer]
-OnCalendar=*:0/15
+OnCalendar=*:0/30
 Persistent=true
 RandomizedDelaySec=60
 

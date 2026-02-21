@@ -89,6 +89,7 @@ class CreateTaskRequest(BaseModel):
 class UpdateTaskRequest(BaseModel):
     status: str | None = None
     output: str | None = None
+    parent_task_id: int | None = None
 
 
 class TaskSummary(BaseModel):
