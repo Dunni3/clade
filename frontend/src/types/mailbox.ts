@@ -155,3 +155,44 @@ export interface MorselSummary {
   tags: string[];
   links: MorselLink[];
 }
+
+// -- Kanban --
+
+export interface CardLink {
+  object_type: string;
+  object_id: string;
+}
+
+export interface CardSummary {
+  id: number;
+  title: string;
+  description: string;
+  col: string;
+  priority: string;
+  assignee: string | null;
+  creator: string;
+  created_at: string;
+  updated_at: string;
+  labels: string[];
+  links: CardLink[];
+}
+
+export interface CreateCardRequest {
+  title: string;
+  description?: string;
+  col?: string;
+  priority?: string;
+  assignee?: string | null;
+  labels?: string[];
+  links?: CardLink[];
+}
+
+export interface UpdateCardRequest {
+  title?: string;
+  description?: string;
+  col?: string;
+  priority?: string;
+  assignee?: string | null;
+  labels?: string[];
+  links?: CardLink[];
+}

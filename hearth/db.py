@@ -87,6 +87,31 @@ CREATE TABLE IF NOT EXISTS embers (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
+
+CREATE TABLE IF NOT EXISTS kanban_cards (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    col         TEXT NOT NULL DEFAULT 'backlog',
+    priority    TEXT NOT NULL DEFAULT 'normal',
+    assignee    TEXT,
+    creator     TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS kanban_card_labels (
+    card_id     INTEGER NOT NULL REFERENCES kanban_cards(id),
+    label       TEXT NOT NULL,
+    PRIMARY KEY (card_id, label)
+);
+
+CREATE TABLE IF NOT EXISTS kanban_card_links (
+    card_id     INTEGER NOT NULL REFERENCES kanban_cards(id),
+    object_type TEXT NOT NULL,
+    object_id   TEXT NOT NULL,
+    PRIMARY KEY (card_id, object_type, object_id)
+);
 """
 
 
@@ -1087,6 +1112,232 @@ async def delete_ember(name: str) -> bool:
     db = await get_db()
     try:
         cursor = await db.execute("DELETE FROM embers WHERE name = ?", (name,))
+        await db.commit()
+        return cursor.rowcount > 0
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# Kanban Cards
+# ---------------------------------------------------------------------------
+
+KANBAN_COLUMNS = {"backlog", "todo", "in_progress", "done", "archived"}
+KANBAN_PRIORITIES = {"low", "normal", "high", "urgent"}
+_PRIORITY_ORDER = {"urgent": 4, "high": 3, "normal": 2, "low": 1}
+
+
+async def insert_card(
+    creator: str,
+    title: str,
+    description: str = "",
+    col: str = "backlog",
+    priority: str = "normal",
+    assignee: str | None = None,
+    labels: list[str] | None = None,
+    links: list[dict] | None = None,
+) -> int:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "INSERT INTO kanban_cards (creator, title, description, col, priority, assignee) VALUES (?, ?, ?, ?, ?, ?)",
+            (creator, title, description, col, priority, assignee),
+        )
+        card_id = cursor.lastrowid
+        if labels:
+            for label in labels:
+                await db.execute(
+                    "INSERT INTO kanban_card_labels (card_id, label) VALUES (?, ?)",
+                    (card_id, label),
+                )
+        if links:
+            for link in links:
+                await db.execute(
+                    "INSERT INTO kanban_card_links (card_id, object_type, object_id) VALUES (?, ?, ?)",
+                    (card_id, link["object_type"], link["object_id"]),
+                )
+        await db.commit()
+        return card_id
+    finally:
+        await db.close()
+
+
+async def get_card(card_id: int) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT id, title, description, col, priority, assignee, creator, created_at, updated_at FROM kanban_cards WHERE id = ?",
+            (card_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        card = dict(row)
+        cursor = await db.execute(
+            "SELECT label FROM kanban_card_labels WHERE card_id = ?",
+            (card_id,),
+        )
+        card["labels"] = [r["label"] for r in await cursor.fetchall()]
+        cursor = await db.execute(
+            "SELECT object_type, object_id FROM kanban_card_links WHERE card_id = ?",
+            (card_id,),
+        )
+        card["links"] = [dict(r) for r in await cursor.fetchall()]
+        return card
+    finally:
+        await db.close()
+
+
+async def get_cards(
+    *,
+    col: str | None = None,
+    assignee: str | None = None,
+    creator: str | None = None,
+    priority: str | None = None,
+    label: str | None = None,
+    include_archived: bool = False,
+    limit: int = 200,
+    offset: int = 0,
+) -> list[dict]:
+    db = await get_db()
+    try:
+        where_clauses: list[str] = []
+        params: list = []
+
+        if col:
+            where_clauses.append("c.col = ?")
+            params.append(col)
+        elif not include_archived:
+            where_clauses.append("c.col != 'archived'")
+
+        if assignee:
+            where_clauses.append("c.assignee = ?")
+            params.append(assignee)
+        if creator:
+            where_clauses.append("c.creator = ?")
+            params.append(creator)
+        if priority:
+            where_clauses.append("c.priority = ?")
+            params.append(priority)
+        if label:
+            where_clauses.append(
+                "c.id IN (SELECT card_id FROM kanban_card_labels WHERE label = ?)"
+            )
+            params.append(label)
+
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        sql = f"""
+            SELECT c.id, c.title, c.description, c.col, c.priority, c.assignee, c.creator, c.created_at, c.updated_at
+            FROM kanban_cards c
+            {where_sql}
+            ORDER BY
+                CASE c.priority
+                    WHEN 'urgent' THEN 4
+                    WHEN 'high' THEN 3
+                    WHEN 'normal' THEN 2
+                    WHEN 'low' THEN 1
+                    ELSE 0
+                END DESC,
+                c.updated_at DESC
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+
+        cursor = await db.execute(sql, params)
+        rows = await cursor.fetchall()
+        cards = [dict(row) for row in rows]
+
+        # Bulk-fetch labels and links
+        if cards:
+            card_ids = [c["id"] for c in cards]
+            placeholders = ",".join("?" * len(card_ids))
+            cursor = await db.execute(
+                f"SELECT card_id, label FROM kanban_card_labels WHERE card_id IN ({placeholders})",
+                card_ids,
+            )
+            label_rows = await cursor.fetchall()
+            label_map: dict[int, list[str]] = {}
+            for r in label_rows:
+                label_map.setdefault(r["card_id"], []).append(r["label"])
+
+            cursor = await db.execute(
+                f"SELECT card_id, object_type, object_id FROM kanban_card_links WHERE card_id IN ({placeholders})",
+                card_ids,
+            )
+            link_rows = await cursor.fetchall()
+            link_map: dict[int, list[dict]] = {}
+            for r in link_rows:
+                link_map.setdefault(r["card_id"], []).append(
+                    {"object_type": r["object_type"], "object_id": r["object_id"]}
+                )
+
+            for card in cards:
+                card["labels"] = label_map.get(card["id"], [])
+                card["links"] = link_map.get(card["id"], [])
+
+        return cards
+    finally:
+        await db.close()
+
+
+async def update_card(card_id: int, **kwargs) -> dict | None:
+    """Update a card. Pass only the fields to change.
+
+    Supported kwargs: title, description, col, priority, assignee, labels.
+    """
+    db = await get_db()
+    try:
+        updates: list[str] = []
+        params: list = []
+
+        for field in ("title", "description", "col", "priority", "assignee"):
+            if field in kwargs:
+                updates.append(f"{field} = ?")
+                params.append(kwargs[field])
+
+        if updates:
+            updates.append("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')")
+            params.append(card_id)
+            query = f"UPDATE kanban_cards SET {', '.join(updates)} WHERE id = ?"
+            cursor = await db.execute(query, params)
+            if cursor.rowcount == 0:
+                return None
+
+        if "labels" in kwargs:
+            # Replace labels
+            await db.execute("DELETE FROM kanban_card_labels WHERE card_id = ?", (card_id,))
+            labels = kwargs["labels"]
+            if labels:
+                for lbl in labels:
+                    await db.execute(
+                        "INSERT INTO kanban_card_labels (card_id, label) VALUES (?, ?)",
+                        (card_id, lbl),
+                    )
+
+        if "links" in kwargs:
+            # Replace links
+            await db.execute("DELETE FROM kanban_card_links WHERE card_id = ?", (card_id,))
+            links = kwargs["links"]
+            if links:
+                for link in links:
+                    await db.execute(
+                        "INSERT INTO kanban_card_links (card_id, object_type, object_id) VALUES (?, ?, ?)",
+                        (card_id, link["object_type"], link["object_id"]),
+                    )
+
+        await db.commit()
+        return await get_card(card_id)
+    finally:
+        await db.close()
+
+
+async def delete_card(card_id: int) -> bool:
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM kanban_card_links WHERE card_id = ?", (card_id,))
+        await db.execute("DELETE FROM kanban_card_labels WHERE card_id = ?", (card_id,))
+        cursor = await db.execute("DELETE FROM kanban_cards WHERE id = ?", (card_id,))
         await db.commit()
         return cursor.rowcount > 0
     finally:

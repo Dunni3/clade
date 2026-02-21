@@ -7,6 +7,7 @@ from mcp.server.fastmcp import FastMCP
 
 from ..communication.mailbox_client import MailboxClient
 from .tools.conductor_tools import create_conductor_tools
+from .tools.kanban_tools import create_kanban_tools
 from .tools.mailbox_tools import create_mailbox_tools
 
 # Initialize MCP server
@@ -24,6 +25,9 @@ if _hearth_url and _hearth_api_key:
 
 # Register shared mailbox tools
 create_mailbox_tools(mcp, _mailbox)
+
+# Register kanban tools
+create_kanban_tools(mcp, _mailbox)
 
 # Load worker registry
 _worker_registry: dict[str, dict] = {}

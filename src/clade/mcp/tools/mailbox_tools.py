@@ -290,6 +290,7 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         tags: list[str] | None = None,
         task_id: int | None = None,
         brother: str | None = None,
+        card_id: int | None = None,
     ) -> str:
         """Deposit a morsel — a short note, observation, or log entry.
 
@@ -301,6 +302,7 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             tags: Optional list of tags (e.g. ["conductor-tick", "debug"]).
             task_id: Optional task ID to link this morsel to.
             brother: Optional brother name to link this morsel to.
+            card_id: Optional kanban card ID to link this morsel to.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -310,6 +312,8 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
                 links.append({"object_type": "task", "object_id": str(task_id)})
             if brother is not None:
                 links.append({"object_type": "brother", "object_id": brother})
+            if card_id is not None:
+                links.append({"object_type": "card", "object_id": str(card_id)})
             result = await mailbox.create_morsel(
                 body=body,
                 tags=tags or None,
@@ -325,6 +329,7 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         creator: str | None = None,
         tag: str | None = None,
         task_id: int | None = None,
+        card_id: int | None = None,
         limit: int = 20,
     ) -> str:
         """List morsels, optionally filtered by creator, tag, or linked object.
@@ -333,6 +338,7 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             creator: Filter by creator name.
             tag: Filter by tag.
             task_id: Filter by linked task ID.
+            card_id: Filter by linked kanban card ID.
             limit: Maximum number of morsels to return.
         """
         if mailbox is None:
@@ -340,7 +346,10 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         try:
             object_type = None
             object_id = None
-            if task_id is not None:
+            if card_id is not None:
+                object_type = "card"
+                object_id = card_id
+            elif task_id is not None:
                 object_type = "task"
                 object_id = task_id
             morsels = await mailbox.get_morsels(

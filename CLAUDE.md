@@ -46,6 +46,7 @@ clade/
 │   │   ├── server_conductor.py    # Conductor server (mailbox + trees + delegation)
 │   │   └── tools/
 │   │       ├── brother_tools.py   # list_brothers
+│   │       ├── kanban_tools.py    # create_card/list_board/get_card/move_card/update_card/archive_card
 │   │       ├── mailbox_tools.py   # send/check/read/browse/unread + task list/get/update/kill + deposit_morsel/list_morsels/list_trees/get_tree
 │   │       ├── task_tools.py      # initiate_ssh_task (coordinator only, supports parent_task_id)
 │   │       ├── ember_tools.py     # check_ember_health, list_ember_tasks
@@ -145,12 +146,13 @@ Each brother gets an identity section in their `~/.claude/CLAUDE.md`, telling th
 - `initiate_ssh_task(brother, prompt, subject?, max_turns?, auto_pull?, parent_task_id?)` — Delegate a task via SSH + tmux
 - `list_tasks(assignee?, status?, limit?)` — Browse tasks
 - `kill_task(task_id)` — Kill a running task (terminates tmux session on Ember, marks as `killed`)
-- `deposit_morsel(body, tags?, task_id?, brother?)` — Deposit an observation/note into the morsel repository
-- `list_morsels(creator?, tag?, task_id?, limit?)` — List morsels with filters
+- `deposit_morsel(body, tags?, task_id?, brother?, card_id?)` — Deposit an observation/note into the morsel repository
+- `list_morsels(creator?, tag?, task_id?, card_id?, limit?)` — List morsels with filters
 - `list_trees(limit?)` — List task trees with status summaries
 - `get_tree(root_task_id)` — Get full task tree hierarchy
 - `check_ember_health(url?)` — Check Ember server health (optional URL for ad-hoc checks)
 - `list_ember_tasks()` — List active tasks and orphaned tmux sessions on configured Ember
+- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)
 
 ### Conductor tools (clade-conductor)
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
@@ -158,19 +160,22 @@ Each brother gets an identity section in their `~/.claude/CLAUDE.md`, telling th
 - `delegate_task(worker, prompt, subject?, parent_task_id?, working_dir?, max_turns?)` — Delegate a task to a worker via Ember. Auto-reads `TRIGGER_TASK_ID` from env for parent linking when `parent_task_id` is not explicitly set.
 - `check_worker_health(worker?)` — Check one or all worker Ember servers
 - `list_worker_tasks(worker?)` — List active tasks on worker Embers
-- `deposit_morsel(body, tags?, task_id?, brother?)` — Deposit an observation/note
-- `list_morsels(creator?, tag?, task_id?, limit?)` — List morsels with filters
+- `deposit_morsel(body, tags?, task_id?, brother?, card_id?)` — Deposit an observation/note
+- `list_morsels(creator?, tag?, task_id?, card_id?, limit?)` — List morsels with filters
 - `list_trees(limit?)` — List task trees with status summaries
 - `get_tree(root_task_id)` — Get full task tree hierarchy
+- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)
+
 ### Worker tools (clade-worker)
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
 - `list_tasks`, `get_task`, `update_task`, `kill_task` — Task visibility, status updates, and kill
-- `deposit_morsel(body, tags?, task_id?, brother?)` — Deposit an observation/note
-- `list_morsels(creator?, tag?, task_id?, limit?)` — List morsels with filters
+- `deposit_morsel(body, tags?, task_id?, brother?, card_id?)` — Deposit an observation/note
+- `list_morsels(creator?, tag?, task_id?, card_id?, limit?)` — List morsels with filters
 - `list_trees(limit?)` — List task trees with status summaries
 - `get_tree(root_task_id)` — Get full task tree hierarchy
 - `check_ember_health(url?)` — Check local Ember server health
 - `list_ember_tasks()` — List active tasks on local Ember
+- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)
 
 ## Task Delegation System
 
@@ -220,6 +225,35 @@ A structured observation repository. Any brother can deposit a **morsel** — a 
 **Frontend:** MorselFeedPage with creator/tag filters. Reusable MorselPanel component shown contextually on TaskDetailPage and TreeDetailPage.
 
 **Conductor integration:** The conductor deposits a morsel at the end of every tick (tagged `conductor-tick`), summarizing observations and actions.
+
+## Kanban Board
+
+A shared kanban board for tracking development work. All brothers can create, view, and update cards. Only creators and admins can delete.
+
+**DB schema:** `kanban_cards` (id, title, description, col, priority, assignee, creator, created_at, updated_at) + `kanban_card_labels` (card_id, label) + `kanban_card_links` (card_id, object_type, object_id).
+
+**Columns:** `backlog`, `todo`, `in_progress`, `done`, `archived`. Archived excluded by default. Sorted by priority desc, then recency.
+
+**Priorities:** `low`, `normal`, `high`, `urgent`.
+
+**API** (under `/api/v1/kanban/cards`):
+| Method | Path | Status | Notes |
+|--------|------|--------|-------|
+| POST | `/kanban/cards` | 201 | Validate col/priority |
+| GET | `/kanban/cards` | 200 | Filters: col, assignee, creator, priority, label, include_archived |
+| GET | `/kanban/cards/{id}` | 200 | 404 if missing |
+| PATCH | `/kanban/cards/{id}` | 200 | Any auth'd user can update |
+| DELETE | `/kanban/cards/{id}` | 204 | Creator or admin only |
+
+**MCP tools** (registered on all 3 servers — personal, worker, conductor):
+- `create_card(title, description?, col?, priority?, assignee?, labels?, links?)` — create a card (links: list of `{object_type, object_id}`)
+- `list_board(col?, assignee?, label?, include_archived?)` — show cards grouped by column
+- `get_card(card_id)` — full card details (includes linked objects)
+- `move_card(card_id, col)` — move to a column
+- `update_card(card_id, title?, description?, priority?, assignee?, labels?, links?)` — edit fields
+- `archive_card(card_id)` — move to archived
+
+**Frontend:** `/board` route, KanbanPage with 4-column horizontal layout, move buttons, create form, detail/edit modal, filters.
 
 ## Ember Server (HTTP-based Task Execution)
 

@@ -14,6 +14,8 @@ from .config import API_KEYS, CONDUCTOR_TICK_CMD, EMBER_URLS
 
 logger = logging.getLogger(__name__)
 from .models import (
+    CardSummary,
+    CreateCardRequest,
     CreateMorselRequest,
     CreateTaskEventRequest,
     CreateTaskRequest,
@@ -38,6 +40,7 @@ from .models import (
     TreeNode,
     TreeSummary,
     UnreadCountResponse,
+    UpdateCardRequest,
     UpdateTaskRequest,
     UpsertEmberRequest,
 )
@@ -644,5 +647,126 @@ async def get_morsel(
     if morsel is None:
         raise HTTPException(status_code=404, detail="Morsel not found")
     return morsel
+
+
+# ---------------------------------------------------------------------------
+# Kanban endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/v1/kanban/cards", response_model=CardSummary, status_code=201)
+async def create_card(
+    req: CreateCardRequest,
+    caller: str = Depends(resolve_sender),
+):
+    if req.col not in db.KANBAN_COLUMNS:
+        raise HTTPException(status_code=422, detail=f"Invalid column '{req.col}'. Must be one of: {', '.join(sorted(db.KANBAN_COLUMNS))}")
+    if req.priority not in db.KANBAN_PRIORITIES:
+        raise HTTPException(status_code=422, detail=f"Invalid priority '{req.priority}'. Must be one of: {', '.join(sorted(db.KANBAN_PRIORITIES))}")
+    links = [{"object_type": l.object_type, "object_id": l.object_id} for l in req.links] if req.links else None
+    card_id = await db.insert_card(
+        creator=caller,
+        title=req.title,
+        description=req.description,
+        col=req.col,
+        priority=req.priority,
+        assignee=req.assignee,
+        labels=req.labels or None,
+        links=links,
+    )
+    card = await db.get_card(card_id)
+    return card
+
+
+@app.get("/api/v1/kanban/cards", response_model=list[CardSummary])
+async def list_cards(
+    col: str | None = None,
+    assignee: str | None = None,
+    creator: str | None = None,
+    priority: str | None = None,
+    label: str | None = None,
+    include_archived: bool = False,
+    limit: int = 200,
+    offset: int = 0,
+    _caller: str = Depends(resolve_sender),
+):
+    return await db.get_cards(
+        col=col,
+        assignee=assignee,
+        creator=creator,
+        priority=priority,
+        label=label,
+        include_archived=include_archived,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/api/v1/kanban/cards/{card_id}", response_model=CardSummary)
+async def get_card_detail(
+    card_id: int,
+    _caller: str = Depends(resolve_sender),
+):
+    card = await db.get_card(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return card
+
+
+@app.patch("/api/v1/kanban/cards/{card_id}", response_model=CardSummary)
+async def update_card(
+    card_id: int,
+    req: UpdateCardRequest,
+    _caller: str = Depends(resolve_sender),
+):
+    card = await db.get_card(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    kwargs: dict = {}
+    if req.title is not None:
+        kwargs["title"] = req.title
+    if req.description is not None:
+        kwargs["description"] = req.description
+    if req.col is not None:
+        if req.col not in db.KANBAN_COLUMNS:
+            raise HTTPException(status_code=422, detail=f"Invalid column '{req.col}'")
+        kwargs["col"] = req.col
+    if req.priority is not None:
+        if req.priority not in db.KANBAN_PRIORITIES:
+            raise HTTPException(status_code=422, detail=f"Invalid priority '{req.priority}'")
+        kwargs["priority"] = req.priority
+    if "assignee" in req.model_fields_set:
+        kwargs["assignee"] = req.assignee
+    if "labels" in req.model_fields_set:
+        kwargs["labels"] = req.labels
+    if "links" in req.model_fields_set:
+        kwargs["links"] = [{"object_type": l.object_type, "object_id": l.object_id} for l in req.links] if req.links else []
+
+    updated = await db.update_card(card_id, **kwargs)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return updated
+
+
+@app.delete("/api/v1/kanban/cards/{card_id}", status_code=204)
+async def delete_card(
+    card_id: int,
+    caller: str = Depends(resolve_sender),
+):
+    card = await db.get_card(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    if card["creator"] != caller and caller not in ADMIN_NAMES:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the creator or an admin can delete this card",
+        )
+
+    deleted = await db.delete_card(card_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return Response(status_code=204)
 
 

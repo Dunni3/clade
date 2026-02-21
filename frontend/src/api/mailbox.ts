@@ -14,6 +14,9 @@ import type {
   TreeSummary,
   TreeNode,
   MorselSummary,
+  CardSummary,
+  CreateCardRequest,
+  UpdateCardRequest,
 } from '../types/mailbox';
 
 export async function getInbox(unreadOnly = false, limit = 50): Promise<MessageSummary[]> {
@@ -134,4 +137,39 @@ export async function getMorsels(params: {
 export async function getMorsel(id: number): Promise<MorselSummary> {
   const { data } = await apiClient.get<MorselSummary>(`/morsels/${id}`);
   return data;
+}
+
+// -- Kanban --
+
+export async function getCards(params: {
+  col?: string;
+  assignee?: string;
+  creator?: string;
+  priority?: string;
+  label?: string;
+  include_archived?: boolean;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<CardSummary[]> {
+  const { data } = await apiClient.get<CardSummary[]>('/kanban/cards', { params });
+  return data;
+}
+
+export async function getCard(id: number): Promise<CardSummary> {
+  const { data } = await apiClient.get<CardSummary>(`/kanban/cards/${id}`);
+  return data;
+}
+
+export async function createCard(req: CreateCardRequest): Promise<CardSummary> {
+  const { data } = await apiClient.post<CardSummary>('/kanban/cards', req);
+  return data;
+}
+
+export async function updateCard(id: number, req: UpdateCardRequest): Promise<CardSummary> {
+  const { data } = await apiClient.patch<CardSummary>(`/kanban/cards/${id}`, req);
+  return data;
+}
+
+export async function deleteCard(id: number): Promise<void> {
+  await apiClient.delete(`/kanban/cards/${id}`);
 }

@@ -11,6 +11,7 @@ from mcp.server.fastmcp import FastMCP
 from ..communication.mailbox_client import MailboxClient
 from ..worker.client import EmberClient
 from .tools.ember_tools import create_ember_tools
+from .tools.kanban_tools import create_kanban_tools
 from .tools.mailbox_tools import create_mailbox_tools
 
 # Initialize MCP server
@@ -28,6 +29,9 @@ if _hearth_url and _hearth_api_key:
 
 # Register mailbox tools
 create_mailbox_tools(mcp, _mailbox)
+
+# Register kanban tools
+create_kanban_tools(mcp, _mailbox)
 
 # Setup Ember client if configured (worker talks to its own local Ember using its Hearth key)
 _ember_url = os.environ.get("EMBER_URL")

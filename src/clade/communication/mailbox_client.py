@@ -318,6 +318,108 @@ class MailboxClient:
 
     # -- Ember Registration --
 
+    # -- Kanban --
+
+    async def create_card(
+        self,
+        title: str,
+        description: str = "",
+        col: str = "backlog",
+        priority: str = "normal",
+        assignee: str | None = None,
+        labels: list[str] | None = None,
+        links: list[dict] | None = None,
+    ) -> dict:
+        payload: dict = {"title": title, "description": description, "col": col, "priority": priority}
+        if assignee is not None:
+            payload["assignee"] = assignee
+        if labels:
+            payload["labels"] = labels
+        if links:
+            payload["links"] = links
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.post(
+                self._url("/kanban/cards"),
+                json=payload,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_cards(
+        self,
+        col: str | None = None,
+        assignee: str | None = None,
+        creator: str | None = None,
+        priority: str | None = None,
+        label: str | None = None,
+        include_archived: bool = False,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict]:
+        params: dict = {"limit": limit, "offset": offset}
+        if col:
+            params["col"] = col
+        if assignee:
+            params["assignee"] = assignee
+        if creator:
+            params["creator"] = creator
+        if priority:
+            params["priority"] = priority
+        if label:
+            params["label"] = label
+        if include_archived:
+            params["include_archived"] = True
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url("/kanban/cards"),
+                params=params,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_card(self, card_id: int) -> dict:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url(f"/kanban/cards/{card_id}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def update_card(
+        self,
+        card_id: int,
+        **kwargs,
+    ) -> dict:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.patch(
+                self._url(f"/kanban/cards/{card_id}"),
+                json=kwargs,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def archive_card(self, card_id: int) -> dict:
+        return await self.update_card(card_id, col="archived")
+
+    async def delete_card(self, card_id: int) -> bool:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.delete(
+                self._url(f"/kanban/cards/{card_id}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            return resp.status_code == 204
+
+    # -- Ember Registration --
+
     def register_ember_sync(self, name: str, ember_url: str) -> bool:
         """Register an Ember server with the Hearth. Returns True on success.
 

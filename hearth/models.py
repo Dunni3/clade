@@ -246,3 +246,45 @@ class EmberEntry(BaseModel):
     ember_url: str
     created_at: str
     updated_at: str
+
+
+# -- Kanban --
+
+
+class CardLink(BaseModel):
+    object_type: str  # "task", "morsel", "tree", "message", "card"
+    object_id: str
+
+
+class CreateCardRequest(BaseModel):
+    title: str
+    description: str = ""
+    col: str = "backlog"
+    priority: str = "normal"
+    assignee: str | None = None
+    labels: list[str] = []
+    links: list[CardLink] = []
+
+
+class UpdateCardRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    col: str | None = None
+    priority: str | None = None
+    assignee: str | None = None
+    labels: list[str] | None = None
+    links: list[CardLink] | None = None
+
+
+class CardSummary(BaseModel):
+    id: int
+    title: str
+    description: str
+    col: str
+    priority: str
+    assignee: str | None = None
+    creator: str
+    created_at: str
+    updated_at: str
+    labels: list[str] = []
+    links: list[CardLink] = []

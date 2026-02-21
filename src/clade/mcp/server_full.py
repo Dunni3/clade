@@ -7,6 +7,7 @@ from ..communication.mailbox_client import MailboxClient
 from ..core.config import load_config
 from ..worker.client import EmberClient
 from .tools.ember_tools import create_ember_tools
+from .tools.kanban_tools import create_kanban_tools
 from .tools.mailbox_tools import create_mailbox_tools
 from .tools.brother_tools import create_brother_tools
 from .tools.task_tools import create_task_tools
@@ -32,6 +33,9 @@ if _hearth_url and _hearth_api_key:
 
 # Register mailbox tools
 create_mailbox_tools(mcp, _mailbox)
+
+# Register kanban tools
+create_kanban_tools(mcp, _mailbox)
 
 # Register task delegation tools (pass URL/key for hook-based task logging)
 create_task_tools(mcp, _mailbox, config, mailbox_url=_hearth_url, mailbox_api_key=_hearth_api_key)

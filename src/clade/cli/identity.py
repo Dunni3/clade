@@ -56,6 +56,9 @@ def generate_personal_identity(
     lines.append("- `get_task` — Get task details")
     lines.append("- `update_task` — Update task status")
     lines.append("- `initiate_ssh_task` — Delegate a task to a brother via SSH")
+    lines.append("- `deposit_morsel` — Deposit a note/observation (linkable to tasks, brothers, cards)")
+    lines.append("- `list_morsels` — List morsels (filter by creator, tag, task_id, card_id)")
+    lines.append("- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)")
     lines.append("")
 
     # Brothers
@@ -123,6 +126,9 @@ def generate_conductor_identity(
     lines.append("- `delegate_task` — Delegate a task to a worker via Ember")
     lines.append("- `check_worker_health` — Check worker Ember health")
     lines.append("- `list_worker_tasks` — List active worker tasks")
+    lines.append("- `deposit_morsel` — Deposit a note/observation (linkable to tasks, brothers, cards)")
+    lines.append("- `list_morsels` — List morsels (filter by creator, tag, task_id, card_id)")
+    lines.append("- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)")
     lines.append("")
 
     # Workers
@@ -201,6 +207,9 @@ def generate_worker_identity(
     lines.append("- `list_tasks` — List tasks from the Hearth")
     lines.append("- `get_task` — Get task details")
     lines.append("- `update_task` — Update task status")
+    lines.append("- `deposit_morsel` — Deposit a note/observation (linkable to tasks, brothers, cards)")
+    lines.append("- `list_morsels` — List morsels (filter by creator, tag, task_id, card_id)")
+    lines.append("- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)")
     lines.append("")
 
     # Family list
