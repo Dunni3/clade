@@ -10,6 +10,7 @@ import TreeListPage from './pages/TreeListPage';
 import TreeDetailPage from './pages/TreeDetailPage';
 import KanbanPage from './pages/KanbanPage';
 import MorselFeedPage from './pages/MorselFeedPage';
+import MorselDetailPage from './pages/MorselDetailPage';
 import StatusPage from './pages/StatusPage';
 import SettingsPage from './pages/SettingsPage';
 import { useAuthStore } from './store/authStore';
@@ -95,6 +96,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <MorselFeedPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/morsels/:id"
+            element={
+              <RequireAuth>
+                <MorselDetailPage />
               </RequireAuth>
             }
           />

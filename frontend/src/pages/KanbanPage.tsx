@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { getCards, createCard, updateCard, deleteCard } from '../api/mailbox';
 import type { CardSummary, CreateCardRequest } from '../types/mailbox';
+import PeekDrawer from '../components/PeekDrawer';
 
 const COLUMNS = ['backlog', 'todo', 'in_progress', 'done'] as const;
 const ALL_COLUMNS = ['backlog', 'todo', 'in_progress', 'done', 'archived'] as const;
@@ -51,6 +52,9 @@ export default function KanbanPage() {
   const [newPriority, setNewPriority] = useState<string>('normal');
   const [newAssignee, setNewAssignee] = useState('');
   const [newLabels, setNewLabels] = useState('');
+
+  // Peek drawer state
+  const [peekObject, setPeekObject] = useState<{ type: string; id: string } | null>(null);
 
   // Edit form state
   const [editTitle, setEditTitle] = useState('');
@@ -438,25 +442,14 @@ export default function KanbanPage() {
                           card: 'bg-emerald-900/50 text-emerald-300 hover:bg-emerald-900',
                         };
                         const colors = colorMap[link.object_type] || 'bg-gray-700 text-gray-300';
-                        const linkMap: Record<string, string> = {
-                          task: `/tasks/${link.object_id}`,
-                          tree: `/trees/${link.object_id}`,
-                          card: `/board?card=${link.object_id}`,
-                          morsel: `/morsels`,
-                          message: `/feed`,
-                        };
-                        const href = linkMap[link.object_type];
-                        if (href) {
-                          return (
-                            <Link key={key} to={href} className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${colors}`}>
-                              {label}
-                            </Link>
-                          );
-                        }
                         return (
-                          <span key={key} className={`px-2 py-0.5 rounded text-xs font-medium ${colors}`}>
+                          <button
+                            key={key}
+                            onClick={() => setPeekObject({ type: link.object_type, id: link.object_id })}
+                            className={`px-2 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer ${colors}`}
+                          >
                             {label}
-                          </span>
+                          </button>
                         );
                       })}
                     </div>
@@ -481,6 +474,13 @@ export default function KanbanPage() {
           </div>
         </div>
       )}
+      {/* Peek drawer */}
+      <PeekDrawer
+        open={!!peekObject}
+        onClose={() => setPeekObject(null)}
+        objectType={peekObject?.type || ''}
+        objectId={peekObject?.id || ''}
+      />
     </div>
   );
 }
