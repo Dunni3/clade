@@ -6,11 +6,11 @@ import MessageDetailPage from './pages/MessageDetailPage';
 import ComposePage from './pages/ComposePage';
 import TasksPage from './pages/TasksPage';
 import TaskDetailPage from './pages/TaskDetailPage';
-import ThrumListPage from './pages/ThrumListPage';
-import ThrumDetailPage from './pages/ThrumDetailPage';
 import TreeListPage from './pages/TreeListPage';
 import TreeDetailPage from './pages/TreeDetailPage';
+import KanbanPage from './pages/KanbanPage';
 import MorselFeedPage from './pages/MorselFeedPage';
+import MorselDetailPage from './pages/MorselDetailPage';
 import StatusPage from './pages/StatusPage';
 import SettingsPage from './pages/SettingsPage';
 import { useAuthStore } from './store/authStore';
@@ -68,22 +68,6 @@ export default function App() {
             }
           />
           <Route
-            path="/thrums"
-            element={
-              <RequireAuth>
-                <ThrumListPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/thrums/:id"
-            element={
-              <RequireAuth>
-                <ThrumDetailPage />
-              </RequireAuth>
-            }
-          />
-          <Route
             path="/trees"
             element={
               <RequireAuth>
@@ -100,10 +84,26 @@ export default function App() {
             }
           />
           <Route
+            path="/board"
+            element={
+              <RequireAuth>
+                <KanbanPage />
+              </RequireAuth>
+            }
+          />
+          <Route
             path="/morsels"
             element={
               <RequireAuth>
                 <MorselFeedPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/morsels/:id"
+            element={
+              <RequireAuth>
+                <MorselDetailPage />
               </RequireAuth>
             }
           />
