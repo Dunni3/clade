@@ -210,6 +210,129 @@ class TestDatabaseTasks:
         assert updated["completed_at"] == "2026-02-09T10:30:00Z"
 
 
+class TestDatabaseTaskTrees:
+    @pytest.mark.asyncio
+    async def test_insert_with_parent(self):
+        parent_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Parent task", subject="Parent"
+        )
+        child_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Child task", subject="Child",
+            parent_task_id=parent_id,
+        )
+
+        child = await mailbox_db.get_task(child_id)
+        assert child["parent_task_id"] == parent_id
+        assert child["root_task_id"] == parent_id
+
+    @pytest.mark.asyncio
+    async def test_three_level_chain(self):
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root", subject="Root"
+        )
+        mid_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Mid", subject="Mid",
+            parent_task_id=root_id,
+        )
+        leaf_id = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="Leaf", subject="Leaf",
+            parent_task_id=mid_id,
+        )
+
+        leaf = await mailbox_db.get_task(leaf_id)
+        assert leaf["parent_task_id"] == mid_id
+        assert leaf["root_task_id"] == root_id  # inherits root, not parent
+
+    @pytest.mark.asyncio
+    async def test_invalid_parent_raises(self):
+        with pytest.raises(ValueError, match="does not exist"):
+            await mailbox_db.insert_task(
+                creator="doot", assignee="oppy", prompt="Orphan",
+                parent_task_id=999,
+            )
+
+    @pytest.mark.asyncio
+    async def test_get_task_includes_children(self):
+        parent_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Parent", subject="Parent"
+        )
+        c1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Child 1",
+            parent_task_id=parent_id,
+        )
+        c2 = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="Child 2",
+            parent_task_id=parent_id,
+        )
+
+        parent = await mailbox_db.get_task(parent_id)
+        assert len(parent["children"]) == 2
+        child_ids = {c["id"] for c in parent["children"]}
+        assert child_ids == {c1, c2}
+
+    @pytest.mark.asyncio
+    async def test_get_tree(self):
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root", subject="Root"
+        )
+        c1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C1", parent_task_id=root_id,
+        )
+        c2 = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="C2", parent_task_id=root_id,
+        )
+        c1_1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C1.1", parent_task_id=c1,
+        )
+
+        tree = await mailbox_db.get_tree(root_id)
+        assert tree["id"] == root_id
+        assert len(tree["children"]) == 2
+        # Find c1 in children
+        c1_node = next(c for c in tree["children"] if c["id"] == c1)
+        assert len(c1_node["children"]) == 1
+        assert c1_node["children"][0]["id"] == c1_1
+
+    @pytest.mark.asyncio
+    async def test_get_tree_not_found(self):
+        tree = await mailbox_db.get_tree(999)
+        assert tree is None
+
+    @pytest.mark.asyncio
+    async def test_get_trees_with_stats(self):
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root", subject="Root"
+        )
+        c1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C1", parent_task_id=root_id,
+        )
+        c2 = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="C2", parent_task_id=root_id,
+        )
+        await mailbox_db.update_task(c1, status="completed")
+        await mailbox_db.update_task(c2, status="failed")
+
+        trees = await mailbox_db.get_trees()
+        assert len(trees) == 1
+        t = trees[0]
+        assert t["root_task_id"] == root_id
+        assert t["total_tasks"] == 3  # root + 2 children
+        assert t["completed"] == 1
+        assert t["failed"] == 1
+        assert t["pending"] == 1  # root is still pending
+
+    @pytest.mark.asyncio
+    async def test_backward_compat_no_parent(self):
+        """Tasks without parent still work as before."""
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Standalone"
+        )
+        task = await mailbox_db.get_task(task_id)
+        assert task["parent_task_id"] is None
+        assert task["root_task_id"] is None
+        assert task["children"] == []
+
+
 class TestDatabaseTaskLinkedMessages:
     @pytest.mark.asyncio
     async def test_message_with_task_id(self):
@@ -480,6 +603,132 @@ class TestAPITasks:
         data = resp.json()
         assert len(data["messages"]) == 1
         assert data["messages"][0]["body"] == "Task received"
+
+
+# ---------------------------------------------------------------------------
+# Tasks — API tree endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestAPITaskTrees:
+    @pytest.mark.asyncio
+    async def test_create_with_parent(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Parent", "subject": "Parent"},
+            headers=DOOT_HEADERS,
+        )
+        parent_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Child",
+                "parent_task_id": parent_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        child_id = resp.json()["id"]
+
+        resp = await client.get(f"/api/v1/tasks/{child_id}", headers=DOOT_HEADERS)
+        data = resp.json()
+        assert data["parent_task_id"] == parent_id
+        assert data["root_task_id"] == parent_id
+
+    @pytest.mark.asyncio
+    async def test_create_invalid_parent_422(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Orphan",
+                "parent_task_id": 9999,
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_task_detail_includes_children(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Parent", "subject": "Parent"},
+            headers=DOOT_HEADERS,
+        )
+        parent_id = resp.json()["id"]
+
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Child 1", "parent_task_id": parent_id},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "jerry", "prompt": "Child 2", "parent_task_id": parent_id},
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get(f"/api/v1/tasks/{parent_id}", headers=DOOT_HEADERS)
+        data = resp.json()
+        assert len(data["children"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_tree_list(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Root", "subject": "Root task"},
+            headers=DOOT_HEADERS,
+        )
+        root_id = resp.json()["id"]
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Child", "parent_task_id": root_id},
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get("/api/v1/trees", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        trees = resp.json()
+        assert len(trees) == 1
+        assert trees[0]["root_task_id"] == root_id
+        assert trees[0]["total_tasks"] == 2
+
+    @pytest.mark.asyncio
+    async def test_tree_detail(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Root", "subject": "Root"},
+            headers=DOOT_HEADERS,
+        )
+        root_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "C1", "parent_task_id": root_id},
+            headers=DOOT_HEADERS,
+        )
+        c1_id = resp.json()["id"]
+
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "jerry", "prompt": "C1.1", "parent_task_id": c1_id},
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get(f"/api/v1/trees/{root_id}", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        tree = resp.json()
+        assert tree["id"] == root_id
+        assert len(tree["children"]) == 1
+        assert tree["children"][0]["id"] == c1_id
+        assert len(tree["children"][0]["children"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_tree_not_found(self, client):
+        resp = await client.get("/api/v1/trees/999", headers=DOOT_HEADERS)
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------

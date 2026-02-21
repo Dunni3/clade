@@ -74,6 +74,33 @@ CREATE TABLE IF NOT EXISTS thrums (
     completed_at TEXT,
     output       TEXT
 );
+
+CREATE TABLE IF NOT EXISTS morsels (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    creator    TEXT NOT NULL,
+    body       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS morsel_tags (
+    morsel_id INTEGER NOT NULL REFERENCES morsels(id),
+    tag       TEXT NOT NULL,
+    PRIMARY KEY (morsel_id, tag)
+);
+
+CREATE TABLE IF NOT EXISTS morsel_links (
+    morsel_id   INTEGER NOT NULL REFERENCES morsels(id),
+    object_type TEXT NOT NULL,
+    object_id   TEXT NOT NULL,
+    PRIMARY KEY (morsel_id, object_type, object_id)
+);
+
+CREATE TABLE IF NOT EXISTS embers (
+    name       TEXT PRIMARY KEY,
+    ember_url  TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
 """
 
 
@@ -103,6 +130,19 @@ async def init_db() -> None:
             )
         except Exception:
             pass  # Column already exists
+        # Migration: add parent_task_id and root_task_id to tasks
+        try:
+            await db.execute(
+                "ALTER TABLE tasks ADD COLUMN parent_task_id INTEGER REFERENCES tasks(id)"
+            )
+        except Exception:
+            pass
+        try:
+            await db.execute(
+                "ALTER TABLE tasks ADD COLUMN root_task_id INTEGER REFERENCES tasks(id)"
+            )
+        except Exception:
+            pass
         await db.commit()
     finally:
         await db.close()
@@ -457,13 +497,27 @@ async def insert_task(
     host: str | None = None,
     working_dir: str | None = None,
     thrum_id: int | None = None,
+    parent_task_id: int | None = None,
 ) -> int:
     db = await get_db()
     try:
+        root_task_id = None
+        if parent_task_id is not None:
+            # Validate parent exists and compute root_task_id
+            cursor = await db.execute(
+                "SELECT id, root_task_id FROM tasks WHERE id = ?",
+                (parent_task_id,),
+            )
+            parent = await cursor.fetchone()
+            if parent is None:
+                raise ValueError(f"Parent task {parent_task_id} does not exist")
+            # If parent has a root, inherit it; otherwise parent IS the root
+            root_task_id = parent["root_task_id"] if parent["root_task_id"] is not None else parent["id"]
+
         cursor = await db.execute(
-            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, thrum_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (creator, assignee, subject, prompt, session_name, host, working_dir, thrum_id),
+            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, thrum_id, parent_task_id, root_task_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (creator, assignee, subject, prompt, session_name, host, working_dir, thrum_id, parent_task_id, root_task_id),
         )
         await db.commit()
         return cursor.lastrowid
@@ -493,7 +547,7 @@ async def get_tasks(
             params.append(creator)
         where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
         sql = f"""
-            SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, thrum_id
+            SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, thrum_id, parent_task_id, root_task_id
             FROM tasks
             {where_sql}
             ORDER BY created_at DESC
@@ -561,6 +615,15 @@ async def get_task(task_id: int) -> dict | None:
                 msg["read_by"] = read_map.get(msg["id"], [])
 
         task["messages"] = messages
+
+        # Get children
+        cursor = await db.execute(
+            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, thrum_id, parent_task_id, root_task_id
+               FROM tasks WHERE parent_task_id = ? ORDER BY created_at ASC""",
+            (task_id,),
+        )
+        child_rows = await cursor.fetchall()
+        task["children"] = [dict(r) for r in child_rows]
 
         # Get task events
         cursor = await db.execute(
@@ -899,5 +962,281 @@ async def update_task(
             await db.commit()
 
         return await get_task(task_id)
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# Task Trees
+# ---------------------------------------------------------------------------
+
+
+async def get_tree(root_task_id: int) -> dict | None:
+    """Fetch a full task tree rooted at root_task_id."""
+    db = await get_db()
+    try:
+        # Fetch root task
+        cursor = await db.execute(
+            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, thrum_id, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output FROM tasks WHERE id = ?",
+            (root_task_id,),
+        )
+        root_row = await cursor.fetchone()
+        if root_row is None:
+            return None
+        root = dict(root_row)
+
+        # Fetch all descendants
+        cursor = await db.execute(
+            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, thrum_id, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output FROM tasks WHERE root_task_id = ? ORDER BY created_at ASC",
+            (root_task_id,),
+        )
+        desc_rows = await cursor.fetchall()
+        descendants = [dict(r) for r in desc_rows]
+
+        # Build tree: index by ID, attach children
+        nodes = {root["id"]: root}
+        root["children"] = []
+        for d in descendants:
+            d["children"] = []
+            nodes[d["id"]] = d
+
+        for d in descendants:
+            parent_id = d["parent_task_id"]
+            if parent_id in nodes:
+                nodes[parent_id]["children"].append(d)
+
+        return root
+    finally:
+        await db.close()
+
+
+async def get_trees(limit: int = 50, offset: int = 0) -> list[dict]:
+    """List task trees with aggregated stats."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT
+                 d.root_task_id,
+                 r.subject,
+                 r.creator,
+                 r.created_at,
+                 r.status,
+                 COUNT(*) + 1 as total_tasks,
+                 SUM(CASE WHEN d.status = 'completed' THEN 1 ELSE 0 END) as completed,
+                 SUM(CASE WHEN d.status = 'failed' THEN 1 ELSE 0 END) as failed,
+                 SUM(CASE WHEN d.status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+                 SUM(CASE WHEN d.status = 'pending' THEN 1 ELSE 0 END) as pending
+               FROM tasks d
+               JOIN tasks r ON d.root_task_id = r.id
+               WHERE d.root_task_id IS NOT NULL
+               GROUP BY d.root_task_id
+               ORDER BY r.created_at DESC
+               LIMIT ? OFFSET ?""",
+            (limit, offset),
+        )
+        rows = await cursor.fetchall()
+        results = []
+        for row in rows:
+            r = dict(row)
+            # Adjust counts: include root task status in aggregates
+            root_status = r.pop("status")
+            r["completed"] = r["completed"] + (1 if root_status == "completed" else 0)
+            r["failed"] = r["failed"] + (1 if root_status == "failed" else 0)
+            r["in_progress"] = r["in_progress"] + (1 if root_status == "in_progress" else 0)
+            r["pending"] = r["pending"] + (1 if root_status == "pending" else 0)
+            results.append(r)
+        return results
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# Morsels
+# ---------------------------------------------------------------------------
+
+
+async def insert_morsel(
+    creator: str,
+    body: str,
+    tags: list[str] | None = None,
+    links: list[dict] | None = None,
+) -> int:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "INSERT INTO morsels (creator, body) VALUES (?, ?)",
+            (creator, body),
+        )
+        morsel_id = cursor.lastrowid
+
+        if tags:
+            for tag in tags:
+                await db.execute(
+                    "INSERT INTO morsel_tags (morsel_id, tag) VALUES (?, ?)",
+                    (morsel_id, tag),
+                )
+
+        if links:
+            for link in links:
+                await db.execute(
+                    "INSERT INTO morsel_links (morsel_id, object_type, object_id) VALUES (?, ?, ?)",
+                    (morsel_id, link["object_type"], link["object_id"]),
+                )
+
+        await db.commit()
+        return morsel_id
+    finally:
+        await db.close()
+
+
+async def get_morsel(morsel_id: int) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT id, creator, body, created_at FROM morsels WHERE id = ?",
+            (morsel_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        morsel = dict(row)
+
+        cursor = await db.execute(
+            "SELECT tag FROM morsel_tags WHERE morsel_id = ?",
+            (morsel_id,),
+        )
+        morsel["tags"] = [r["tag"] for r in await cursor.fetchall()]
+
+        cursor = await db.execute(
+            "SELECT object_type, object_id FROM morsel_links WHERE morsel_id = ?",
+            (morsel_id,),
+        )
+        morsel["links"] = [dict(r) for r in await cursor.fetchall()]
+
+        return morsel
+    finally:
+        await db.close()
+
+
+async def get_morsels(
+    *,
+    creator: str | None = None,
+    tag: str | None = None,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    db = await get_db()
+    try:
+        where_clauses: list[str] = []
+        params: list = []
+
+        if creator:
+            where_clauses.append("m.creator = ?")
+            params.append(creator)
+        if tag:
+            where_clauses.append(
+                "m.id IN (SELECT morsel_id FROM morsel_tags WHERE tag = ?)"
+            )
+            params.append(tag)
+        if object_type and object_id:
+            where_clauses.append(
+                "m.id IN (SELECT morsel_id FROM morsel_links WHERE object_type = ? AND object_id = ?)"
+            )
+            params.extend([object_type, object_id])
+
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        sql = f"""
+            SELECT m.id, m.creator, m.body, m.created_at
+            FROM morsels m
+            {where_sql}
+            ORDER BY m.created_at DESC
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+
+        cursor = await db.execute(sql, params)
+        rows = await cursor.fetchall()
+        morsels = [dict(row) for row in rows]
+
+        # Bulk-fetch tags and links
+        if morsels:
+            morsel_ids = [m["id"] for m in morsels]
+            placeholders = ",".join("?" * len(morsel_ids))
+
+            cursor = await db.execute(
+                f"SELECT morsel_id, tag FROM morsel_tags WHERE morsel_id IN ({placeholders})",
+                morsel_ids,
+            )
+            tag_rows = await cursor.fetchall()
+            tag_map: dict[int, list[str]] = {}
+            for r in tag_rows:
+                tag_map.setdefault(r["morsel_id"], []).append(r["tag"])
+
+            cursor = await db.execute(
+                f"SELECT morsel_id, object_type, object_id FROM morsel_links WHERE morsel_id IN ({placeholders})",
+                morsel_ids,
+            )
+            link_rows = await cursor.fetchall()
+            link_map: dict[int, list[dict]] = {}
+            for r in link_rows:
+                link_map.setdefault(r["morsel_id"], []).append(
+                    {"object_type": r["object_type"], "object_id": r["object_id"]}
+                )
+
+            for morsel in morsels:
+                morsel["tags"] = tag_map.get(morsel["id"], [])
+                morsel["links"] = link_map.get(morsel["id"], [])
+
+        return morsels
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# Embers (registry)
+# ---------------------------------------------------------------------------
+
+
+async def upsert_ember(name: str, ember_url: str) -> dict:
+    db = await get_db()
+    try:
+        await db.execute(
+            """INSERT INTO embers (name, ember_url) VALUES (?, ?)
+               ON CONFLICT(name) DO UPDATE SET ember_url = excluded.ember_url, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')""",
+            (name, ember_url),
+        )
+        await db.commit()
+
+        cursor = await db.execute(
+            "SELECT name, ember_url, created_at, updated_at FROM embers WHERE name = ?",
+            (name,),
+        )
+        row = await cursor.fetchone()
+        return dict(row)
+    finally:
+        await db.close()
+
+
+async def get_embers() -> list[dict]:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT name, ember_url, created_at, updated_at FROM embers ORDER BY name"
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+async def delete_ember(name: str) -> bool:
+    db = await get_db()
+    try:
+        cursor = await db.execute("DELETE FROM embers WHERE name = ?", (name,))
+        await db.commit()
+        return cursor.rowcount > 0
     finally:
         await db.close()

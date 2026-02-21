@@ -132,6 +132,7 @@ class MailboxClient:
         host: str | None = None,
         working_dir: str | None = None,
         thrum_id: int | None = None,
+        parent_task_id: int | None = None,
     ) -> dict:
         payload: dict = {"assignee": assignee, "prompt": prompt, "subject": subject}
         if session_name is not None:
@@ -142,6 +143,8 @@ class MailboxClient:
             payload["working_dir"] = working_dir
         if thrum_id is not None:
             payload["thrum_id"] = thrum_id
+        if parent_task_id is not None:
+            payload["parent_task_id"] = parent_task_id
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.post(
                 self._url("/tasks"),
@@ -221,6 +224,107 @@ class MailboxClient:
             )
             resp.raise_for_status()
             return resp.json()
+
+    # -- Morsels --
+
+    async def create_morsel(
+        self,
+        body: str,
+        tags: list[str] | None = None,
+        links: list[dict] | None = None,
+    ) -> dict:
+        payload: dict = {"body": body}
+        if tags:
+            payload["tags"] = tags
+        if links:
+            payload["links"] = links
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.post(
+                self._url("/morsels"),
+                json=payload,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_morsels(
+        self,
+        creator: str | None = None,
+        tag: str | None = None,
+        object_type: str | None = None,
+        object_id: int | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        params: dict = {"limit": limit, "offset": offset}
+        if creator:
+            params["creator"] = creator
+        if tag:
+            params["tag"] = tag
+        if object_type:
+            params["object_type"] = object_type
+        if object_id is not None:
+            params["object_id"] = object_id
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url("/morsels"),
+                params=params,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_morsel(self, morsel_id: int) -> dict:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url(f"/morsels/{morsel_id}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    # -- Trees --
+
+    async def get_trees(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url("/trees"),
+                params={"limit": limit, "offset": offset},
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_tree(self, root_id: int) -> dict:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url(f"/trees/{root_id}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    # -- Ember Registration --
+
+    def register_ember_sync(self, name: str, ember_url: str) -> bool:
+        """Register an Ember server with the Hearth. Returns True on success.
+
+        Uses synchronous httpx since ember registration is a one-shot call
+        during CLI setup (which is sync).
+        """
+        resp = httpx.put(
+            self._url(f"/embers/{name}"),
+            json={"ember_url": ember_url},
+            headers=self.headers,
+            timeout=10,
+            verify=self.verify_ssl,
+        )
+        return resp.status_code in (200, 201)
 
     # -- Thrums --
 

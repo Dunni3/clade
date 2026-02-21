@@ -4,6 +4,8 @@
 
 set -euo pipefail
 
+TRIGGER_TASK_ID="${1:-}"
+
 CONFIG_DIR="${HOME}/.config/clade"
 LOG_DIR="${HOME}/.local/share/clade/conductor-logs"
 TICK_PROMPT="${CONFIG_DIR}/conductor-tick.md"
@@ -32,8 +34,11 @@ LOG_FILE="${LOG_DIR}/tick_${TIMESTAMP}.log"
 
 # Run the tick
 echo "=== Conductor tick: $(date -u +%Y-%m-%dT%H:%M:%SZ) ===" | tee "$LOG_FILE"
+if [[ -n "$TRIGGER_TASK_ID" ]]; then
+    echo "  Triggered by task #${TRIGGER_TASK_ID}" | tee -a "$LOG_FILE"
+fi
 
-claude -p "$(cat "$TICK_PROMPT")" \
+env ${TRIGGER_TASK_ID:+TRIGGER_TASK_ID=$TRIGGER_TASK_ID} claude -p "$(cat "$TICK_PROMPT")" \
     --dangerously-skip-permissions \
     --max-turns 20 \
     --mcp-config "${HOME}/.config/clade/conductor-mcp.json" \

@@ -63,18 +63,25 @@ def create_ember_tools(mcp: FastMCP, ember: EmberClient | None) -> dict:
             result = await ember.active_tasks()
             lines = []
 
-            active = result.get("active_task")
-            if active:
-                lines.append(
-                    f"Active task:\n"
-                    f"  Task ID: {active.get('task_id', 'N/A')}\n"
-                    f"  Session: {active.get('session_name', '?')}\n"
-                    f"  Subject: {active.get('subject', '(none)')}\n"
-                    f"  Working dir: {active.get('working_dir', 'N/A')}\n"
-                    f"  Alive: {active.get('alive', '?')}"
-                )
+            # New multi-aspen format, with fallback for old Embers
+            aspens = result.get("aspens")
+            if aspens is None:
+                # Old Ember — wrap single active_task in a list
+                active = result.get("active_task")
+                aspens = [active] if active else []
+
+            if aspens:
+                lines.append(f"Active aspens ({len(aspens)}):")
+                for a in aspens:
+                    lines.append(
+                        f"  - Task ID: {a.get('task_id', 'N/A')}\n"
+                        f"    Session: {a.get('session_name', '?')}\n"
+                        f"    Subject: {a.get('subject', '(none)')}\n"
+                        f"    Working dir: {a.get('working_dir', 'N/A')}\n"
+                        f"    Alive: {a.get('alive', '?')}"
+                    )
             else:
-                lines.append("No active task.")
+                lines.append("No active aspens.")
 
             orphaned = result.get("orphaned_sessions", [])
             if orphaned:

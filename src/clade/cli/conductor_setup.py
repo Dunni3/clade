@@ -285,7 +285,7 @@ def deploy_conductor(
 
     # Step 2: Detect remote user
     click.echo("Detecting remote user...")
-    remote_user = detect_remote_user(ssh_host)
+    remote_user = detect_remote_user(ssh_host, ssh_key=ssh_key)
     if not remote_user:
         click.echo(click.style("  Could not detect remote user", fg="red"))
         return False

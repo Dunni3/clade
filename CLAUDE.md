@@ -195,8 +195,8 @@ An **Ember** is a lightweight HTTP server running on a worker brother's machine 
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
 | `GET /health` | No | Liveness check (brother name, active tasks, uptime) |
-| `POST /tasks/execute` | Yes (202) | Launch a Claude Code tmux session. Returns busy error if already running a task. |
-| `GET /tasks/active` | Yes | Active task info + orphaned tmux sessions |
+| `POST /tasks/execute` | Yes (202) | Launch a Claude Code tmux session (supports concurrent aspens). |
+| `GET /tasks/active` | Yes | List of active aspens + orphaned tmux sessions |
 
 **Authentication:** Embers reuse the brother's Hearth API key (`HEARTH_API_KEY` env var) — no separate Ember key needed. Doot authenticates to a remote Ember using the brother's Hearth key (from `keys.json`). Workers authenticate to their local Ember using their own Hearth key.
 
@@ -215,7 +215,7 @@ An **Ember** is a lightweight HTTP server running on a worker brother's machine 
 - Workers: `EMBER_URL=http://localhost:8100` (local Ember, uses existing `HEARTH_API_KEY`)
 - Doot: `EMBER_URL=http://100.71.57.52:8100` + `EMBER_API_KEY=<brother's Hearth key>`
 
-**In-memory state:** `TaskState` tracks one active task. No DB — the Hearth is source of truth. `is_busy()` checks tmux liveness and auto-clears stale tasks.
+**In-memory state:** `AspenRegistry` tracks all running aspens (concurrent Claude Code sessions). No DB — the Hearth is source of truth. `reap()` sweeps dead tmux sessions automatically.
 
 **Deployment:** Automated via `clade setup-ember <name>` or `clade add-brother --ember`. The CLI detects the remote user, `clade-ember` binary path, clade package directory, and Tailscale IP, then templates and deploys a systemd service. Falls back to printing manual instructions if sudo is unavailable. Reference service file: `deploy/ember.service`. Config fields `ember_host` and `ember_port` are stored in `BrotherEntry` in `clade.yaml`.
 

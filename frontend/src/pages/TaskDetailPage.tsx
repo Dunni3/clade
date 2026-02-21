@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getTask } from '../api/mailbox';
+import MorselPanel from '../components/MorselPanel';
 import type { TaskDetail, FeedMessage, TaskEvent } from '../types/mailbox';
 
 const POLL_INTERVAL_MS = 5000;
@@ -230,6 +231,23 @@ export default function TaskDetailPage() {
             <h1 className="text-xl font-semibold text-gray-100">
               {task.subject || '(no subject)'}
             </h1>
+            {(task.parent_task_id || task.root_task_id || (task.children && task.children.length > 0)) && (
+              <div className="flex items-center gap-3 mt-1.5">
+                {task.parent_task_id && (
+                  <Link to={`/tasks/${task.parent_task_id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
+                    Parent: #{task.parent_task_id}
+                  </Link>
+                )}
+                {task.root_task_id && task.root_task_id !== task.id && (
+                  <Link to={`/trees/${task.root_task_id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
+                    Tree: #{task.root_task_id}
+                  </Link>
+                )}
+                {task.children && task.children.length > 0 && (
+                  <span className="text-xs text-gray-500">Children: {task.children.length}</span>
+                )}
+              </div>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap gap-4 text-xs text-gray-500">
@@ -260,6 +278,9 @@ export default function TaskDetailPage() {
           <pre className="text-sm text-gray-400 whitespace-pre-wrap overflow-x-auto">{task.output}</pre>
         </div>
       )}
+
+      {/* Morsels */}
+      <MorselPanel objectType="task" objectId={task.id} />
 
       {/* Timeline */}
       <div className="mb-4 flex items-center justify-between">

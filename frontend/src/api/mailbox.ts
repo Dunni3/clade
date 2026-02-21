@@ -12,6 +12,10 @@ import type {
   ThrumSummary,
   ThrumDetail,
   MemberActivityResponse,
+  EmberStatusResponse,
+  TreeSummary,
+  TreeNode,
+  MorselSummary,
 } from '../types/mailbox';
 
 export async function getInbox(unreadOnly = false, limit = 50): Promise<MessageSummary[]> {
@@ -105,5 +109,40 @@ export async function getHealthCheck(): Promise<{ status: string }> {
 
 export async function getMemberActivity(): Promise<MemberActivityResponse> {
   const { data } = await apiClient.get<MemberActivityResponse>('/members/activity');
+  return data;
+}
+
+export async function getEmberStatus(): Promise<EmberStatusResponse> {
+  const { data } = await apiClient.get<EmberStatusResponse>('/embers/status');
+  return data;
+}
+
+export async function getTrees(params: {
+  limit?: number;
+  offset?: number;
+} = {}): Promise<TreeSummary[]> {
+  const { data } = await apiClient.get<TreeSummary[]>('/trees', { params });
+  return data;
+}
+
+export async function getTree(rootId: number): Promise<TreeNode> {
+  const { data } = await apiClient.get<TreeNode>(`/trees/${rootId}`);
+  return data;
+}
+
+export async function getMorsels(params: {
+  creator?: string;
+  tag?: string;
+  object_type?: string;
+  object_id?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<MorselSummary[]> {
+  const { data } = await apiClient.get<MorselSummary[]>('/morsels', { params });
+  return data;
+}
+
+export async function getMorsel(id: number): Promise<MorselSummary> {
+  const { data } = await apiClient.get<MorselSummary>(`/morsels/${id}`);
   return data;
 }

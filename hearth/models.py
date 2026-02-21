@@ -84,6 +84,7 @@ class CreateTaskRequest(BaseModel):
     host: str | None = None
     working_dir: str | None = None
     thrum_id: int | None = None
+    parent_task_id: int | None = None
 
 
 class UpdateTaskRequest(BaseModel):
@@ -101,6 +102,8 @@ class TaskSummary(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     thrum_id: int | None = None
+    parent_task_id: int | None = None
+    root_task_id: int | None = None
 
 
 class TaskDetail(TaskSummary):
@@ -111,6 +114,7 @@ class TaskDetail(TaskSummary):
     output: str | None = None
     messages: list[FeedMessage] = []
     events: list["TaskEvent"] = []
+    children: list[TaskSummary] = []
 
 
 class CreateTaskResponse(BaseModel):
@@ -214,3 +218,78 @@ class ThrumDetail(ThrumSummary):
 class CreateThrumResponse(BaseModel):
     id: int
     message: str = "Thrum created"
+
+
+# -- Task Trees --
+
+
+class TreeSummary(BaseModel):
+    root_task_id: int
+    subject: str
+    creator: str
+    created_at: str
+    total_tasks: int
+    completed: int
+    failed: int
+    in_progress: int
+    pending: int
+
+
+class TreeNode(BaseModel):
+    id: int
+    creator: str
+    assignee: str
+    subject: str
+    status: str
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+    thrum_id: int | None = None
+    parent_task_id: int | None = None
+    root_task_id: int | None = None
+    prompt: str | None = None
+    session_name: str | None = None
+    host: str | None = None
+    working_dir: str | None = None
+    output: str | None = None
+    children: list["TreeNode"] = []
+
+
+TreeNode.model_rebuild()
+
+
+# -- Morsels --
+
+
+class MorselLink(BaseModel):
+    object_type: str
+    object_id: str
+
+
+class CreateMorselRequest(BaseModel):
+    body: str
+    tags: list[str] = []
+    links: list[MorselLink] = []
+
+
+class MorselSummary(BaseModel):
+    id: int
+    creator: str
+    body: str
+    created_at: str
+    tags: list[str] = []
+    links: list[MorselLink] = []
+
+
+# -- Embers (registry) --
+
+
+class UpsertEmberRequest(BaseModel):
+    ember_url: str
+
+
+class EmberEntry(BaseModel):
+    name: str
+    ember_url: str
+    created_at: str
+    updated_at: str

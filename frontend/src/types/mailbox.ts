@@ -63,6 +63,8 @@ export interface TaskSummary {
   started_at: string | null;
   completed_at: string | null;
   thrum_id: number | null;
+  parent_task_id: number | null;
+  root_task_id: number | null;
 }
 
 export interface TaskEvent {
@@ -80,6 +82,7 @@ export interface TaskDetail extends TaskSummary {
   host: string | null;
   working_dir: string | null;
   output: string | null;
+  children: TaskSummary[];
   messages: FeedMessage[];
   events: TaskEvent[];
 }
@@ -114,4 +117,60 @@ export interface MemberActivity {
 
 export interface MemberActivityResponse {
   members: MemberActivity[];
+}
+
+export interface EmberInfo {
+  status: string;
+  active_tasks?: number;
+  uptime_seconds?: number;
+}
+
+export interface EmberStatusResponse {
+  embers: Record<string, EmberInfo>;
+}
+
+export interface TreeSummary {
+  root_task_id: number;
+  subject: string;
+  creator: string;
+  created_at: string;
+  total_tasks: number;
+  completed: number;
+  failed: number;
+  in_progress: number;
+  pending: number;
+}
+
+export interface TreeNode {
+  id: number;
+  creator: string;
+  assignee: string;
+  subject: string;
+  status: string;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  thrum_id: number | null;
+  parent_task_id: number | null;
+  root_task_id: number | null;
+  prompt: string | null;
+  session_name: string | null;
+  host: string | null;
+  working_dir: string | null;
+  output: string | null;
+  children: TreeNode[];
+}
+
+export interface MorselLink {
+  object_type: string;
+  object_id: string;
+}
+
+export interface MorselSummary {
+  id: number;
+  creator: string;
+  body: string;
+  created_at: string;
+  tags: string[];
+  links: MorselLink[];
 }

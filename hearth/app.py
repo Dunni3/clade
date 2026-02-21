@@ -10,22 +10,25 @@ from fastapi.responses import Response
 
 from . import db
 from .auth import ADMIN_NAMES, resolve_sender
-from .config import API_KEYS, CONDUCTOR_TICK_CMD
+from .config import API_KEYS, CONDUCTOR_TICK_CMD, EMBER_URLS
 
 logger = logging.getLogger(__name__)
 from .models import (
+    CreateMorselRequest,
     CreateTaskEventRequest,
     CreateTaskRequest,
     CreateTaskResponse,
     CreateThrumRequest,
     CreateThrumResponse,
     EditMessageRequest,
+    EmberEntry,
     FeedMessage,
     KeyInfo,
     MarkReadResponse,
     MemberActivityResponse,
     MessageDetail,
     MessageSummary,
+    MorselSummary,
     ReadByEntry,
     RegisterKeyRequest,
     RegisterKeyResponse,
@@ -36,9 +39,12 @@ from .models import (
     TaskSummary,
     ThrumDetail,
     ThrumSummary,
+    TreeNode,
+    TreeSummary,
     UnreadCountResponse,
     UpdateTaskRequest,
     UpdateThrumRequest,
+    UpsertEmberRequest,
 )
 
 
@@ -65,13 +71,16 @@ def _now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _maybe_trigger_conductor_tick() -> None:
+def _maybe_trigger_conductor_tick(task_id: int | None = None) -> None:
     """Fire-and-forget: spawn the conductor tick if configured."""
     if not CONDUCTOR_TICK_CMD:
         return
     try:
+        cmd = CONDUCTOR_TICK_CMD
+        if task_id is not None:
+            cmd = f"{cmd} {task_id}"
         subprocess.Popen(
-            CONDUCTOR_TICK_CMD,
+            cmd,
             shell=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -257,16 +266,20 @@ async def create_task(
     req: CreateTaskRequest,
     caller: str = Depends(resolve_sender),
 ):
-    task_id = await db.insert_task(
-        creator=caller,
-        assignee=req.assignee,
-        subject=req.subject,
-        prompt=req.prompt,
-        session_name=req.session_name,
-        host=req.host,
-        working_dir=req.working_dir,
-        thrum_id=req.thrum_id,
-    )
+    try:
+        task_id = await db.insert_task(
+            creator=caller,
+            assignee=req.assignee,
+            subject=req.subject,
+            prompt=req.prompt,
+            session_name=req.session_name,
+            host=req.host,
+            working_dir=req.working_dir,
+            thrum_id=req.thrum_id,
+            parent_task_id=req.parent_task_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     return CreateTaskResponse(id=task_id)
 
 
@@ -351,9 +364,9 @@ async def update_task(
     if updated is None:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Trigger conductor tick when a thrum-linked task reaches a terminal state
-    if req.status in ("completed", "failed") and task.get("thrum_id") is not None:
-        _maybe_trigger_conductor_tick()
+    # Trigger conductor tick when any task reaches a terminal state
+    if req.status in ("completed", "failed"):
+        _maybe_trigger_conductor_tick(task_id=task_id)
 
     return updated
 
@@ -398,6 +411,158 @@ async def member_activity(
     env_names = list(API_KEYS.values())
     members = await db.get_member_activity(extra_names=env_names)
     return MemberActivityResponse(members=members)
+
+
+# ---------------------------------------------------------------------------
+# Ember status endpoint
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/embers/status")
+async def ember_status(
+    _caller: str = Depends(resolve_sender),
+):
+    """Proxy health checks to known Ember servers (env + DB merged, DB wins)."""
+    import asyncio
+    import httpx
+
+    # Merge env-var entries with DB entries (DB wins on conflict)
+    merged: dict[str, str] = dict(EMBER_URLS)
+    db_embers = await db.get_embers()
+    for entry in db_embers:
+        merged[entry["name"]] = entry["ember_url"]
+
+    if not merged:
+        return {"embers": {}}
+
+    async def _check(name: str, url: str) -> tuple[str, dict]:
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=5.0) as client:
+                resp = await client.get(f"{url}/health")
+                resp.raise_for_status()
+                data = resp.json()
+                return name, {
+                    "status": "ok",
+                    "active_tasks": data.get("active_tasks", 0),
+                    "uptime_seconds": data.get("uptime_seconds"),
+                }
+        except Exception:
+            return name, {"status": "unreachable"}
+
+    results = await asyncio.gather(*[
+        _check(name, url) for name, url in merged.items()
+    ])
+    return {"embers": dict(results)}
+
+
+@app.put("/api/v1/embers/{name}", response_model=EmberEntry)
+async def upsert_ember(
+    name: str,
+    req: UpsertEmberRequest,
+    _caller: str = Depends(resolve_sender),
+):
+    """Register or update an Ember URL."""
+    entry = await db.upsert_ember(name, req.ember_url)
+    return entry
+
+
+@app.get("/api/v1/embers", response_model=list[EmberEntry])
+async def list_embers(
+    _caller: str = Depends(resolve_sender),
+):
+    """List all registered Ember entries."""
+    return await db.get_embers()
+
+
+@app.delete("/api/v1/embers/{name}", status_code=204)
+async def delete_ember(
+    name: str,
+    caller: str = Depends(resolve_sender),
+):
+    """Delete an Ember entry (admin only)."""
+    if caller not in ADMIN_NAMES:
+        raise HTTPException(status_code=403, detail="Admin only")
+    deleted = await db.delete_ember(name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Ember not found")
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Task Tree endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/trees", response_model=list[TreeSummary])
+async def list_trees(
+    limit: int = 50,
+    offset: int = 0,
+    _caller: str = Depends(resolve_sender),
+):
+    return await db.get_trees(limit=limit, offset=offset)
+
+
+@app.get("/api/v1/trees/{root_id}", response_model=TreeNode)
+async def get_tree(
+    root_id: int,
+    _caller: str = Depends(resolve_sender),
+):
+    tree = await db.get_tree(root_id)
+    if tree is None:
+        raise HTTPException(status_code=404, detail="Tree not found")
+    return tree
+
+
+# ---------------------------------------------------------------------------
+# Morsel endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/v1/morsels", response_model=MorselSummary, status_code=201)
+async def create_morsel(
+    req: CreateMorselRequest,
+    caller: str = Depends(resolve_sender),
+):
+    links = [{"object_type": l.object_type, "object_id": l.object_id} for l in req.links] if req.links else None
+    morsel_id = await db.insert_morsel(
+        creator=caller,
+        body=req.body,
+        tags=req.tags or None,
+        links=links,
+    )
+    morsel = await db.get_morsel(morsel_id)
+    return morsel
+
+
+@app.get("/api/v1/morsels", response_model=list[MorselSummary])
+async def list_morsels(
+    creator: str | None = None,
+    tag: str | None = None,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    _caller: str = Depends(resolve_sender),
+):
+    return await db.get_morsels(
+        creator=creator,
+        tag=tag,
+        object_type=object_type,
+        object_id=object_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/api/v1/morsels/{morsel_id}", response_model=MorselSummary)
+async def get_morsel(
+    morsel_id: int,
+    _caller: str = Depends(resolve_sender),
+):
+    morsel = await db.get_morsel(morsel_id)
+    if morsel is None:
+        raise HTTPException(status_code=404, detail="Morsel not found")
+    return morsel
 
 
 # ---------------------------------------------------------------------------

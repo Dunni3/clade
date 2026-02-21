@@ -84,7 +84,7 @@ class TestConductorTriggerOnTaskUpdate:
     @patch("hearth.app.CONDUCTOR_TICK_CMD", "echo tick")
     @patch("hearth.app.subprocess.Popen")
     async def test_thrum_linked_task_completed_triggers(self, mock_popen, client):
-        """Completing a thrum-linked task should fire the conductor tick."""
+        """Completing a thrum-linked task should fire the conductor tick with task_id."""
         _, task_id = await _create_thrum_and_task(client)
         mock_popen.reset_mock()  # clear call from thrum creation
 
@@ -95,7 +95,7 @@ class TestConductorTriggerOnTaskUpdate:
         )
         assert resp.status_code == 200
         mock_popen.assert_called_once_with(
-            "echo tick",
+            f"echo tick {task_id}",
             shell=True,
             stdout=-3,  # subprocess.DEVNULL
             stderr=-3,
@@ -121,8 +121,8 @@ class TestConductorTriggerOnTaskUpdate:
     @pytest.mark.asyncio
     @patch("hearth.app.CONDUCTOR_TICK_CMD", "echo tick")
     @patch("hearth.app.subprocess.Popen")
-    async def test_standalone_task_completed_no_trigger(self, mock_popen, client):
-        """Completing a task without thrum_id should NOT trigger."""
+    async def test_standalone_task_completed_triggers(self, mock_popen, client):
+        """Completing a standalone task (no thrum_id) should also trigger."""
         resp = await client.post(
             "/api/v1/tasks",
             json={"assignee": "oppy", "prompt": "Standalone task"},
@@ -136,7 +136,26 @@ class TestConductorTriggerOnTaskUpdate:
             headers=OPPY_HEADERS,
         )
         assert resp.status_code == 200
-        mock_popen.assert_not_called()
+        mock_popen.assert_called_once()
+        # Verify command includes task_id
+        call_args = mock_popen.call_args
+        assert str(task_id) in call_args[0][0]
+
+    @pytest.mark.asyncio
+    @patch("hearth.app.CONDUCTOR_TICK_CMD", "echo tick")
+    @patch("hearth.app.subprocess.Popen")
+    async def test_task_completed_command_includes_task_id(self, mock_popen, client):
+        """The Popen command should include the task_id as an argument."""
+        _, task_id = await _create_thrum_and_task(client)
+        mock_popen.reset_mock()
+
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "completed", "output": "Done"},
+            headers=OPPY_HEADERS,
+        )
+        call_args = mock_popen.call_args[0][0]
+        assert call_args == f"echo tick {task_id}"
 
     @pytest.mark.asyncio
     @patch("hearth.app.CONDUCTOR_TICK_CMD", "echo tick")

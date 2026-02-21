@@ -8,6 +8,9 @@ import TasksPage from './pages/TasksPage';
 import TaskDetailPage from './pages/TaskDetailPage';
 import ThrumListPage from './pages/ThrumListPage';
 import ThrumDetailPage from './pages/ThrumDetailPage';
+import TreeListPage from './pages/TreeListPage';
+import TreeDetailPage from './pages/TreeDetailPage';
+import MorselFeedPage from './pages/MorselFeedPage';
 import StatusPage from './pages/StatusPage';
 import SettingsPage from './pages/SettingsPage';
 import { useAuthStore } from './store/authStore';
@@ -77,6 +80,30 @@ export default function App() {
             element={
               <RequireAuth>
                 <ThrumDetailPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/trees"
+            element={
+              <RequireAuth>
+                <TreeListPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/trees/:rootId"
+            element={
+              <RequireAuth>
+                <TreeDetailPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/morsels"
+            element={
+              <RequireAuth>
+                <MorselFeedPage />
               </RequireAuth>
             }
           />

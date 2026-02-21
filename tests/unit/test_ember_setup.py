@@ -1,6 +1,6 @@
 """Tests for Ember setup detection helpers and service template."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from clade.cli.ember_setup import (
     SERVICE_NAME,
@@ -10,6 +10,7 @@ from clade.cli.ember_setup import (
     detect_remote_user,
     detect_tailscale_ip,
     generate_manual_instructions,
+    setup_ember,
 )
 from clade.cli.ssh_utils import SSHResult
 
@@ -135,3 +136,114 @@ class TestGenerateManualInstructions:
             api_key="key",
         )
         assert "9200" in result
+
+
+def _make_deploy_ok():
+    return SSHResult(success=True, stdout="EMBER_DEPLOY_OK", stderr="", message="ok")
+
+
+def _detection_patches():
+    """Context manager stack for all detection function patches."""
+    return (
+        patch("clade.cli.ember_setup.detect_remote_user", return_value="testuser"),
+        patch("clade.cli.ember_setup.detect_clade_ember_path", return_value="/usr/bin/clade-ember"),
+        patch("clade.cli.ember_setup.detect_clade_dir", return_value="/opt/clade"),
+        patch("clade.cli.ember_setup.detect_tailscale_ip", return_value="100.1.2.3"),
+        patch("clade.cli.ember_setup.deploy_systemd_service", return_value=_make_deploy_ok()),
+        patch("clade.cli.ember_setup.check_ember_health_remote", return_value=True),
+    )
+
+
+class TestSetupEmberRegistration:
+    def test_registration_called_after_health_check(self):
+        """After successful deployment and health check, register_ember_sync is called."""
+        patches = _detection_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            mock_client_instance = MagicMock()
+            mock_client_instance.register_ember_sync.return_value = True
+            mock_client_cls = MagicMock(return_value=mock_client_instance)
+
+            with patch("clade.communication.mailbox_client.MailboxClient", mock_client_cls):
+                ember_host, port = setup_ember(
+                    ssh_host="masuda",
+                    name="oppy",
+                    api_key="oppy-key",
+                    port=8100,
+                    working_dir="/home/testuser/projects",
+                    server_url="https://hearth.example.com",
+                    hearth_api_key="doot-key",
+                )
+
+            assert ember_host == "100.1.2.3"
+            assert port == 8100
+            mock_client_cls.assert_called_once_with(
+                "https://hearth.example.com", "doot-key", verify_ssl=True
+            )
+            mock_client_instance.register_ember_sync.assert_called_once_with(
+                "oppy", "http://100.1.2.3:8100"
+            )
+
+    def test_registration_failure_is_graceful(self):
+        """If register_ember_sync raises, setup_ember should still return successfully."""
+        patches = _detection_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            mock_client_instance = MagicMock()
+            mock_client_instance.register_ember_sync.side_effect = Exception("Network error")
+            mock_client_cls = MagicMock(return_value=mock_client_instance)
+
+            with patch("clade.communication.mailbox_client.MailboxClient", mock_client_cls):
+                ember_host, port = setup_ember(
+                    ssh_host="masuda",
+                    name="oppy",
+                    api_key="oppy-key",
+                    port=8100,
+                    working_dir="/home/testuser/projects",
+                    server_url="https://hearth.example.com",
+                    hearth_api_key="doot-key",
+                )
+
+            # Should still succeed despite registration failure
+            assert ember_host == "100.1.2.3"
+            assert port == 8100
+
+    def test_no_server_url_skips_registration(self):
+        """If server_url is None, no registration attempt should be made."""
+        patches = _detection_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            mock_client_cls = MagicMock()
+
+            with patch("clade.communication.mailbox_client.MailboxClient", mock_client_cls):
+                ember_host, port = setup_ember(
+                    ssh_host="masuda",
+                    name="oppy",
+                    api_key="oppy-key",
+                    port=8100,
+                    working_dir="/home/testuser/projects",
+                    server_url=None,
+                    hearth_api_key="doot-key",
+                )
+
+            assert ember_host == "100.1.2.3"
+            assert port == 8100
+            mock_client_cls.assert_not_called()
+
+    def test_no_hearth_key_skips_registration(self):
+        """If hearth_api_key is None, no registration attempt should be made."""
+        patches = _detection_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            mock_client_cls = MagicMock()
+
+            with patch("clade.communication.mailbox_client.MailboxClient", mock_client_cls):
+                ember_host, port = setup_ember(
+                    ssh_host="masuda",
+                    name="oppy",
+                    api_key="oppy-key",
+                    port=8100,
+                    working_dir="/home/testuser/projects",
+                    server_url="https://hearth.example.com",
+                    hearth_api_key=None,
+                )
+
+            assert ember_host == "100.1.2.3"
+            assert port == 8100
+            mock_client_cls.assert_not_called()
