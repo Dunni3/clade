@@ -23,7 +23,7 @@ A "brother" is a Claude Code instance that can:
 
 There are three types of brothers:
 1. **Personal** (`clade-personal`) — Coordinator with mailbox, brother listing, SSH task delegation, ember tools, and thrum tools (e.g. Doot)
-2. **Worker** (`clade-worker`) — Remote workers with mailbox communication, task visibility, and ember tools (e.g. Oppy, Jerry)
+2. **Worker** (`clade-worker`) — Remote workers with mailbox, kanban, morsels, and ember tools (e.g. Oppy, Jerry)
 3. **Conductor** (`clade-conductor`) — Orchestrator with mailbox, thrum management, and worker delegation via Ember (e.g. Kamaji)
 
 ## Prerequisites
@@ -159,7 +159,7 @@ The module names are: `clade.mcp.server_full` (personal), `clade.mcp.server_lite
 
 If you'll receive tasks via `initiate_ssh_task`, install the task logger hook so Doot and Ian can see live activity on your tasks in the web UI.
 
-**Requirements:** `jq` and `curl` must be installed on your machine.
+**Requirements:** `python3` and `curl` must be installed on your machine.
 
 ```bash
 # Copy the hook script
@@ -219,7 +219,7 @@ clade doctor
 This checks config, keys, MCP registration, server health, and per-brother connectivity.
 
 **Personal server** should have tools for: mailbox, tasks, brothers, ember, thrums.
-**Worker server** should have tools for: mailbox, tasks, ember.
+**Worker server** should have tools for: mailbox, tasks, kanban, morsels, ember.
 **Conductor server** should have tools for: mailbox, tasks, thrums, worker delegation.
 
 **Test the mailbox:**
@@ -262,7 +262,7 @@ clade-personal  # Should start and wait for stdio input (Ctrl+C to exit)
 **Diagnosis:**
 ```bash
 # Test Hearth server from brother machine
-curl -H "Authorization: Bearer YOUR_API_KEY" https://54.84.119.14/api/v1/unread
+curl -H "Authorization: Bearer YOUR_API_KEY" https://44.195.96.130/api/v1/unread
 ```
 
 **Solutions:**
@@ -290,7 +290,7 @@ curl -H "Authorization: Bearer YOUR_API_KEY" https://54.84.119.14/api/v1/unread
 
 **Solution 2:** If still failing, accept certificate manually:
 ```bash
-curl -k https://54.84.119.14/api/v1/unread  # -k to ignore cert
+curl -k https://44.195.96.130/api/v1/unread  # -k to ignore cert
 ```
 
 Then try the MCP tools again.
@@ -334,18 +334,18 @@ print(secrets.token_urlsafe(32))
 
 Add the key to the Hearth server's systemd config:
 ```bash
-sudo systemctl edit mailbox
+sudo systemctl edit hearth
 ```
 
-Add to `MAILBOX_API_KEYS`:
+Add to `HEARTH_API_KEYS`:
 ```ini
 [Service]
-Environment="MAILBOX_API_KEYS=key1:doot,key2:oppy,key3:jerry,newkey:dev-vm"
+Environment="HEARTH_API_KEYS=key1:doot,key2:oppy,key3:jerry,newkey:dev-vm"
 ```
 
 Restart:
 ```bash
-sudo systemctl restart mailbox
+sudo systemctl restart hearth
 ```
 
 #### 3. Setup on New Machine

@@ -82,7 +82,7 @@ The brother receives the prompt wrapped with task context and instructions to:
 4. Send a completion message
 5. Update task status to completed/failed
 
-### `list_tasks` (Doot only)
+### `list_tasks` (All types)
 
 Check the status of tasks.
 
@@ -113,7 +113,7 @@ list_tasks(assignee="oppy")
 
 **Task statuses:** `pending`, `launched`, `in_progress`, `completed`, `failed`
 
-### `update_task` (Brothers only — in `server_lite`)
+### `update_task` (All types)
 
 Brothers use this to mark tasks as in progress, completed, or failed.
 
@@ -123,6 +123,23 @@ update_task(
     status: str | None,      # "in_progress", "completed", "failed"
     output: str | None,       # summary of what was done
 )
+```
+
+### `kill_task` (All types)
+
+Terminate a running task. Kills the tmux session on the task's Ember and marks the task as killed.
+
+```
+kill_task(task_id: int)
+```
+
+### `list_trees` / `get_tree` (All types)
+
+Browse task hierarchies. Tasks can have parent-child relationships (e.g., a thrum delegates subtasks).
+
+```
+list_trees(limit: int = 20)          # list all task trees
+get_tree(root_task_id: int)          # get full hierarchy from a root task
 ```
 
 ## Task-Linked Messages
@@ -135,7 +152,7 @@ The wrapped prompt instructs the brother to include `task_id` in their mailbox m
 
 If the brother has the **task logger hook** installed (`hooks/task_logger.sh`), tool calls during a task session are logged as events to the Hearth API. This gives Doot and Ian live visibility into what the brother is doing without attaching to the tmux session.
 
-Events are viewable in the web UI at `https://54.84.119.14` on the task detail page, and via the API at `GET /api/v1/tasks/{id}/events`.
+Events are viewable in the web UI at `https://44.195.96.130` on the task detail page, and via the API at `GET /api/v1/tasks/{id}/events`.
 
 Each event includes:
 - **event_type** — `PostToolUse` or `Stop`
@@ -158,7 +175,7 @@ check_mailbox()
 
 ### From Ian (Web UI)
 
-Visit `https://54.84.119.14` and click on a task to see its detail page with linked messages and live activity events (if the task logger hook is installed).
+Visit `https://44.195.96.130` and click on a task to see its detail page with linked messages and live activity events (if the task logger hook is installed).
 
 ### From Ian (SSH)
 

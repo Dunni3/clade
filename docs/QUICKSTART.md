@@ -16,8 +16,9 @@ pip install -e .
 
 This installs:
 - `clade` — CLI for setup and management
-- `clade-personal` — Full MCP server (mailbox + task delegation + brother listing)
-- `clade-worker` — Lite MCP server (mailbox + task visibility only)
+- `clade-personal` — Full MCP server (mailbox + task delegation + brother listing + thrums)
+- `clade-worker` — Worker MCP server (mailbox + kanban + morsels + ember tools)
+- `clade-conductor` — Conductor MCP server (mailbox + thrums + worker delegation)
 - `clade-ember` — Ember server (HTTP-based task execution on worker machines)
 
 ## Initialize Your Clade
@@ -177,24 +178,22 @@ If you prefer to configure manually instead of using the CLI, edit `~/.claude.js
 
 After restarting Claude Code, verify your MCP tools are available:
 
-**Personal (full server) — 12 tools:**
-- `list_brothers` — List available brothers
-- `send_message` — Send message to brothers
-- `check_mailbox` — Check for messages
-- `read_message` — Read a message (marks as read)
-- `browse_feed` — Browse all messages
-- `unread_count` — Get unread count
-- `initiate_ssh_task` — Delegate a task to a brother via SSH
-- `list_tasks` — Browse task list
-- `get_task` — Get task details
-- `update_task` — Update task status
-- `check_ember_health` — Check Ember server health
-- `list_ember_tasks` — List active Ember tasks
+**Personal (full server):**
+- Mailbox: `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count`
+- Tasks: `list_tasks`, `get_task`, `update_task`, `kill_task`, `list_trees`, `get_tree`
+- Morsels: `deposit_morsel`, `list_morsels`
+- Kanban: `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card`
+- Ember: `check_ember_health`, `list_ember_tasks`
+- Brothers: `list_brothers`
+- SSH: `initiate_ssh_task`
+- Thrums: `create_thrum`, `list_thrums`, `get_thrum`, `update_thrum`
 
-**Worker (lite server) — 10 tools:**
-- `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count`
-- `list_tasks`, `get_task`, `update_task`
-- `check_ember_health`, `list_ember_tasks`
+**Worker (lite server):**
+- Mailbox: `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count`
+- Tasks: `list_tasks`, `get_task`, `update_task`, `kill_task`, `list_trees`, `get_tree`
+- Morsels: `deposit_morsel`, `list_morsels`
+- Kanban: `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card`
+- Ember: `check_ember_health`, `list_ember_tasks`
 
 ## Basic Usage
 
