@@ -22,9 +22,9 @@ A "brother" is a Claude Code instance that can:
 - Browse the shared message feed
 
 There are three types of brothers:
-1. **Personal** (`clade-personal`) — Coordinator with mailbox, brother listing, SSH task delegation, ember tools, and thrum tools (e.g. Doot)
+1. **Personal** (`clade-personal`) — Coordinator with mailbox, brother listing, SSH task delegation, kanban, and ember tools (e.g. Doot)
 2. **Worker** (`clade-worker`) — Remote workers with mailbox, kanban, morsels, and ember tools (e.g. Oppy, Jerry)
-3. **Conductor** (`clade-conductor`) — Orchestrator with mailbox, thrum management, and worker delegation via Ember (e.g. Kamaji)
+3. **Conductor** (`clade-conductor`) — Orchestrator with mailbox and worker delegation via Ember (e.g. Kamaji)
 
 ## Prerequisites
 
@@ -218,9 +218,9 @@ clade doctor
 
 This checks config, keys, MCP registration, server health, and per-brother connectivity.
 
-**Personal server** should have tools for: mailbox, tasks, brothers, ember, thrums.
+**Personal server** should have tools for: mailbox, tasks, brothers, kanban, ember.
 **Worker server** should have tools for: mailbox, tasks, kanban, morsels, ember.
-**Conductor server** should have tools for: mailbox, tasks, thrums, worker delegation.
+**Conductor server** should have tools for: mailbox, tasks, worker delegation.
 
 **Test the mailbox:**
 

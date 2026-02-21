@@ -210,6 +210,164 @@ class TestDatabaseTasks:
         assert updated["completed_at"] == "2026-02-09T10:30:00Z"
 
 
+class TestDatabaseTaskTrees:
+    @pytest.mark.asyncio
+    async def test_insert_with_parent(self):
+        parent_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Parent task", subject="Parent"
+        )
+        child_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Child task", subject="Child",
+            parent_task_id=parent_id,
+        )
+
+        child = await mailbox_db.get_task(child_id)
+        assert child["parent_task_id"] == parent_id
+        assert child["root_task_id"] == parent_id
+
+    @pytest.mark.asyncio
+    async def test_three_level_chain(self):
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root", subject="Root"
+        )
+        mid_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Mid", subject="Mid",
+            parent_task_id=root_id,
+        )
+        leaf_id = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="Leaf", subject="Leaf",
+            parent_task_id=mid_id,
+        )
+
+        leaf = await mailbox_db.get_task(leaf_id)
+        assert leaf["parent_task_id"] == mid_id
+        assert leaf["root_task_id"] == root_id  # inherits root, not parent
+
+    @pytest.mark.asyncio
+    async def test_invalid_parent_raises(self):
+        with pytest.raises(ValueError, match="does not exist"):
+            await mailbox_db.insert_task(
+                creator="doot", assignee="oppy", prompt="Orphan",
+                parent_task_id=999,
+            )
+
+    @pytest.mark.asyncio
+    async def test_get_task_includes_children(self):
+        parent_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Parent", subject="Parent"
+        )
+        c1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Child 1",
+            parent_task_id=parent_id,
+        )
+        c2 = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="Child 2",
+            parent_task_id=parent_id,
+        )
+
+        parent = await mailbox_db.get_task(parent_id)
+        assert len(parent["children"]) == 2
+        child_ids = {c["id"] for c in parent["children"]}
+        assert child_ids == {c1, c2}
+
+    @pytest.mark.asyncio
+    async def test_get_tree(self):
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root", subject="Root"
+        )
+        c1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C1", parent_task_id=root_id,
+        )
+        c2 = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="C2", parent_task_id=root_id,
+        )
+        c1_1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C1.1", parent_task_id=c1,
+        )
+
+        tree = await mailbox_db.get_tree(root_id)
+        assert tree["id"] == root_id
+        assert len(tree["children"]) == 2
+        # Find c1 in children
+        c1_node = next(c for c in tree["children"] if c["id"] == c1)
+        assert len(c1_node["children"]) == 1
+        assert c1_node["children"][0]["id"] == c1_1
+
+    @pytest.mark.asyncio
+    async def test_get_tree_not_found(self):
+        tree = await mailbox_db.get_tree(999)
+        assert tree is None
+
+    @pytest.mark.asyncio
+    async def test_get_trees_with_stats(self):
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root", subject="Root"
+        )
+        c1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C1", parent_task_id=root_id,
+        )
+        c2 = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="C2", parent_task_id=root_id,
+        )
+        await mailbox_db.update_task(c1, status="completed")
+        await mailbox_db.update_task(c2, status="failed")
+
+        trees = await mailbox_db.get_trees()
+        assert len(trees) == 1
+        t = trees[0]
+        assert t["root_task_id"] == root_id
+        assert t["total_tasks"] == 3  # root + 2 children
+        assert t["completed"] == 1
+        assert t["failed"] == 1
+        assert t["pending"] == 1  # root is still pending
+
+    @pytest.mark.asyncio
+    async def test_standalone_task_is_own_root(self):
+        """Tasks without parent are their own root (single-node tree)."""
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Standalone"
+        )
+        task = await mailbox_db.get_task(task_id)
+        assert task["parent_task_id"] is None
+        assert task["root_task_id"] == task_id
+        assert task["children"] == []
+
+
+class TestDatabaseGetApiKeyForName:
+    @pytest.mark.asyncio
+    async def test_found(self):
+        await mailbox_db.insert_api_key("testbot", "secret-key-123")
+        key = await mailbox_db.get_api_key_for_name("testbot")
+        assert key == "secret-key-123"
+
+    @pytest.mark.asyncio
+    async def test_not_found(self):
+        key = await mailbox_db.get_api_key_for_name("nobody")
+        assert key is None
+
+
+class TestDatabaseTreesKilledCount:
+    @pytest.mark.asyncio
+    async def test_killed_count_in_tree_stats(self):
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root", subject="Root"
+        )
+        c1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C1", parent_task_id=root_id,
+        )
+        c2 = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="C2", parent_task_id=root_id,
+        )
+        await mailbox_db.update_task(c1, status="killed")
+        await mailbox_db.update_task(c2, status="completed")
+
+        trees = await mailbox_db.get_trees()
+        assert len(trees) == 1
+        t = trees[0]
+        assert t["killed"] == 1
+        assert t["completed"] == 1
+
+
 class TestDatabaseTaskLinkedMessages:
     @pytest.mark.asyncio
     async def test_message_with_task_id(self):
@@ -483,6 +641,274 @@ class TestAPITasks:
 
 
 # ---------------------------------------------------------------------------
+# Tasks — API tree endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestAPITaskTrees:
+    @pytest.mark.asyncio
+    async def test_create_with_parent(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Parent", "subject": "Parent"},
+            headers=DOOT_HEADERS,
+        )
+        parent_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Child",
+                "parent_task_id": parent_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        child_id = resp.json()["id"]
+
+        resp = await client.get(f"/api/v1/tasks/{child_id}", headers=DOOT_HEADERS)
+        data = resp.json()
+        assert data["parent_task_id"] == parent_id
+        assert data["root_task_id"] == parent_id
+
+    @pytest.mark.asyncio
+    async def test_create_invalid_parent_422(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Orphan",
+                "parent_task_id": 9999,
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_task_detail_includes_children(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Parent", "subject": "Parent"},
+            headers=DOOT_HEADERS,
+        )
+        parent_id = resp.json()["id"]
+
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Child 1", "parent_task_id": parent_id},
+            headers=DOOT_HEADERS,
+        )
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "jerry", "prompt": "Child 2", "parent_task_id": parent_id},
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get(f"/api/v1/tasks/{parent_id}", headers=DOOT_HEADERS)
+        data = resp.json()
+        assert len(data["children"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_tree_list(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Root", "subject": "Root task"},
+            headers=DOOT_HEADERS,
+        )
+        root_id = resp.json()["id"]
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Child", "parent_task_id": root_id},
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get("/api/v1/trees", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        trees = resp.json()
+        assert len(trees) == 1
+        assert trees[0]["root_task_id"] == root_id
+        assert trees[0]["total_tasks"] == 2
+
+    @pytest.mark.asyncio
+    async def test_tree_detail(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Root", "subject": "Root"},
+            headers=DOOT_HEADERS,
+        )
+        root_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "C1", "parent_task_id": root_id},
+            headers=DOOT_HEADERS,
+        )
+        c1_id = resp.json()["id"]
+
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "jerry", "prompt": "C1.1", "parent_task_id": c1_id},
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get(f"/api/v1/trees/{root_id}", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        tree = resp.json()
+        assert tree["id"] == root_id
+        assert len(tree["children"]) == 1
+        assert tree["children"][0]["id"] == c1_id
+        assert len(tree["children"][0]["children"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_tree_not_found(self, client):
+        resp = await client.get("/api/v1/trees/999", headers=DOOT_HEADERS)
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Kill task — API endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestAPIKillTask:
+    @pytest.mark.asyncio
+    async def test_kill_in_progress_task(self, client):
+        """Kill an in_progress task — should return 200 with status=killed."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff", "subject": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        # Move to in_progress
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/kill",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "killed"
+        assert data["completed_at"] is not None
+        assert "Killed by doot" in data["output"]
+
+    @pytest.mark.asyncio
+    async def test_kill_pending_task(self, client):
+        """Kill a pending task — should work since it's an active status."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/kill",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "killed"
+
+    @pytest.mark.asyncio
+    async def test_kill_completed_task_409(self, client):
+        """Cannot kill an already-completed task."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "completed"},
+            headers=OPPY_HEADERS,
+        )
+
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/kill",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_kill_by_non_creator_403(self, client):
+        """Only creator or admins can kill a task."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/kill",
+            headers=JERRY_HEADERS,
+        )
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_kill_not_found(self, client):
+        """Killing a non-existent task returns 404."""
+        resp = await client.post(
+            "/api/v1/tasks/9999/kill",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_kill_already_killed_409(self, client):
+        """Cannot kill a task that's already killed."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        # Kill it once
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/kill",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+
+        # Try to kill again — should be 409
+        resp = await client.post(
+            f"/api/v1/tasks/{task_id}/kill",
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_killed_sets_completed_at_via_patch(self, client):
+        """PATCH update_task with status=killed also sets completed_at."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "killed"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "killed"
+        assert data["completed_at"] is not None
+
+
+# ---------------------------------------------------------------------------
 # MailboxClient — task methods
 # ---------------------------------------------------------------------------
 
@@ -567,6 +993,26 @@ class TestMailboxClientTasks:
             result = await self.client.update_task(1, status="completed", output="All done")
             assert result["status"] == "completed"
             instance.patch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_kill_task(self):
+        mock_resp = self._make_mock_resp({
+            "id": 1, "creator": "doot", "assignee": "oppy", "subject": "Test",
+            "prompt": "Do stuff", "status": "killed",
+            "created_at": "2026-02-09T10:00:00Z",
+            "started_at": "2026-02-09T10:01:00Z",
+            "completed_at": "2026-02-09T10:30:00Z",
+            "session_name": None, "host": None, "working_dir": None,
+            "output": "Killed by doot", "messages": [],
+        })
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(post_resp=mock_resp)
+            MockClient.return_value = instance
+            result = await self.client.kill_task(1)
+            assert result["status"] == "killed"
+            instance.post.assert_called_once()
+            call_args = instance.post.call_args
+            assert "/tasks/1/kill" in str(call_args)
 
     @pytest.mark.asyncio
     async def test_send_message_with_task_id(self):
@@ -673,6 +1119,33 @@ class TestInitiateSSHTaskTool:
         assert call_kwargs["task_id"] == 10
         assert call_kwargs["mailbox_url"] == "https://54.84.119.14"
         assert call_kwargs["mailbox_api_key"] == "secret-key"
+
+
+class TestKillTaskTool:
+    @pytest.mark.asyncio
+    async def test_not_configured(self):
+        tools = _make_mailbox_tools(None)
+        result = await tools["kill_task"](1)
+        assert "not configured" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_success(self):
+        mock_client = AsyncMock()
+        mock_client.kill_task.return_value = {
+            "id": 5, "status": "killed", "assignee": "oppy",
+        }
+        tools = _make_mailbox_tools(mock_client)
+        result = await tools["kill_task"](5)
+        assert "Task #5 killed" in result
+        assert "oppy" in result
+
+    @pytest.mark.asyncio
+    async def test_error(self):
+        mock_client = AsyncMock()
+        mock_client.kill_task.side_effect = Exception("Connection refused")
+        tools = _make_mailbox_tools(mock_client)
+        result = await tools["kill_task"](1)
+        assert "Error" in result
 
 
 class TestListTasksTool:

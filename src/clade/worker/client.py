@@ -30,7 +30,7 @@ class EmberClient:
         subject: str = "",
         task_id: int | None = None,
         working_dir: str | None = None,
-        max_turns: int = 50,
+        max_turns: int | None = None,
         hearth_url: str | None = None,
         hearth_api_key: str | None = None,
         hearth_name: str | None = None,
@@ -40,8 +40,9 @@ class EmberClient:
         payload: dict = {
             "prompt": prompt,
             "subject": subject,
-            "max_turns": max_turns,
         }
+        if max_turns is not None:
+            payload["max_turns"] = max_turns
         if task_id is not None:
             payload["task_id"] = task_id
         if working_dir is not None:
@@ -61,6 +62,17 @@ class EmberClient:
                 json=payload,
                 headers=self.headers,
                 timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def kill_task(self, task_id: int) -> dict:
+        """Kill a running task on the Ember."""
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.post(
+                f"{self.base_url}/tasks/{task_id}/kill",
+                headers=self.headers,
+                timeout=15,
             )
             resp.raise_for_status()
             return resp.json()

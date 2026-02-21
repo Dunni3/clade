@@ -213,12 +213,31 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             ]
             if t.get("completed_at"):
                 lines.append(f"Completed: {format_timestamp(t['completed_at'])}")
+            if t.get("parent_task_id"):
+                lines.append(f"Parent task: #{t['parent_task_id']}")
+            if t.get("root_task_id"):
+                lines.append(f"Root task: #{t['root_task_id']}")
             if t.get("host"):
                 lines.append(f"Host: {t['host']}")
             if t.get("session_name"):
                 lines.append(f"Session: {t['session_name']}")
             if t.get("working_dir"):
                 lines.append(f"Working dir: {t['working_dir']}")
+            linked_cards = t.get("linked_cards", [])
+            if linked_cards:
+                lines.append(f"\nLinked cards ({len(linked_cards)}):")
+                for card in linked_cards:
+                    lines.append(
+                        f"  Card #{card['id']}: {card['title']} [{card['col']}]"
+                    )
+            children = t.get("children", [])
+            if children:
+                lines.append(f"\nChildren ({len(children)}):")
+                for c in children:
+                    lines.append(
+                        f"  #{c['id']} [{c['status']}] {c.get('subject') or '(no subject)'}"
+                        f" — {c['assignee']}"
+                    )
             if t.get("output"):
                 lines.append(f"\nOutput: {t['output']}")
             lines.append(f"\nPrompt:\n{t['prompt']}")
@@ -253,6 +272,173 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         except Exception as e:
             return f"Error updating task: {e}"
 
+    @mcp.tool()
+    async def kill_task(task_id: int) -> str:
+        """Kill a running task. Terminates the tmux session on the Ember and marks the task as killed.
+
+        Args:
+            task_id: The task ID to kill.
+        """
+        if mailbox is None:
+            return _NOT_CONFIGURED
+        try:
+            result = await mailbox.kill_task(task_id)
+            return (
+                f"Task #{result['id']} killed.\n"
+                f"  Status: {result['status']}\n"
+                f"  Assignee: {result['assignee']}"
+            )
+        except Exception as e:
+            return f"Error killing task: {e}"
+
+    @mcp.tool()
+    async def deposit_morsel(
+        body: str,
+        tags: list[str] | None = None,
+        task_id: int | None = None,
+        brother: str | None = None,
+        card_id: int | None = None,
+    ) -> str:
+        """Deposit a morsel — a short note, observation, or log entry.
+
+        Morsels are lightweight records that can be tagged and linked to tasks
+        or brothers for later retrieval.
+
+        Args:
+            body: The morsel content.
+            tags: Optional list of tags (e.g. ["conductor-tick", "debug"]).
+            task_id: Optional task ID to link this morsel to.
+            brother: Optional brother name to link this morsel to.
+            card_id: Optional kanban card ID to link this morsel to.
+        """
+        if mailbox is None:
+            return _NOT_CONFIGURED
+        try:
+            links = []
+            if task_id is not None:
+                links.append({"object_type": "task", "object_id": str(task_id)})
+            if brother is not None:
+                links.append({"object_type": "brother", "object_id": brother})
+            if card_id is not None:
+                links.append({"object_type": "card", "object_id": str(card_id)})
+            result = await mailbox.create_morsel(
+                body=body,
+                tags=tags or None,
+                links=links or None,
+            )
+            morsel_id = result.get("id", "?")
+            return f"Morsel #{morsel_id} deposited."
+        except Exception as e:
+            return f"Error depositing morsel: {e}"
+
+    @mcp.tool()
+    async def list_morsels(
+        creator: str | None = None,
+        tag: str | None = None,
+        task_id: int | None = None,
+        card_id: int | None = None,
+        limit: int = 20,
+    ) -> str:
+        """List morsels, optionally filtered by creator, tag, or linked object.
+
+        Args:
+            creator: Filter by creator name.
+            tag: Filter by tag.
+            task_id: Filter by linked task ID.
+            card_id: Filter by linked kanban card ID.
+            limit: Maximum number of morsels to return.
+        """
+        if mailbox is None:
+            return _NOT_CONFIGURED
+        try:
+            object_type = None
+            object_id = None
+            if card_id is not None:
+                object_type = "card"
+                object_id = card_id
+            elif task_id is not None:
+                object_type = "task"
+                object_id = task_id
+            morsels = await mailbox.get_morsels(
+                creator=creator,
+                tag=tag,
+                object_type=object_type,
+                object_id=object_id,
+                limit=limit,
+            )
+            if not morsels:
+                return "No morsels found."
+            lines = []
+            for m in morsels:
+                tags_str = ", ".join(m.get("tags", []))
+                header = f"#{m['id']} by {m['creator']}"
+                if tags_str:
+                    header += f" [{tags_str}]"
+                header += f" ({format_timestamp(m['created_at'])})"
+                body_preview = m["body"][:120] + ("..." if len(m["body"]) > 120 else "")
+                lines.append(f"{header}\n  {body_preview}")
+            return "\n\n".join(lines)
+        except Exception as e:
+            return f"Error listing morsels: {e}"
+
+    @mcp.tool()
+    async def list_trees(limit: int = 20) -> str:
+        """List task trees (hierarchies of parent-child tasks).
+
+        Args:
+            limit: Maximum number of trees to return.
+        """
+        if mailbox is None:
+            return _NOT_CONFIGURED
+        try:
+            trees = await mailbox.get_trees(limit=limit)
+            if not trees:
+                return "No task trees found."
+            lines = []
+            for tree in trees:
+                root = tree.get("root", tree)
+                status_counts = tree.get("status_counts", {})
+                counts_str = ", ".join(f"{k}: {v}" for k, v in status_counts.items())
+                total = tree.get("total_tasks", "?")
+                lines.append(
+                    f"Tree #{root['id']}: {root.get('subject') or '(no subject)'}\n"
+                    f"  Root assignee: {root['assignee']} | Tasks: {total}\n"
+                    f"  Statuses: {counts_str or 'n/a'}"
+                )
+            return "\n\n".join(lines)
+        except Exception as e:
+            return f"Error listing trees: {e}"
+
+    @mcp.tool()
+    async def get_tree(root_task_id: int) -> str:
+        """Get a task tree showing the full hierarchy from a root task.
+
+        Args:
+            root_task_id: The root task ID.
+        """
+        if mailbox is None:
+            return _NOT_CONFIGURED
+        try:
+            tree = await mailbox.get_tree(root_task_id)
+            lines = [f"Task tree rooted at #{root_task_id}:\n"]
+
+            def _render_node(node: dict, depth: int = 0) -> None:
+                indent = "  " * depth
+                prefix = "└─ " if depth > 0 else ""
+                subject = node.get("subject") or "(no subject)"
+                lines.append(
+                    f"{indent}{prefix}#{node['id']} [{node['status']}] {subject}"
+                    f" — {node['assignee']}"
+                )
+                for child in node.get("children", []):
+                    _render_node(child, depth + 1)
+
+            root = tree.get("root", tree)
+            _render_node(root)
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Error fetching tree: {e}"
+
     return {
         "send_message": send_message,
         "check_mailbox": check_mailbox,
@@ -262,4 +448,9 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         "list_tasks": list_tasks,
         "get_task": get_task,
         "update_task": update_task,
+        "kill_task": kill_task,
+        "deposit_morsel": deposit_morsel,
+        "list_morsels": list_morsels,
+        "list_trees": list_trees,
+        "get_tree": get_tree,
     }

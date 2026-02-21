@@ -38,36 +38,88 @@ WantedBy=multi-user.target
 """
 
 
-def detect_remote_user(ssh_host: str) -> str | None:
+def detect_remote_user(ssh_host: str, ssh_key: str | None = None) -> str | None:
     """Detect the remote username via whoami."""
-    result = run_remote(ssh_host, "whoami", timeout=10)
+    result = run_remote(ssh_host, "whoami", ssh_key=ssh_key, timeout=10)
     if result.success:
         return result.stdout.strip()
     return None
 
 
-def detect_clade_ember_path(ssh_host: str) -> str | None:
-    """Detect the path to the clade-ember binary on the remote."""
-    result = run_remote(ssh_host, "which clade-ember 2>/dev/null", timeout=10)
+def detect_clade_ember_path(ssh_host: str, ssh_key: str | None = None) -> str | None:
+    """Detect the path to the clade-ember binary on the remote.
+
+    Tries `which` first, then searches common conda/mamba/venv locations
+    since non-interactive SSH sessions don't activate environments.
+    """
+    result = run_remote(ssh_host, "which clade-ember 2>/dev/null", ssh_key=ssh_key, timeout=10)
+    if result.success and result.stdout.strip():
+        return result.stdout.strip()
+
+    # Search common env locations
+    search_script = r"""
+for d in \
+    ~/mambaforge/envs/*/bin \
+    ~/miniforge3/envs/*/bin \
+    ~/miniconda3/envs/*/bin \
+    ~/anaconda3/envs/*/bin \
+    ~/.conda/envs/*/bin \
+    ~/.local/venv/bin \
+    ~/.local/bin; do
+    if [ -x "$d/clade-ember" ]; then
+        echo "$d/clade-ember"
+        exit 0
+    fi
+done
+exit 1
+"""
+    result = run_remote(ssh_host, search_script, ssh_key=ssh_key, timeout=10)
     if result.success and result.stdout.strip():
         return result.stdout.strip()
     return None
 
 
-def detect_clade_dir(ssh_host: str) -> str | None:
-    """Detect the clade package directory on the remote (for WorkingDirectory)."""
-    script = 'python3 -c "import clade, os; print(os.path.dirname(os.path.dirname(clade.__file__)))" 2>/dev/null'
-    result = run_remote(ssh_host, script, timeout=10)
-    if result.success and result.stdout.strip():
-        path = result.stdout.strip()
-        if path.startswith("/"):
-            return path
+def detect_clade_dir(ssh_host: str, ssh_key: str | None = None) -> str | None:
+    """Detect the clade package directory on the remote (for WorkingDirectory).
+
+    Tries the system python first, then searches conda/mamba/venv pythons
+    since non-interactive SSH won't have the environment activated.
+    """
+    import_cmd = 'import clade, os; print(os.path.dirname(os.path.dirname(clade.__file__)))'
+
+    # Try system python first
+    result = run_remote(ssh_host, f'python3 -c "{import_cmd}" 2>/dev/null', ssh_key=ssh_key, timeout=10)
+    if result.success and result.stdout.strip().startswith("/"):
+        return result.stdout.strip()
+
+    # Search conda/mamba/venv pythons
+    search_script = f"""
+for py in \\
+    ~/mambaforge/envs/*/bin/python \\
+    ~/miniforge3/envs/*/bin/python \\
+    ~/miniconda3/envs/*/bin/python \\
+    ~/anaconda3/envs/*/bin/python \\
+    ~/.conda/envs/*/bin/python \\
+    ~/.local/venv/bin/python; do
+    if [ -x "$py" ]; then
+        result=$("$py" -c "{import_cmd}" 2>/dev/null)
+        if [ $? -eq 0 ] && [ -n "$result" ]; then
+            echo "$result"
+            exit 0
+        fi
+    fi
+done
+exit 1
+"""
+    result = run_remote(ssh_host, search_script, ssh_key=ssh_key, timeout=15)
+    if result.success and result.stdout.strip().startswith("/"):
+        return result.stdout.strip()
     return None
 
 
-def detect_tailscale_ip(ssh_host: str) -> str | None:
+def detect_tailscale_ip(ssh_host: str, ssh_key: str | None = None) -> str | None:
     """Detect the Tailscale IPv4 address on the remote, if available."""
-    result = run_remote(ssh_host, "tailscale ip -4 2>/dev/null", timeout=10)
+    result = run_remote(ssh_host, "tailscale ip -4 2>/dev/null", ssh_key=ssh_key, timeout=10)
     if result.success and result.stdout.strip():
         ip = result.stdout.strip()
         if ip.startswith("100."):
@@ -177,7 +229,9 @@ def setup_ember(
     port: int,
     working_dir: str | None,
     server_url: str | None,
+    ssh_key: str | None = None,
     yes: bool = False,
+    hearth_api_key: str | None = None,
 ) -> tuple[str | None, int]:
     """Set up an Ember server on a remote brother.
 
@@ -188,6 +242,7 @@ def setup_ember(
         port: Ember port.
         working_dir: Working directory for tasks (from config or flag).
         server_url: Hearth server URL.
+        ssh_key: Optional path to SSH private key.
         yes: Auto-accept prompts.
 
     Returns:
@@ -197,7 +252,7 @@ def setup_ember(
 
     # Detect remote user
     click.echo("  Detecting remote user...")
-    remote_user = detect_remote_user(ssh_host)
+    remote_user = detect_remote_user(ssh_host, ssh_key=ssh_key)
     if not remote_user:
         click.echo(click.style("  Could not detect remote user", fg="red"))
         return None, port
@@ -205,7 +260,7 @@ def setup_ember(
 
     # Detect clade-ember path
     click.echo("  Detecting clade-ember binary...")
-    ember_path = detect_clade_ember_path(ssh_host)
+    ember_path = detect_clade_ember_path(ssh_host, ssh_key=ssh_key)
     if not ember_path:
         click.echo(click.style("  clade-ember not found on remote", fg="red"))
         click.echo("  Make sure the clade package is installed (pip install -e .)")
@@ -214,7 +269,7 @@ def setup_ember(
 
     # Detect clade directory (for WorkingDirectory)
     click.echo("  Detecting clade package directory...")
-    clade_dir = detect_clade_dir(ssh_host)
+    clade_dir = detect_clade_dir(ssh_host, ssh_key=ssh_key)
     if not clade_dir:
         clade_dir = f"/home/{remote_user}"
         click.echo(click.style(f"  Could not detect, using {clade_dir}", fg="yellow"))
@@ -223,7 +278,7 @@ def setup_ember(
 
     # Detect Tailscale IP
     click.echo("  Detecting Tailscale IP...")
-    tailscale_ip = detect_tailscale_ip(ssh_host)
+    tailscale_ip = detect_tailscale_ip(ssh_host, ssh_key=ssh_key)
     if tailscale_ip:
         click.echo(f"  Tailscale: {tailscale_ip}")
         ember_host = tailscale_ip
@@ -282,5 +337,20 @@ def setup_ember(
         click.echo(click.style("  Ember is healthy!", fg="green"))
     else:
         click.echo(click.style("  Health check failed (may need a moment to start)", fg="yellow"))
+
+    # Register ember with the Hearth (best-effort)
+    if server_url and hearth_api_key:
+        try:
+            from ..communication.mailbox_client import MailboxClient
+
+            verify_ssl = server_url.startswith("https")
+            client = MailboxClient(server_url, hearth_api_key, verify_ssl=verify_ssl)
+            ok = client.register_ember_sync(name, f"http://{ember_host}:{port}")
+            if ok:
+                click.echo(f"  Registered ember with Hearth")
+            else:
+                click.echo(click.style("  Warning: failed to register ember with Hearth", fg="yellow"))
+        except Exception as e:
+            click.echo(click.style(f"  Warning: could not register ember with Hearth: {e}", fg="yellow"))
 
     return ember_host, port

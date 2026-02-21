@@ -51,27 +51,18 @@ async def client():
 # ---------------------------------------------------------------------------
 
 
-async def _create_thrum_and_task(client, thrum_id=None):
-    """Create a thrum with a linked task, return (thrum_id, task_id)."""
-    if thrum_id is None:
-        resp = await client.post(
-            "/api/v1/thrums",
-            json={"title": "Test workflow"},
-            headers=KAMAJI_HEADERS,
-        )
-        thrum_id = resp.json()["id"]
-
+async def _create_task(client):
+    """Create a standalone task, return task_id."""
     resp = await client.post(
         "/api/v1/tasks",
         json={
             "assignee": "oppy",
             "prompt": "Do stuff",
-            "thrum_id": thrum_id,
         },
         headers=KAMAJI_HEADERS,
     )
     task_id = resp.json()["id"]
-    return thrum_id, task_id
+    return task_id
 
 
 # ---------------------------------------------------------------------------
@@ -83,10 +74,10 @@ class TestConductorTriggerOnTaskUpdate:
     @pytest.mark.asyncio
     @patch("hearth.app.CONDUCTOR_TICK_CMD", "echo tick")
     @patch("hearth.app.subprocess.Popen")
-    async def test_thrum_linked_task_completed_triggers(self, mock_popen, client):
-        """Completing a thrum-linked task should fire the conductor tick."""
-        _, task_id = await _create_thrum_and_task(client)
-        mock_popen.reset_mock()  # clear call from thrum creation
+    async def test_task_completed_triggers(self, mock_popen, client):
+        """Completing a task should fire the conductor tick with task_id."""
+        task_id = await _create_task(client)
+        mock_popen.reset_mock()
 
         resp = await client.patch(
             f"/api/v1/tasks/{task_id}",
@@ -95,7 +86,7 @@ class TestConductorTriggerOnTaskUpdate:
         )
         assert resp.status_code == 200
         mock_popen.assert_called_once_with(
-            "echo tick",
+            f"echo tick {task_id}",
             shell=True,
             stdout=-3,  # subprocess.DEVNULL
             stderr=-3,
@@ -105,10 +96,10 @@ class TestConductorTriggerOnTaskUpdate:
     @pytest.mark.asyncio
     @patch("hearth.app.CONDUCTOR_TICK_CMD", "echo tick")
     @patch("hearth.app.subprocess.Popen")
-    async def test_thrum_linked_task_failed_triggers(self, mock_popen, client):
-        """Failing a thrum-linked task should fire the conductor tick."""
-        _, task_id = await _create_thrum_and_task(client)
-        mock_popen.reset_mock()  # clear call from thrum creation
+    async def test_task_failed_triggers(self, mock_popen, client):
+        """Failing a task should fire the conductor tick."""
+        task_id = await _create_task(client)
+        mock_popen.reset_mock()
 
         resp = await client.patch(
             f"/api/v1/tasks/{task_id}",
@@ -121,8 +112,8 @@ class TestConductorTriggerOnTaskUpdate:
     @pytest.mark.asyncio
     @patch("hearth.app.CONDUCTOR_TICK_CMD", "echo tick")
     @patch("hearth.app.subprocess.Popen")
-    async def test_standalone_task_completed_no_trigger(self, mock_popen, client):
-        """Completing a task without thrum_id should NOT trigger."""
+    async def test_standalone_task_completed_triggers(self, mock_popen, client):
+        """Completing a standalone task should trigger."""
         resp = await client.post(
             "/api/v1/tasks",
             json={"assignee": "oppy", "prompt": "Standalone task"},
@@ -136,15 +127,34 @@ class TestConductorTriggerOnTaskUpdate:
             headers=OPPY_HEADERS,
         )
         assert resp.status_code == 200
-        mock_popen.assert_not_called()
+        mock_popen.assert_called_once()
+        # Verify command includes task_id
+        call_args = mock_popen.call_args
+        assert str(task_id) in call_args[0][0]
+
+    @pytest.mark.asyncio
+    @patch("hearth.app.CONDUCTOR_TICK_CMD", "echo tick")
+    @patch("hearth.app.subprocess.Popen")
+    async def test_task_completed_command_includes_task_id(self, mock_popen, client):
+        """The Popen command should include the task_id as an argument."""
+        task_id = await _create_task(client)
+        mock_popen.reset_mock()
+
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "completed", "output": "Done"},
+            headers=OPPY_HEADERS,
+        )
+        call_args = mock_popen.call_args[0][0]
+        assert call_args == f"echo tick {task_id}"
 
     @pytest.mark.asyncio
     @patch("hearth.app.CONDUCTOR_TICK_CMD", "echo tick")
     @patch("hearth.app.subprocess.Popen")
     async def test_task_in_progress_no_trigger(self, mock_popen, client):
-        """Setting a thrum-linked task to in_progress should NOT trigger."""
-        _, task_id = await _create_thrum_and_task(client)
-        mock_popen.reset_mock()  # clear call from thrum creation
+        """Setting a task to in_progress should NOT trigger."""
+        task_id = await _create_task(client)
+        mock_popen.reset_mock()
 
         resp = await client.patch(
             f"/api/v1/tasks/{task_id}",
@@ -158,9 +168,9 @@ class TestConductorTriggerOnTaskUpdate:
     @patch("hearth.app.CONDUCTOR_TICK_CMD", "echo tick")
     @patch("hearth.app.subprocess.Popen")
     async def test_task_launched_no_trigger(self, mock_popen, client):
-        """Setting a thrum-linked task to launched should NOT trigger."""
-        _, task_id = await _create_thrum_and_task(client)
-        mock_popen.reset_mock()  # clear call from thrum creation
+        """Setting a task to launched should NOT trigger."""
+        task_id = await _create_task(client)
+        mock_popen.reset_mock()
 
         resp = await client.patch(
             f"/api/v1/tasks/{task_id}",
@@ -169,26 +179,6 @@ class TestConductorTriggerOnTaskUpdate:
         )
         assert resp.status_code == 200
         mock_popen.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# Tests — thrum creation triggers
-# ---------------------------------------------------------------------------
-
-
-class TestConductorTriggerOnThrumCreate:
-    @pytest.mark.asyncio
-    @patch("hearth.app.CONDUCTOR_TICK_CMD", "echo tick")
-    @patch("hearth.app.subprocess.Popen")
-    async def test_new_thrum_triggers(self, mock_popen, client):
-        """Creating a new thrum should fire the conductor tick."""
-        resp = await client.post(
-            "/api/v1/thrums",
-            json={"title": "New workflow", "goal": "Test trigger"},
-            headers=KAMAJI_HEADERS,
-        )
-        assert resp.status_code == 200
-        mock_popen.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -202,25 +192,13 @@ class TestConductorTriggerDisabled:
     @patch("hearth.app.subprocess.Popen")
     async def test_no_cmd_no_subprocess_on_task(self, mock_popen, client):
         """Without CONDUCTOR_TICK_CMD, no subprocess is spawned on task completion."""
-        _, task_id = await _create_thrum_and_task(client)
-        mock_popen.reset_mock()  # clear any calls from setup
+        task_id = await _create_task(client)
+        mock_popen.reset_mock()
 
         await client.patch(
             f"/api/v1/tasks/{task_id}",
             json={"status": "completed", "output": "Done"},
             headers=OPPY_HEADERS,
-        )
-        mock_popen.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("hearth.app.CONDUCTOR_TICK_CMD", None)
-    @patch("hearth.app.subprocess.Popen")
-    async def test_no_cmd_no_subprocess_on_thrum(self, mock_popen, client):
-        """Without CONDUCTOR_TICK_CMD, no subprocess is spawned on thrum creation."""
-        await client.post(
-            "/api/v1/thrums",
-            json={"title": "Test"},
-            headers=KAMAJI_HEADERS,
         )
         mock_popen.assert_not_called()
 
@@ -236,8 +214,8 @@ class TestConductorTriggerErrorResilience:
     @patch("hearth.app.subprocess.Popen", side_effect=OSError("spawn failed"))
     async def test_popen_exception_does_not_crash_api(self, mock_popen, client):
         """If Popen raises, the API response still succeeds."""
-        _, task_id = await _create_thrum_and_task(client)
-        mock_popen.reset_mock()  # clear call from thrum creation
+        task_id = await _create_task(client)
+        mock_popen.reset_mock()
 
         resp = await client.patch(
             f"/api/v1/tasks/{task_id}",
@@ -246,16 +224,3 @@ class TestConductorTriggerErrorResilience:
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "completed"
-
-    @pytest.mark.asyncio
-    @patch("hearth.app.CONDUCTOR_TICK_CMD", "echo tick")
-    @patch("hearth.app.subprocess.Popen", side_effect=OSError("spawn failed"))
-    async def test_popen_exception_on_thrum_create_does_not_crash(self, mock_popen, client):
-        """If Popen raises during thrum creation, the API still succeeds."""
-        resp = await client.post(
-            "/api/v1/thrums",
-            json={"title": "Test", "goal": "Resilience test"},
-            headers=KAMAJI_HEADERS,
-        )
-        assert resp.status_code == 200
-        assert "id" in resp.json()

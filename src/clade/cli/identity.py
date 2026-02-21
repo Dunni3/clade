@@ -56,6 +56,9 @@ def generate_personal_identity(
     lines.append("- `get_task` — Get task details")
     lines.append("- `update_task` — Update task status")
     lines.append("- `initiate_ssh_task` — Delegate a task to a brother via SSH")
+    lines.append("- `deposit_morsel` — Deposit a note/observation (linkable to tasks, brothers, cards)")
+    lines.append("- `list_morsels` — List morsels (filter by creator, tag, task_id, card_id)")
+    lines.append("- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)")
     lines.append("")
 
     # Brothers
@@ -120,13 +123,12 @@ def generate_conductor_identity(
     lines.append("- `list_tasks` — List tasks from the Hearth")
     lines.append("- `get_task` — Get task details")
     lines.append("- `update_task` — Update task status")
-    lines.append("- `create_thrum` — Create a new thrum (workflow)")
-    lines.append("- `list_thrums` — List thrums")
-    lines.append("- `get_thrum` — Get thrum details with linked tasks")
-    lines.append("- `update_thrum` — Update thrum status/plan/output")
     lines.append("- `delegate_task` — Delegate a task to a worker via Ember")
     lines.append("- `check_worker_health` — Check worker Ember health")
     lines.append("- `list_worker_tasks` — List active worker tasks")
+    lines.append("- `deposit_morsel` — Deposit a note/observation (linkable to tasks, brothers, cards)")
+    lines.append("- `list_morsels` — List morsels (filter by creator, tag, task_id, card_id)")
+    lines.append("- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)")
     lines.append("")
 
     # Workers
@@ -205,6 +207,9 @@ def generate_worker_identity(
     lines.append("- `list_tasks` — List tasks from the Hearth")
     lines.append("- `get_task` — Get task details")
     lines.append("- `update_task` — Update task status")
+    lines.append("- `deposit_morsel` — Deposit a note/observation (linkable to tasks, brothers, cards)")
+    lines.append("- `list_morsels` — List morsels (filter by creator, tag, task_id, card_id)")
+    lines.append("- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)")
     lines.append("")
 
     # Family list
@@ -280,7 +285,11 @@ def write_identity_local(
     return path
 
 
-def write_identity_remote(ssh_host: str, identity_section: str) -> SSHResult:
+def write_identity_remote(
+    ssh_host: str,
+    identity_section: str,
+    ssh_key: str | None = None,
+) -> SSHResult:
     """Write identity section to a remote brother's ~/.claude/CLAUDE.md.
 
     Uses SSH + a Python script to perform the upsert on the remote host.
@@ -288,6 +297,7 @@ def write_identity_remote(ssh_host: str, identity_section: str) -> SSHResult:
     Args:
         ssh_host: SSH host string (e.g. 'ian@masuda').
         identity_section: The identity section to write.
+        ssh_key: Optional path to SSH private key.
 
     Returns:
         SSHResult from the remote operation.
@@ -328,4 +338,4 @@ path.write_text(updated)
 print('IDENTITY_OK')
 "
 """
-    return run_remote(ssh_host, script, timeout=15)
+    return run_remote(ssh_host, script, ssh_key=ssh_key, timeout=15)

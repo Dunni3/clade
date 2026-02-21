@@ -10,22 +10,26 @@ from fastapi.responses import Response
 
 from . import db
 from .auth import ADMIN_NAMES, resolve_sender
-from .config import API_KEYS, CONDUCTOR_TICK_CMD
+from .config import API_KEYS, CONDUCTOR_TICK_CMD, EMBER_URLS
 
 logger = logging.getLogger(__name__)
 from .models import (
+    CardSummary,
+    CreateCardRequest,
+    CreateMorselRequest,
     CreateTaskEventRequest,
     CreateTaskRequest,
     CreateTaskResponse,
-    CreateThrumRequest,
-    CreateThrumResponse,
     EditMessageRequest,
+    EmberEntry,
     FeedMessage,
     KeyInfo,
+    LinkedCardInfo,
     MarkReadResponse,
     MemberActivityResponse,
     MessageDetail,
     MessageSummary,
+    MorselSummary,
     ReadByEntry,
     RegisterKeyRequest,
     RegisterKeyResponse,
@@ -34,11 +38,12 @@ from .models import (
     TaskDetail,
     TaskEvent,
     TaskSummary,
-    ThrumDetail,
-    ThrumSummary,
+    TreeNode,
+    TreeSummary,
     UnreadCountResponse,
+    UpdateCardRequest,
     UpdateTaskRequest,
-    UpdateThrumRequest,
+    UpsertEmberRequest,
 )
 
 
@@ -65,13 +70,21 @@ def _now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _maybe_trigger_conductor_tick() -> None:
+def _maybe_trigger_conductor_tick(
+    task_id: int | None = None, message_id: int | None = None
+) -> None:
     """Fire-and-forget: spawn the conductor tick if configured."""
     if not CONDUCTOR_TICK_CMD:
         return
     try:
+        cmd = CONDUCTOR_TICK_CMD
+        if task_id is not None:
+            cmd = f"{cmd} {task_id}"
+        elif message_id is not None:
+            cmd = f"{cmd} --message {message_id}"
+        logger.info("Triggering conductor tick: %s", cmd)
         subprocess.Popen(
-            CONDUCTOR_TICK_CMD,
+            cmd,
             shell=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -110,6 +123,11 @@ async def send_message(
         recipients=req.recipients,
         task_id=req.task_id,
     )
+
+    # Trigger conductor tick when kamaji receives a message (not from himself)
+    if "kamaji" in req.recipients and sender != "kamaji":
+        _maybe_trigger_conductor_tick(message_id=message_id)
+
     return SendMessageResponse(id=message_id)
 
 
@@ -257,16 +275,19 @@ async def create_task(
     req: CreateTaskRequest,
     caller: str = Depends(resolve_sender),
 ):
-    task_id = await db.insert_task(
-        creator=caller,
-        assignee=req.assignee,
-        subject=req.subject,
-        prompt=req.prompt,
-        session_name=req.session_name,
-        host=req.host,
-        working_dir=req.working_dir,
-        thrum_id=req.thrum_id,
-    )
+    try:
+        task_id = await db.insert_task(
+            creator=caller,
+            assignee=req.assignee,
+            subject=req.subject,
+            prompt=req.prompt,
+            session_name=req.session_name,
+            host=req.host,
+            working_dir=req.working_dir,
+            parent_task_id=req.parent_task_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     return CreateTaskResponse(id=task_id)
 
 
@@ -342,7 +363,7 @@ async def update_task(
         kwargs["status"] = req.status
         if req.status == "in_progress" and task["started_at"] is None:
             kwargs["started_at"] = _now_utc()
-        if req.status in ("completed", "failed"):
+        if req.status in ("completed", "failed", "killed"):
             kwargs["completed_at"] = _now_utc()
     if req.output is not None:
         kwargs["output"] = req.output
@@ -351,10 +372,87 @@ async def update_task(
     if updated is None:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Trigger conductor tick when a thrum-linked task reaches a terminal state
-    if req.status in ("completed", "failed") and task.get("thrum_id") is not None:
-        _maybe_trigger_conductor_tick()
+    # Trigger conductor tick when any task reaches a terminal state
+    # Note: "killed" is intentionally excluded — killed tasks must not trigger Kamaji
+    if req.status in ("completed", "failed"):
+        _maybe_trigger_conductor_tick(task_id=task_id)
 
+    return updated
+
+
+@app.post("/api/v1/tasks/{task_id}/kill", response_model=TaskDetail)
+async def kill_task(
+    task_id: int,
+    caller: str = Depends(resolve_sender),
+):
+    """Kill a running task: terminate tmux session on Ember, mark killed in DB."""
+    import httpx
+
+    task = await db.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Auth: only creator, admins can kill
+    if task["creator"] != caller and caller not in ADMIN_NAMES:
+        raise HTTPException(
+            status_code=403, detail="Only creator or admin can kill a task"
+        )
+
+    # Guard: only active tasks can be killed
+    if task["status"] not in ("pending", "launched", "in_progress"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot kill task with status '{task['status']}'"
+        )
+
+    ember_detail = ""
+    assignee = task["assignee"]
+
+    # Look up Ember URL: DB first, env fallback
+    ember_url = None
+    db_embers = await db.get_embers()
+    for entry in db_embers:
+        if entry["name"] == assignee:
+            ember_url = entry["ember_url"]
+            break
+    if ember_url is None:
+        ember_url = EMBER_URLS.get(assignee)
+
+    if ember_url:
+        # Look up assignee's API key for Ember auth
+        assignee_key = await db.get_api_key_for_name(assignee)
+        if assignee_key is None:
+            # Env fallback: search API_KEYS dict
+            for key, name in API_KEYS.items():
+                if name == assignee:
+                    assignee_key = key
+                    break
+
+        if assignee_key:
+            try:
+                async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
+                    resp = await client.post(
+                        f"{ember_url}/tasks/{task_id}/kill",
+                        headers={"Authorization": f"Bearer {assignee_key}"},
+                    )
+                    ember_result = resp.json()
+                    ember_detail = f"Ember: {ember_result.get('status', 'unknown')}"
+            except Exception as e:
+                ember_detail = f"Ember unreachable: {e}"
+        else:
+            ember_detail = "Ember: no API key found for assignee"
+    else:
+        ember_detail = "Ember: no URL configured for assignee"
+
+    # Mark killed in DB regardless of Ember result
+    output = f"Killed by {caller}. {ember_detail}".strip()
+    updated = await db.update_task(
+        task_id, status="killed", completed_at=_now_utc(), output=output
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Do NOT trigger conductor tick for killed tasks
     return updated
 
 
@@ -401,92 +499,295 @@ async def member_activity(
 
 
 # ---------------------------------------------------------------------------
-# Thrum endpoints
+# Ember status endpoint
 # ---------------------------------------------------------------------------
 
 
-@app.post("/api/v1/thrums", response_model=CreateThrumResponse)
-async def create_thrum(
-    req: CreateThrumRequest,
+@app.get("/api/v1/embers/status")
+async def ember_status(
+    _caller: str = Depends(resolve_sender),
+):
+    """Proxy health checks to known Ember servers (env + DB merged, DB wins)."""
+    import asyncio
+    import httpx
+
+    # Merge env-var entries with DB entries (DB wins on conflict)
+    merged: dict[str, str] = dict(EMBER_URLS)
+    db_embers = await db.get_embers()
+    for entry in db_embers:
+        merged[entry["name"]] = entry["ember_url"]
+
+    if not merged:
+        return {"embers": {}}
+
+    async def _check(name: str, url: str) -> tuple[str, dict]:
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=5.0) as client:
+                resp = await client.get(f"{url}/health")
+                resp.raise_for_status()
+                data = resp.json()
+                return name, {
+                    "status": "ok",
+                    "active_tasks": data.get("active_tasks", 0),
+                    "uptime_seconds": data.get("uptime_seconds"),
+                }
+        except Exception:
+            return name, {"status": "unreachable"}
+
+    results = await asyncio.gather(*[
+        _check(name, url) for name, url in merged.items()
+    ])
+    return {"embers": dict(results)}
+
+
+@app.put("/api/v1/embers/{name}", response_model=EmberEntry)
+async def upsert_ember(
+    name: str,
+    req: UpsertEmberRequest,
+    _caller: str = Depends(resolve_sender),
+):
+    """Register or update an Ember URL."""
+    entry = await db.upsert_ember(name, req.ember_url)
+    return entry
+
+
+@app.get("/api/v1/embers", response_model=list[EmberEntry])
+async def list_embers(
+    _caller: str = Depends(resolve_sender),
+):
+    """List all registered Ember entries."""
+    return await db.get_embers()
+
+
+@app.delete("/api/v1/embers/{name}", status_code=204)
+async def delete_ember(
+    name: str,
     caller: str = Depends(resolve_sender),
 ):
-    thrum_id = await db.insert_thrum(
+    """Delete an Ember entry (admin only)."""
+    if caller not in ADMIN_NAMES:
+        raise HTTPException(status_code=403, detail="Admin only")
+    deleted = await db.delete_ember(name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Ember not found")
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Task Tree endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/trees", response_model=list[TreeSummary])
+async def list_trees(
+    limit: int = 50,
+    offset: int = 0,
+    _caller: str = Depends(resolve_sender),
+):
+    return await db.get_trees(limit=limit, offset=offset)
+
+
+@app.get("/api/v1/trees/{root_id}", response_model=TreeNode)
+async def get_tree(
+    root_id: int,
+    _caller: str = Depends(resolve_sender),
+):
+    tree = await db.get_tree(root_id)
+    if tree is None:
+        raise HTTPException(status_code=404, detail="Tree not found")
+    return tree
+
+
+# ---------------------------------------------------------------------------
+# Morsel endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/v1/morsels", response_model=MorselSummary, status_code=201)
+async def create_morsel(
+    req: CreateMorselRequest,
+    caller: str = Depends(resolve_sender),
+):
+    links = [{"object_type": l.object_type, "object_id": l.object_id} for l in req.links] if req.links else None
+    morsel_id = await db.insert_morsel(
+        creator=caller,
+        body=req.body,
+        tags=req.tags or None,
+        links=links,
+    )
+    morsel = await db.get_morsel(morsel_id)
+    return morsel
+
+
+@app.get("/api/v1/morsels", response_model=list[MorselSummary])
+async def list_morsels(
+    creator: str | None = None,
+    tag: str | None = None,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    _caller: str = Depends(resolve_sender),
+):
+    return await db.get_morsels(
+        creator=creator,
+        tag=tag,
+        object_type=object_type,
+        object_id=object_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/api/v1/morsels/{morsel_id}", response_model=MorselSummary)
+async def get_morsel(
+    morsel_id: int,
+    _caller: str = Depends(resolve_sender),
+):
+    morsel = await db.get_morsel(morsel_id)
+    if morsel is None:
+        raise HTTPException(status_code=404, detail="Morsel not found")
+    return morsel
+
+
+# ---------------------------------------------------------------------------
+# Kanban endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/kanban/cards/by-link", response_model=list[CardSummary])
+async def get_cards_by_link(
+    object_type: str,
+    object_id: str,
+    _caller: str = Depends(resolve_sender),
+):
+    """Get all cards that link to a specific object (reverse lookup)."""
+    card_infos = await db.get_cards_for_objects(object_type, [object_id])
+    card_ids = [c["id"] for c in card_infos.get(object_id, [])]
+    if not card_ids:
+        return []
+    # Fetch full card details
+    results = []
+    for cid in card_ids:
+        card = await db.get_card(cid)
+        if card:
+            results.append(card)
+    return results
+
+
+@app.post("/api/v1/kanban/cards", response_model=CardSummary, status_code=201)
+async def create_card(
+    req: CreateCardRequest,
+    caller: str = Depends(resolve_sender),
+):
+    if req.col not in db.KANBAN_COLUMNS:
+        raise HTTPException(status_code=422, detail=f"Invalid column '{req.col}'. Must be one of: {', '.join(sorted(db.KANBAN_COLUMNS))}")
+    if req.priority not in db.KANBAN_PRIORITIES:
+        raise HTTPException(status_code=422, detail=f"Invalid priority '{req.priority}'. Must be one of: {', '.join(sorted(db.KANBAN_PRIORITIES))}")
+    links = [{"object_type": l.object_type, "object_id": l.object_id} for l in req.links] if req.links else None
+    card_id = await db.insert_card(
         creator=caller,
         title=req.title,
-        goal=req.goal,
-        plan=req.plan,
+        description=req.description,
+        col=req.col,
         priority=req.priority,
+        assignee=req.assignee,
+        labels=req.labels or None,
+        links=links,
     )
-    _maybe_trigger_conductor_tick()
-    return CreateThrumResponse(id=thrum_id)
+    card = await db.get_card(card_id)
+    return card
 
 
-@app.get("/api/v1/thrums", response_model=list[ThrumSummary])
-async def list_thrums(
-    status: str | None = None,
+@app.get("/api/v1/kanban/cards", response_model=list[CardSummary])
+async def list_cards(
+    col: str | None = None,
+    assignee: str | None = None,
     creator: str | None = None,
-    limit: int = 50,
+    priority: str | None = None,
+    label: str | None = None,
+    include_archived: bool = False,
+    limit: int = 200,
+    offset: int = 0,
     _caller: str = Depends(resolve_sender),
 ):
-    return await db.get_thrums(status=status, creator=creator, limit=limit)
+    return await db.get_cards(
+        col=col,
+        assignee=assignee,
+        creator=creator,
+        priority=priority,
+        label=label,
+        include_archived=include_archived,
+        limit=limit,
+        offset=offset,
+    )
 
 
-@app.get("/api/v1/thrums/{thrum_id}", response_model=ThrumDetail)
-async def get_thrum(
-    thrum_id: int,
+@app.get("/api/v1/kanban/cards/{card_id}", response_model=CardSummary)
+async def get_card_detail(
+    card_id: int,
     _caller: str = Depends(resolve_sender),
 ):
-    thrum = await db.get_thrum(thrum_id)
-    if thrum is None:
-        raise HTTPException(status_code=404, detail="Thrum not found")
-    return thrum
+    card = await db.get_card(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return card
 
 
-@app.patch("/api/v1/thrums/{thrum_id}", response_model=ThrumDetail)
-async def update_thrum(
-    thrum_id: int,
-    req: UpdateThrumRequest,
-    caller: str = Depends(resolve_sender),
+@app.patch("/api/v1/kanban/cards/{card_id}", response_model=CardSummary)
+async def update_card(
+    card_id: int,
+    req: UpdateCardRequest,
+    _caller: str = Depends(resolve_sender),
 ):
-    thrum = await db.get_thrum(thrum_id)
-    if thrum is None:
-        raise HTTPException(status_code=404, detail="Thrum not found")
-
-    if thrum["creator"] != caller and caller not in ADMIN_NAMES:
-        raise HTTPException(
-            status_code=403, detail="Only creator or admin can update"
-        )
+    card = await db.get_card(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Card not found")
 
     kwargs: dict = {}
-    if req.status is not None:
-        kwargs["status"] = req.status
-        if req.status in ("planning", "active") and thrum["started_at"] is None:
-            kwargs["started_at"] = _now_utc()
-        if req.status in ("completed", "failed"):
-            kwargs["completed_at"] = _now_utc()
-    for field in ("title", "goal", "plan", "priority", "output"):
-        value = getattr(req, field)
-        if value is not None:
-            kwargs[field] = value
+    if req.title is not None:
+        kwargs["title"] = req.title
+    if req.description is not None:
+        kwargs["description"] = req.description
+    if req.col is not None:
+        if req.col not in db.KANBAN_COLUMNS:
+            raise HTTPException(status_code=422, detail=f"Invalid column '{req.col}'")
+        kwargs["col"] = req.col
+    if req.priority is not None:
+        if req.priority not in db.KANBAN_PRIORITIES:
+            raise HTTPException(status_code=422, detail=f"Invalid priority '{req.priority}'")
+        kwargs["priority"] = req.priority
+    if "assignee" in req.model_fields_set:
+        kwargs["assignee"] = req.assignee
+    if "labels" in req.model_fields_set:
+        kwargs["labels"] = req.labels
+    if "links" in req.model_fields_set:
+        kwargs["links"] = [{"object_type": l.object_type, "object_id": l.object_id} for l in req.links] if req.links else []
 
-    updated = await db.update_thrum(thrum_id, **kwargs)
+    updated = await db.update_card(card_id, **kwargs)
     if updated is None:
-        raise HTTPException(status_code=404, detail="Thrum not found")
+        raise HTTPException(status_code=404, detail="Card not found")
     return updated
 
 
-@app.delete("/api/v1/thrums/{thrum_id}", status_code=204)
-async def delete_thrum(
-    thrum_id: int,
+@app.delete("/api/v1/kanban/cards/{card_id}", status_code=204)
+async def delete_card(
+    card_id: int,
     caller: str = Depends(resolve_sender),
 ):
-    """Delete a thrum (admin only)."""
-    if caller not in ADMIN_NAMES:
-        raise HTTPException(status_code=403, detail="Admin only")
+    card = await db.get_card(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Card not found")
 
-    thrum = await db.get_thrum(thrum_id)
-    if thrum is None:
-        raise HTTPException(status_code=404, detail="Thrum not found")
+    if card["creator"] != caller and caller not in ADMIN_NAMES:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the creator or an admin can delete this card",
+        )
 
-    await db.delete_thrum(thrum_id)
+    deleted = await db.delete_card(card_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Card not found")
     return Response(status_code=204)
+
+

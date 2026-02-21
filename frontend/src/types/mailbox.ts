@@ -62,7 +62,8 @@ export interface TaskSummary {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
-  thrum_id: number | null;
+  parent_task_id: number | null;
+  root_task_id: number | null;
 }
 
 export interface TaskEvent {
@@ -74,32 +75,23 @@ export interface TaskEvent {
   created_at: string;
 }
 
+export interface LinkedCardInfo {
+  id: number;
+  title: string;
+  col: string;
+  priority: string;
+}
+
 export interface TaskDetail extends TaskSummary {
   prompt: string;
   session_name: string | null;
   host: string | null;
   working_dir: string | null;
   output: string | null;
+  children: TaskSummary[];
   messages: FeedMessage[];
   events: TaskEvent[];
-}
-
-export interface ThrumSummary {
-  id: number;
-  creator: string;
-  title: string;
-  goal: string;
-  status: string;
-  priority: string;
-  created_at: string;
-  started_at: string | null;
-  completed_at: string | null;
-}
-
-export interface ThrumDetail extends ThrumSummary {
-  plan: string | null;
-  output: string | null;
-  tasks: TaskSummary[];
+  linked_cards: LinkedCardInfo[];
 }
 
 export interface MemberActivity {
@@ -114,4 +106,102 @@ export interface MemberActivity {
 
 export interface MemberActivityResponse {
   members: MemberActivity[];
+}
+
+export interface EmberInfo {
+  status: string;
+  active_tasks?: number;
+  uptime_seconds?: number;
+}
+
+export interface EmberStatusResponse {
+  embers: Record<string, EmberInfo>;
+}
+
+export interface TreeSummary {
+  root_task_id: number;
+  subject: string;
+  creator: string;
+  created_at: string;
+  total_tasks: number;
+  completed: number;
+  failed: number;
+  in_progress: number;
+  pending: number;
+  killed: number;
+}
+
+export interface TreeNode {
+  id: number;
+  creator: string;
+  assignee: string;
+  subject: string;
+  status: string;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  parent_task_id: number | null;
+  root_task_id: number | null;
+  prompt: string | null;
+  session_name: string | null;
+  host: string | null;
+  working_dir: string | null;
+  output: string | null;
+  children: TreeNode[];
+  linked_cards?: LinkedCardInfo[];
+}
+
+export interface MorselLink {
+  object_type: string;
+  object_id: string;
+}
+
+export interface MorselSummary {
+  id: number;
+  creator: string;
+  body: string;
+  created_at: string;
+  tags: string[];
+  links: MorselLink[];
+}
+
+// -- Kanban --
+
+export interface CardLink {
+  object_type: string;
+  object_id: string;
+}
+
+export interface CardSummary {
+  id: number;
+  title: string;
+  description: string;
+  col: string;
+  priority: string;
+  assignee: string | null;
+  creator: string;
+  created_at: string;
+  updated_at: string;
+  labels: string[];
+  links: CardLink[];
+}
+
+export interface CreateCardRequest {
+  title: string;
+  description?: string;
+  col?: string;
+  priority?: string;
+  assignee?: string | null;
+  labels?: string[];
+  links?: CardLink[];
+}
+
+export interface UpdateCardRequest {
+  title?: string;
+  description?: string;
+  col?: string;
+  priority?: string;
+  assignee?: string | null;
+  labels?: string[];
+  links?: CardLink[];
 }

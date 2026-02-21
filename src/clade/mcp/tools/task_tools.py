@@ -40,8 +40,9 @@ def create_task_tools(
         prompt: str,
         subject: str = "",
         working_dir: str | None = None,
-        max_turns: int = 50,
+        max_turns: int | None = None,
         auto_pull: bool = False,
+        parent_task_id: int | None = None,
     ) -> str:
         """Send a task to a brother via SSH. Launches Claude Code in a detached tmux session.
 
@@ -50,16 +51,17 @@ def create_task_tools(
 
         WARNING: The remote Claude session runs with --dangerously-skip-permissions by default.
         This gives the brother full autonomous control — it can read/write/delete files and run
-        arbitrary commands without human approval. Use max_turns to limit scope. Monitor live by
-        attaching to the tmux session on the remote host if needed.
+        arbitrary commands without human approval. Monitor live by attaching to the tmux session
+        on the remote host if needed.
 
         Args:
             brother: Which brother to send the task to — "jerry" or "oppy".
             prompt: The task prompt / instructions for the brother.
             subject: Short description of the task.
             working_dir: Override the brother's default working directory.
-            max_turns: Maximum Claude turns for the task (default 50). Lower for simple tasks.
+            max_turns: Optional maximum Claude turns. If not set, no turn limit is applied.
             auto_pull: If true, git pull the MCP server repo on the remote host before launching. Default true.
+            parent_task_id: Optional parent task ID for task tree linking.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -81,6 +83,7 @@ def create_task_tools(
                 session_name=session_name,
                 host=host,
                 working_dir=wd,
+                parent_task_id=parent_task_id,
             )
             task_id = task_resp["id"]
         except Exception as e:

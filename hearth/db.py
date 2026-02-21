@@ -61,18 +61,56 @@ CREATE TABLE IF NOT EXISTS api_keys (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
-CREATE TABLE IF NOT EXISTS thrums (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    creator      TEXT NOT NULL,
-    title        TEXT NOT NULL DEFAULT '',
-    goal         TEXT NOT NULL DEFAULT '',
-    plan         TEXT,
-    status       TEXT NOT NULL DEFAULT 'pending',
-    priority     TEXT NOT NULL DEFAULT 'normal',
-    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    started_at   TEXT,
-    completed_at TEXT,
-    output       TEXT
+CREATE TABLE IF NOT EXISTS morsels (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    creator    TEXT NOT NULL,
+    body       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS morsel_tags (
+    morsel_id INTEGER NOT NULL REFERENCES morsels(id),
+    tag       TEXT NOT NULL,
+    PRIMARY KEY (morsel_id, tag)
+);
+
+CREATE TABLE IF NOT EXISTS morsel_links (
+    morsel_id   INTEGER NOT NULL REFERENCES morsels(id),
+    object_type TEXT NOT NULL,
+    object_id   TEXT NOT NULL,
+    PRIMARY KEY (morsel_id, object_type, object_id)
+);
+
+CREATE TABLE IF NOT EXISTS embers (
+    name       TEXT PRIMARY KEY,
+    ember_url  TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS kanban_cards (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    col         TEXT NOT NULL DEFAULT 'backlog',
+    priority    TEXT NOT NULL DEFAULT 'normal',
+    assignee    TEXT,
+    creator     TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS kanban_card_labels (
+    card_id     INTEGER NOT NULL REFERENCES kanban_cards(id),
+    label       TEXT NOT NULL,
+    PRIMARY KEY (card_id, label)
+);
+
+CREATE TABLE IF NOT EXISTS kanban_card_links (
+    card_id     INTEGER NOT NULL REFERENCES kanban_cards(id),
+    object_type TEXT NOT NULL,
+    object_id   TEXT NOT NULL,
+    PRIMARY KEY (card_id, object_type, object_id)
 );
 """
 
@@ -96,13 +134,19 @@ async def init_db() -> None:
             )
         except Exception:
             pass  # Column already exists
-        # Migration: add thrum_id to tasks
+        # Migration: add parent_task_id and root_task_id to tasks
         try:
             await db.execute(
-                "ALTER TABLE tasks ADD COLUMN thrum_id INTEGER REFERENCES thrums(id)"
+                "ALTER TABLE tasks ADD COLUMN parent_task_id INTEGER REFERENCES tasks(id)"
             )
         except Exception:
-            pass  # Column already exists
+            pass
+        try:
+            await db.execute(
+                "ALTER TABLE tasks ADD COLUMN root_task_id INTEGER REFERENCES tasks(id)"
+            )
+        except Exception:
+            pass
         await db.commit()
     finally:
         await db.close()
@@ -456,17 +500,37 @@ async def insert_task(
     session_name: str | None = None,
     host: str | None = None,
     working_dir: str | None = None,
-    thrum_id: int | None = None,
+    parent_task_id: int | None = None,
 ) -> int:
     db = await get_db()
     try:
+        root_task_id = None
+        if parent_task_id is not None:
+            # Validate parent exists and compute root_task_id
+            cursor = await db.execute(
+                "SELECT id, root_task_id FROM tasks WHERE id = ?",
+                (parent_task_id,),
+            )
+            parent = await cursor.fetchone()
+            if parent is None:
+                raise ValueError(f"Parent task {parent_task_id} does not exist")
+            # If parent has a root, inherit it; otherwise parent IS the root
+            root_task_id = parent["root_task_id"] if parent["root_task_id"] is not None else parent["id"]
+
         cursor = await db.execute(
-            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, thrum_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (creator, assignee, subject, prompt, session_name, host, working_dir, thrum_id),
+            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id),
         )
+        task_id = cursor.lastrowid
+        # Every task is a root of its own tree when it has no parent
+        if root_task_id is None:
+            await db.execute(
+                "UPDATE tasks SET root_task_id = ? WHERE id = ?",
+                (task_id, task_id),
+            )
         await db.commit()
-        return cursor.lastrowid
+        return task_id
     finally:
         await db.close()
 
@@ -493,7 +557,7 @@ async def get_tasks(
             params.append(creator)
         where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
         sql = f"""
-            SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, thrum_id
+            SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id
             FROM tasks
             {where_sql}
             ORDER BY created_at DESC
@@ -562,6 +626,15 @@ async def get_task(task_id: int) -> dict | None:
 
         task["messages"] = messages
 
+        # Get children
+        cursor = await db.execute(
+            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id
+               FROM tasks WHERE parent_task_id = ? ORDER BY created_at ASC""",
+            (task_id,),
+        )
+        child_rows = await cursor.fetchall()
+        task["children"] = [dict(r) for r in child_rows]
+
         # Get task events
         cursor = await db.execute(
             "SELECT id, task_id, event_type, tool_name, summary, created_at FROM task_events WHERE task_id = ? ORDER BY created_at ASC",
@@ -569,6 +642,17 @@ async def get_task(task_id: int) -> dict | None:
         )
         event_rows = await cursor.fetchall()
         task["events"] = [dict(r) for r in event_rows]
+
+        # Get linked cards (reverse lookup: cards that link to this task)
+        cursor = await db.execute(
+            """SELECT c.id, c.title, c.col, c.priority
+               FROM kanban_card_links cl
+               JOIN kanban_cards c ON cl.card_id = c.id
+               WHERE cl.object_type = 'task' AND cl.object_id = ?""",
+            (task_id_str,),
+        )
+        card_rows = await cursor.fetchall()
+        task["linked_cards"] = [dict(r) for r in card_rows]
 
         return task
     finally:
@@ -653,6 +737,19 @@ async def list_api_keys() -> list[dict]:
         await db.close()
 
 
+async def get_api_key_for_name(name: str) -> str | None:
+    """Look up an API key by brother name. Returns the key string or None."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT key FROM api_keys WHERE name = ?", (name,)
+        )
+        row = await cursor.fetchone()
+        return row["key"] if row else None
+    finally:
+        await db.close()
+
+
 async def get_all_member_names() -> set[str]:
     """Return the set of all registered member names from the api_keys table."""
     db = await get_db()
@@ -671,143 +768,6 @@ async def delete_api_key(name: str) -> bool:
         cursor = await db.execute(
             "DELETE FROM api_keys WHERE name = ?", (name,)
         )
-        await db.commit()
-        return cursor.rowcount > 0
-    finally:
-        await db.close()
-
-
-# ---------------------------------------------------------------------------
-# Thrums
-# ---------------------------------------------------------------------------
-
-
-async def insert_thrum(
-    creator: str,
-    title: str = "",
-    goal: str = "",
-    plan: str | None = None,
-    priority: str = "normal",
-) -> int:
-    db = await get_db()
-    try:
-        cursor = await db.execute(
-            """INSERT INTO thrums (creator, title, goal, plan, priority)
-               VALUES (?, ?, ?, ?, ?)""",
-            (creator, title, goal, plan, priority),
-        )
-        await db.commit()
-        return cursor.lastrowid
-    finally:
-        await db.close()
-
-
-async def get_thrums(
-    *,
-    status: str | None = None,
-    creator: str | None = None,
-    limit: int = 50,
-) -> list[dict]:
-    db = await get_db()
-    try:
-        where_clauses: list[str] = []
-        params: list = []
-        if status:
-            where_clauses.append("status = ?")
-            params.append(status)
-        if creator:
-            where_clauses.append("creator = ?")
-            params.append(creator)
-        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-        sql = f"""
-            SELECT id, creator, title, goal, status, priority, created_at, started_at, completed_at
-            FROM thrums
-            {where_sql}
-            ORDER BY created_at DESC
-            LIMIT ?
-        """
-        params.append(limit)
-        cursor = await db.execute(sql, params)
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
-    finally:
-        await db.close()
-
-
-async def get_thrum(thrum_id: int) -> dict | None:
-    db = await get_db()
-    try:
-        cursor = await db.execute("SELECT * FROM thrums WHERE id = ?", (thrum_id,))
-        row = await cursor.fetchone()
-        if row is None:
-            return None
-        thrum = dict(row)
-
-        # Get linked tasks
-        cursor = await db.execute(
-            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, thrum_id
-               FROM tasks WHERE thrum_id = ? ORDER BY created_at ASC""",
-            (thrum_id,),
-        )
-        task_rows = await cursor.fetchall()
-        thrum["tasks"] = [dict(r) for r in task_rows]
-
-        return thrum
-    finally:
-        await db.close()
-
-
-async def update_thrum(
-    thrum_id: int,
-    *,
-    title: str | None = None,
-    goal: str | None = None,
-    plan: str | None = None,
-    status: str | None = None,
-    priority: str | None = None,
-    output: str | None = None,
-    started_at: str | None = None,
-    completed_at: str | None = None,
-) -> dict | None:
-    db = await get_db()
-    try:
-        updates: list[str] = []
-        params: list = []
-        for field, value in [
-            ("title", title),
-            ("goal", goal),
-            ("plan", plan),
-            ("status", status),
-            ("priority", priority),
-            ("output", output),
-            ("started_at", started_at),
-            ("completed_at", completed_at),
-        ]:
-            if value is not None:
-                updates.append(f"{field} = ?")
-                params.append(value)
-
-        if updates:
-            params.append(thrum_id)
-            query = f"UPDATE thrums SET {', '.join(updates)} WHERE id = ?"
-            cursor = await db.execute(query, params)
-            if cursor.rowcount == 0:
-                return None
-            await db.commit()
-
-        return await get_thrum(thrum_id)
-    finally:
-        await db.close()
-
-
-async def delete_thrum(thrum_id: int) -> bool:
-    db = await get_db()
-    try:
-        # Unlink tasks (set thrum_id to NULL)
-        await db.execute(
-            "UPDATE tasks SET thrum_id = NULL WHERE thrum_id = ?", (thrum_id,)
-        )
-        cursor = await db.execute("DELETE FROM thrums WHERE id = ?", (thrum_id,))
         await db.commit()
         return cursor.rowcount > 0
     finally:
@@ -899,5 +859,534 @@ async def update_task(
             await db.commit()
 
         return await get_task(task_id)
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# Task Trees
+# ---------------------------------------------------------------------------
+
+
+async def get_cards_for_objects(
+    object_type: str, object_ids: list[str]
+) -> dict[str, list[dict]]:
+    """Reverse lookup: find cards linked to a set of objects.
+
+    Returns a dict mapping object_id -> list of card summaries.
+    """
+    if not object_ids:
+        return {}
+    db = await get_db()
+    try:
+        placeholders = ",".join("?" * len(object_ids))
+        cursor = await db.execute(
+            f"""SELECT cl.object_id, c.id, c.title, c.col, c.priority
+                FROM kanban_card_links cl
+                JOIN kanban_cards c ON cl.card_id = c.id
+                WHERE cl.object_type = ? AND cl.object_id IN ({placeholders})""",
+            [object_type] + object_ids,
+        )
+        rows = await cursor.fetchall()
+        result: dict[str, list[dict]] = {}
+        for r in rows:
+            oid = r["object_id"]
+            result.setdefault(oid, []).append(
+                {"id": r["id"], "title": r["title"], "col": r["col"], "priority": r["priority"]}
+            )
+        return result
+    finally:
+        await db.close()
+
+
+async def get_tree(root_task_id: int) -> dict | None:
+    """Fetch a full task tree rooted at root_task_id."""
+    db = await get_db()
+    try:
+        # Fetch root task
+        cursor = await db.execute(
+            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output FROM tasks WHERE id = ?",
+            (root_task_id,),
+        )
+        root_row = await cursor.fetchone()
+        if root_row is None:
+            return None
+        root = dict(root_row)
+
+        # Fetch all descendants (exclude root itself)
+        cursor = await db.execute(
+            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output FROM tasks WHERE root_task_id = ? AND id != ? ORDER BY created_at ASC",
+            (root_task_id, root_task_id),
+        )
+        desc_rows = await cursor.fetchall()
+        descendants = [dict(r) for r in desc_rows]
+
+        # Build tree: index by ID, attach children
+        nodes = {root["id"]: root}
+        root["children"] = []
+        for d in descendants:
+            d["children"] = []
+            nodes[d["id"]] = d
+
+        for d in descendants:
+            parent_id = d["parent_task_id"]
+            if parent_id in nodes:
+                nodes[parent_id]["children"].append(d)
+
+        # Fetch linked cards for all tasks in the tree
+        all_task_ids = [str(tid) for tid in nodes.keys()]
+        card_map = await get_cards_for_objects("task", all_task_ids)
+        for tid, node in nodes.items():
+            node["linked_cards"] = card_map.get(str(tid), [])
+
+        return root
+    finally:
+        await db.close()
+
+
+async def get_trees(limit: int = 50, offset: int = 0) -> list[dict]:
+    """List task trees with aggregated stats."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT
+                 d.root_task_id,
+                 r.subject,
+                 r.creator,
+                 r.created_at,
+                 COUNT(*) as total_tasks,
+                 SUM(CASE WHEN d.status = 'completed' THEN 1 ELSE 0 END) as completed,
+                 SUM(CASE WHEN d.status = 'failed' THEN 1 ELSE 0 END) as failed,
+                 SUM(CASE WHEN d.status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+                 SUM(CASE WHEN d.status = 'pending' THEN 1 ELSE 0 END) as pending,
+                 SUM(CASE WHEN d.status = 'killed' THEN 1 ELSE 0 END) as killed
+               FROM tasks d
+               JOIN tasks r ON d.root_task_id = r.id
+               WHERE d.root_task_id IS NOT NULL
+               GROUP BY d.root_task_id
+               ORDER BY r.created_at DESC
+               LIMIT ? OFFSET ?""",
+            (limit, offset),
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# Morsels
+# ---------------------------------------------------------------------------
+
+
+async def insert_morsel(
+    creator: str,
+    body: str,
+    tags: list[str] | None = None,
+    links: list[dict] | None = None,
+) -> int:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "INSERT INTO morsels (creator, body) VALUES (?, ?)",
+            (creator, body),
+        )
+        morsel_id = cursor.lastrowid
+
+        if tags:
+            for tag in tags:
+                await db.execute(
+                    "INSERT INTO morsel_tags (morsel_id, tag) VALUES (?, ?)",
+                    (morsel_id, tag),
+                )
+
+        if links:
+            for link in links:
+                await db.execute(
+                    "INSERT INTO morsel_links (morsel_id, object_type, object_id) VALUES (?, ?, ?)",
+                    (morsel_id, link["object_type"], link["object_id"]),
+                )
+
+        await db.commit()
+        return morsel_id
+    finally:
+        await db.close()
+
+
+async def get_morsel(morsel_id: int) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT id, creator, body, created_at FROM morsels WHERE id = ?",
+            (morsel_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        morsel = dict(row)
+
+        cursor = await db.execute(
+            "SELECT tag FROM morsel_tags WHERE morsel_id = ?",
+            (morsel_id,),
+        )
+        morsel["tags"] = [r["tag"] for r in await cursor.fetchall()]
+
+        cursor = await db.execute(
+            "SELECT object_type, object_id FROM morsel_links WHERE morsel_id = ?",
+            (morsel_id,),
+        )
+        morsel["links"] = [dict(r) for r in await cursor.fetchall()]
+
+        return morsel
+    finally:
+        await db.close()
+
+
+async def get_morsels(
+    *,
+    creator: str | None = None,
+    tag: str | None = None,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    db = await get_db()
+    try:
+        where_clauses: list[str] = []
+        params: list = []
+
+        if creator:
+            where_clauses.append("m.creator = ?")
+            params.append(creator)
+        if tag:
+            where_clauses.append(
+                "m.id IN (SELECT morsel_id FROM morsel_tags WHERE tag = ?)"
+            )
+            params.append(tag)
+        if object_type and object_id:
+            where_clauses.append(
+                "m.id IN (SELECT morsel_id FROM morsel_links WHERE object_type = ? AND object_id = ?)"
+            )
+            params.extend([object_type, object_id])
+
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        sql = f"""
+            SELECT m.id, m.creator, m.body, m.created_at
+            FROM morsels m
+            {where_sql}
+            ORDER BY m.created_at DESC
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+
+        cursor = await db.execute(sql, params)
+        rows = await cursor.fetchall()
+        morsels = [dict(row) for row in rows]
+
+        # Bulk-fetch tags and links
+        if morsels:
+            morsel_ids = [m["id"] for m in morsels]
+            placeholders = ",".join("?" * len(morsel_ids))
+
+            cursor = await db.execute(
+                f"SELECT morsel_id, tag FROM morsel_tags WHERE morsel_id IN ({placeholders})",
+                morsel_ids,
+            )
+            tag_rows = await cursor.fetchall()
+            tag_map: dict[int, list[str]] = {}
+            for r in tag_rows:
+                tag_map.setdefault(r["morsel_id"], []).append(r["tag"])
+
+            cursor = await db.execute(
+                f"SELECT morsel_id, object_type, object_id FROM morsel_links WHERE morsel_id IN ({placeholders})",
+                morsel_ids,
+            )
+            link_rows = await cursor.fetchall()
+            link_map: dict[int, list[dict]] = {}
+            for r in link_rows:
+                link_map.setdefault(r["morsel_id"], []).append(
+                    {"object_type": r["object_type"], "object_id": r["object_id"]}
+                )
+
+            for morsel in morsels:
+                morsel["tags"] = tag_map.get(morsel["id"], [])
+                morsel["links"] = link_map.get(morsel["id"], [])
+
+        return morsels
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# Embers (registry)
+# ---------------------------------------------------------------------------
+
+
+async def upsert_ember(name: str, ember_url: str) -> dict:
+    db = await get_db()
+    try:
+        await db.execute(
+            """INSERT INTO embers (name, ember_url) VALUES (?, ?)
+               ON CONFLICT(name) DO UPDATE SET ember_url = excluded.ember_url, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')""",
+            (name, ember_url),
+        )
+        await db.commit()
+
+        cursor = await db.execute(
+            "SELECT name, ember_url, created_at, updated_at FROM embers WHERE name = ?",
+            (name,),
+        )
+        row = await cursor.fetchone()
+        return dict(row)
+    finally:
+        await db.close()
+
+
+async def get_embers() -> list[dict]:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT name, ember_url, created_at, updated_at FROM embers ORDER BY name"
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+async def delete_ember(name: str) -> bool:
+    db = await get_db()
+    try:
+        cursor = await db.execute("DELETE FROM embers WHERE name = ?", (name,))
+        await db.commit()
+        return cursor.rowcount > 0
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# Kanban Cards
+# ---------------------------------------------------------------------------
+
+KANBAN_COLUMNS = {"backlog", "todo", "in_progress", "done", "archived"}
+KANBAN_PRIORITIES = {"low", "normal", "high", "urgent"}
+_PRIORITY_ORDER = {"urgent": 4, "high": 3, "normal": 2, "low": 1}
+
+
+async def insert_card(
+    creator: str,
+    title: str,
+    description: str = "",
+    col: str = "backlog",
+    priority: str = "normal",
+    assignee: str | None = None,
+    labels: list[str] | None = None,
+    links: list[dict] | None = None,
+) -> int:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "INSERT INTO kanban_cards (creator, title, description, col, priority, assignee) VALUES (?, ?, ?, ?, ?, ?)",
+            (creator, title, description, col, priority, assignee),
+        )
+        card_id = cursor.lastrowid
+        if labels:
+            for label in labels:
+                await db.execute(
+                    "INSERT INTO kanban_card_labels (card_id, label) VALUES (?, ?)",
+                    (card_id, label),
+                )
+        if links:
+            for link in links:
+                await db.execute(
+                    "INSERT INTO kanban_card_links (card_id, object_type, object_id) VALUES (?, ?, ?)",
+                    (card_id, link["object_type"], link["object_id"]),
+                )
+        await db.commit()
+        return card_id
+    finally:
+        await db.close()
+
+
+async def get_card(card_id: int) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT id, title, description, col, priority, assignee, creator, created_at, updated_at FROM kanban_cards WHERE id = ?",
+            (card_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        card = dict(row)
+        cursor = await db.execute(
+            "SELECT label FROM kanban_card_labels WHERE card_id = ?",
+            (card_id,),
+        )
+        card["labels"] = [r["label"] for r in await cursor.fetchall()]
+        cursor = await db.execute(
+            "SELECT object_type, object_id FROM kanban_card_links WHERE card_id = ?",
+            (card_id,),
+        )
+        card["links"] = [dict(r) for r in await cursor.fetchall()]
+        return card
+    finally:
+        await db.close()
+
+
+async def get_cards(
+    *,
+    col: str | None = None,
+    assignee: str | None = None,
+    creator: str | None = None,
+    priority: str | None = None,
+    label: str | None = None,
+    include_archived: bool = False,
+    limit: int = 200,
+    offset: int = 0,
+) -> list[dict]:
+    db = await get_db()
+    try:
+        where_clauses: list[str] = []
+        params: list = []
+
+        if col:
+            where_clauses.append("c.col = ?")
+            params.append(col)
+        elif not include_archived:
+            where_clauses.append("c.col != 'archived'")
+
+        if assignee:
+            where_clauses.append("c.assignee = ?")
+            params.append(assignee)
+        if creator:
+            where_clauses.append("c.creator = ?")
+            params.append(creator)
+        if priority:
+            where_clauses.append("c.priority = ?")
+            params.append(priority)
+        if label:
+            where_clauses.append(
+                "c.id IN (SELECT card_id FROM kanban_card_labels WHERE label = ?)"
+            )
+            params.append(label)
+
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        sql = f"""
+            SELECT c.id, c.title, c.description, c.col, c.priority, c.assignee, c.creator, c.created_at, c.updated_at
+            FROM kanban_cards c
+            {where_sql}
+            ORDER BY
+                CASE c.priority
+                    WHEN 'urgent' THEN 4
+                    WHEN 'high' THEN 3
+                    WHEN 'normal' THEN 2
+                    WHEN 'low' THEN 1
+                    ELSE 0
+                END DESC,
+                c.updated_at DESC
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+
+        cursor = await db.execute(sql, params)
+        rows = await cursor.fetchall()
+        cards = [dict(row) for row in rows]
+
+        # Bulk-fetch labels and links
+        if cards:
+            card_ids = [c["id"] for c in cards]
+            placeholders = ",".join("?" * len(card_ids))
+            cursor = await db.execute(
+                f"SELECT card_id, label FROM kanban_card_labels WHERE card_id IN ({placeholders})",
+                card_ids,
+            )
+            label_rows = await cursor.fetchall()
+            label_map: dict[int, list[str]] = {}
+            for r in label_rows:
+                label_map.setdefault(r["card_id"], []).append(r["label"])
+
+            cursor = await db.execute(
+                f"SELECT card_id, object_type, object_id FROM kanban_card_links WHERE card_id IN ({placeholders})",
+                card_ids,
+            )
+            link_rows = await cursor.fetchall()
+            link_map: dict[int, list[dict]] = {}
+            for r in link_rows:
+                link_map.setdefault(r["card_id"], []).append(
+                    {"object_type": r["object_type"], "object_id": r["object_id"]}
+                )
+
+            for card in cards:
+                card["labels"] = label_map.get(card["id"], [])
+                card["links"] = link_map.get(card["id"], [])
+
+        return cards
+    finally:
+        await db.close()
+
+
+async def update_card(card_id: int, **kwargs) -> dict | None:
+    """Update a card. Pass only the fields to change.
+
+    Supported kwargs: title, description, col, priority, assignee, labels.
+    """
+    db = await get_db()
+    try:
+        updates: list[str] = []
+        params: list = []
+
+        for field in ("title", "description", "col", "priority", "assignee"):
+            if field in kwargs:
+                updates.append(f"{field} = ?")
+                params.append(kwargs[field])
+
+        if updates:
+            updates.append("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')")
+            params.append(card_id)
+            query = f"UPDATE kanban_cards SET {', '.join(updates)} WHERE id = ?"
+            cursor = await db.execute(query, params)
+            if cursor.rowcount == 0:
+                return None
+
+        if "labels" in kwargs:
+            # Replace labels
+            await db.execute("DELETE FROM kanban_card_labels WHERE card_id = ?", (card_id,))
+            labels = kwargs["labels"]
+            if labels:
+                for lbl in labels:
+                    await db.execute(
+                        "INSERT INTO kanban_card_labels (card_id, label) VALUES (?, ?)",
+                        (card_id, lbl),
+                    )
+
+        if "links" in kwargs:
+            # Replace links
+            await db.execute("DELETE FROM kanban_card_links WHERE card_id = ?", (card_id,))
+            links = kwargs["links"]
+            if links:
+                for link in links:
+                    await db.execute(
+                        "INSERT INTO kanban_card_links (card_id, object_type, object_id) VALUES (?, ?, ?)",
+                        (card_id, link["object_type"], link["object_id"]),
+                    )
+
+        await db.commit()
+        return await get_card(card_id)
+    finally:
+        await db.close()
+
+
+async def delete_card(card_id: int) -> bool:
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM kanban_card_links WHERE card_id = ?", (card_id,))
+        await db.execute("DELETE FROM kanban_card_labels WHERE card_id = ?", (card_id,))
+        cursor = await db.execute("DELETE FROM kanban_cards WHERE id = ?", (card_id,))
+        await db.commit()
+        return cursor.rowcount > 0
     finally:
         await db.close()

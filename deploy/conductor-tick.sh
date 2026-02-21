@@ -1,19 +1,41 @@
 #!/usr/bin/env bash
 # Conductor tick — runs Kamaji's periodic check-in.
 # Called by systemd timer or cron every 15 minutes.
+#
+# Usage:
+#   conductor-tick.sh                  # periodic tick
+#   conductor-tick.sh <task_id>        # event-driven (task completed/failed)
+#   conductor-tick.sh --message <id>   # event-driven (message to kamaji)
 
 set -euo pipefail
+
+TRIGGER_TASK_ID=""
+TRIGGER_MESSAGE_ID=""
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --message)
+            TRIGGER_MESSAGE_ID="${2:-}"
+            shift 2
+            ;;
+        *)
+            TRIGGER_TASK_ID="$1"
+            shift
+            ;;
+    esac
+done
 
 CONFIG_DIR="${HOME}/.config/clade"
 LOG_DIR="${HOME}/.local/share/clade/conductor-logs"
 TICK_PROMPT="${CONFIG_DIR}/conductor-tick.md"
 ENV_FILE="${CONFIG_DIR}/conductor.env"
 
-# Concurrency guard — only one tick at a time
+# Concurrency guard — only one tick at a time, others queue (up to 10 min)
 LOCK_FILE="${CONFIG_DIR}/conductor-tick.lock"
 exec 200>"$LOCK_FILE"
-if ! flock -n 200; then
-    echo "Conductor tick already running, skipping."
+if ! flock -w 600 200; then
+    echo "Conductor tick: could not acquire lock after 10 min, skipping."
     exit 0
 fi
 
@@ -32,8 +54,15 @@ LOG_FILE="${LOG_DIR}/tick_${TIMESTAMP}.log"
 
 # Run the tick
 echo "=== Conductor tick: $(date -u +%Y-%m-%dT%H:%M:%SZ) ===" | tee "$LOG_FILE"
+if [[ -n "$TRIGGER_TASK_ID" ]]; then
+    echo "  Triggered by task #${TRIGGER_TASK_ID}" | tee -a "$LOG_FILE"
+elif [[ -n "$TRIGGER_MESSAGE_ID" ]]; then
+    echo "  Triggered by message #${TRIGGER_MESSAGE_ID}" | tee -a "$LOG_FILE"
+fi
 
-claude -p "$(cat "$TICK_PROMPT")" \
+env ${TRIGGER_TASK_ID:+TRIGGER_TASK_ID=$TRIGGER_TASK_ID} \
+    ${TRIGGER_MESSAGE_ID:+TRIGGER_MESSAGE_ID=$TRIGGER_MESSAGE_ID} \
+    claude -p "$(cat "$TICK_PROMPT")" \
     --dangerously-skip-permissions \
     --max-turns 20 \
     --mcp-config "${HOME}/.config/clade/conductor-mcp.json" \

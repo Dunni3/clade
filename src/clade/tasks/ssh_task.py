@@ -81,7 +81,7 @@ def build_remote_script(
     session_name: str,
     working_dir: str | None,
     prompt_b64: str,
-    max_turns: int = 50,
+    max_turns: int | None = None,
     auto_pull: bool = False,
     task_id: int | None = None,
     mailbox_url: str | None = None,
@@ -160,7 +160,7 @@ cat > "$RUNNER" << RUNNEREOF
 #!/bin/bash
 {env_lines}
 {cd_cmd}
-claude -p "\\$(cat $PROMPT_FILE)" --dangerously-skip-permissions --max-turns {max_turns}
+claude -p "\\$(cat $PROMPT_FILE)" --dangerously-skip-permissions{f' --max-turns {max_turns}' if max_turns is not None else ''}
 rm -f "$PROMPT_FILE" "$RUNNER"
 RUNNEREOF
 chmod +x "$RUNNER"
@@ -177,7 +177,7 @@ def initiate_task(
     working_dir: str | None,
     prompt: str,
     session_name: str,
-    max_turns: int = 50,
+    max_turns: int | None = None,
     ssh_timeout: int = 30,
     auto_pull: bool = False,
     task_id: int | None = None,
