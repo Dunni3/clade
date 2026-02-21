@@ -83,7 +83,7 @@ class CreateTaskRequest(BaseModel):
     session_name: str | None = None
     host: str | None = None
     working_dir: str | None = None
-    thrum_id: int | None = None
+    parent_task_id: int | None = None
 
 
 class UpdateTaskRequest(BaseModel):
@@ -100,7 +100,15 @@ class TaskSummary(BaseModel):
     created_at: str
     started_at: str | None = None
     completed_at: str | None = None
-    thrum_id: int | None = None
+    parent_task_id: int | None = None
+    root_task_id: int | None = None
+
+
+class LinkedCardInfo(BaseModel):
+    id: int
+    title: str
+    col: str
+    priority: str
 
 
 class TaskDetail(TaskSummary):
@@ -111,6 +119,8 @@ class TaskDetail(TaskSummary):
     output: str | None = None
     messages: list[FeedMessage] = []
     events: list["TaskEvent"] = []
+    children: list[TaskSummary] = []
+    linked_cards: list[LinkedCardInfo] = []
 
 
 class CreateTaskResponse(BaseModel):
@@ -154,9 +164,6 @@ class KeyInfo(BaseModel):
     created_at: str
 
 
-# -- Thrums --
-
-
 # -- Members --
 
 
@@ -174,43 +181,119 @@ class MemberActivityResponse(BaseModel):
     members: list[MemberActivity]
 
 
-# -- Thrums --
+# -- Task Trees --
 
 
-class CreateThrumRequest(BaseModel):
-    title: str = ""
-    goal: str = ""
-    plan: str | None = None
-    priority: str = "normal"
+class TreeSummary(BaseModel):
+    root_task_id: int
+    subject: str
+    creator: str
+    created_at: str
+    total_tasks: int
+    completed: int
+    failed: int
+    in_progress: int
+    pending: int
+    killed: int = 0
 
 
-class UpdateThrumRequest(BaseModel):
-    title: str | None = None
-    goal: str | None = None
-    plan: str | None = None
-    status: str | None = None
-    priority: str | None = None
-    output: str | None = None
-
-
-class ThrumSummary(BaseModel):
+class TreeNode(BaseModel):
     id: int
     creator: str
-    title: str
-    goal: str
+    assignee: str
+    subject: str
     status: str
-    priority: str
     created_at: str
     started_at: str | None = None
     completed_at: str | None = None
-
-
-class ThrumDetail(ThrumSummary):
-    plan: str | None = None
+    parent_task_id: int | None = None
+    root_task_id: int | None = None
+    prompt: str | None = None
+    session_name: str | None = None
+    host: str | None = None
+    working_dir: str | None = None
     output: str | None = None
-    tasks: list[TaskSummary] = []
+    children: list["TreeNode"] = []
+    linked_cards: list[LinkedCardInfo] = []
 
 
-class CreateThrumResponse(BaseModel):
+TreeNode.model_rebuild()
+
+
+# -- Morsels --
+
+
+class MorselLink(BaseModel):
+    object_type: str
+    object_id: str
+
+
+class CreateMorselRequest(BaseModel):
+    body: str
+    tags: list[str] = []
+    links: list[MorselLink] = []
+
+
+class MorselSummary(BaseModel):
     id: int
-    message: str = "Thrum created"
+    creator: str
+    body: str
+    created_at: str
+    tags: list[str] = []
+    links: list[MorselLink] = []
+
+
+# -- Embers (registry) --
+
+
+class UpsertEmberRequest(BaseModel):
+    ember_url: str
+
+
+class EmberEntry(BaseModel):
+    name: str
+    ember_url: str
+    created_at: str
+    updated_at: str
+
+
+# -- Kanban --
+
+
+class CardLink(BaseModel):
+    object_type: str  # "task", "morsel", "tree", "message", "card"
+    object_id: str
+
+
+class CreateCardRequest(BaseModel):
+    title: str
+    description: str = ""
+    col: str = "backlog"
+    priority: str = "normal"
+    assignee: str | None = None
+    labels: list[str] = []
+    links: list[CardLink] = []
+
+
+class UpdateCardRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    col: str | None = None
+    priority: str | None = None
+    assignee: str | None = None
+    labels: list[str] | None = None
+    links: list[CardLink] | None = None
+
+
+class CardSummary(BaseModel):
+    id: int
+    title: str
+    description: str
+    col: str
+    priority: str
+    assignee: str | None = None
+    creator: str
+    created_at: str
+    updated_at: str
+    labels: list[str] = []
+    links: list[CardLink] = []

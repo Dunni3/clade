@@ -4,7 +4,7 @@ import { getTasks, getMemberActivity } from '../api/mailbox';
 import { useAuthStore } from '../store/authStore';
 import type { TaskSummary } from '../types/mailbox';
 
-const STATUSES = ['', 'pending', 'launched', 'in_progress', 'completed', 'failed'];
+const STATUSES = ['', 'pending', 'launched', 'in_progress', 'completed', 'failed', 'killed'];
 
 const statusColors: Record<string, string> = {
   pending: 'bg-gray-500/20 text-gray-300',
@@ -12,6 +12,7 @@ const statusColors: Record<string, string> = {
   in_progress: 'bg-amber-500/20 text-amber-300',
   completed: 'bg-emerald-500/20 text-emerald-300',
   failed: 'bg-red-500/20 text-red-300',
+  killed: 'bg-orange-500/20 text-orange-300',
 };
 
 function formatDate(iso: string) {

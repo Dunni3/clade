@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from mcp.server.fastmcp import FastMCP
 
 from ...communication.mailbox_client import MailboxClient
@@ -39,7 +41,7 @@ def create_conductor_tools(
         if not worker:
             return None
         url = worker.get("ember_url")
-        key = worker.get("ember_api_key")
+        key = worker.get("ember_api_key") or worker.get("api_key")
         if not url or not key:
             return None
         return EmberClient(url, key, verify_ssl=False)
@@ -49,9 +51,10 @@ def create_conductor_tools(
         brother: str,
         prompt: str,
         subject: str = "",
-        thrum_id: int | None = None,
+        parent_task_id: int | None = None,
         working_dir: str | None = None,
         max_turns: int | None = None,
+        card_id: int | None = None,
     ) -> str:
         """Delegate a task to a worker brother via their Ember server.
 
@@ -62,9 +65,10 @@ def create_conductor_tools(
             brother: Worker name (e.g. "oppy").
             prompt: The task prompt/instructions.
             subject: Short description of the task.
-            thrum_id: Optional thrum ID to link this task to.
+            parent_task_id: Optional parent task ID for task tree linking. If not provided, auto-reads from TRIGGER_TASK_ID env var.
             working_dir: Override the worker's default working directory.
             max_turns: Optional maximum Claude turns. If not set, no turn limit is applied.
+            card_id: Optional kanban card ID to link this task to. Creates a formal link so the card tracks which tasks are working on it.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -78,17 +82,33 @@ def create_conductor_tools(
         if ember is None:
             return f"Worker '{brother}' has no Ember configured."
 
+        # Auto-link parent from env if not explicitly provided
+        if parent_task_id is None:
+            trigger_id = os.environ.get("TRIGGER_TASK_ID", "")
+            if trigger_id:
+                try:
+                    parent_task_id = int(trigger_id)
+                except (ValueError, TypeError):
+                    pass  # Invalid env value, ignore
+
         # Create task in Hearth
         try:
             task_result = await mailbox.create_task(
                 assignee=brother,
                 prompt=prompt,
                 subject=subject,
-                thrum_id=thrum_id,
+                parent_task_id=parent_task_id,
             )
             task_id = task_result["id"]
         except Exception as e:
             return f"Error creating task in Hearth: {e}"
+
+        # Link task to card if card_id provided
+        if card_id is not None:
+            try:
+                await mailbox.add_card_link(card_id, "task", str(task_id))
+            except Exception:
+                pass  # Non-fatal: task still created, link just not established
 
         # Send to Ember.
         # Don't pass hearth_url — the Ember process already has the correct
@@ -103,7 +123,7 @@ def create_conductor_tools(
                 working_dir=wd,
                 max_turns=max_turns,
                 hearth_url=None,
-                hearth_api_key=worker.get("hearth_api_key"),
+                hearth_api_key=worker.get("hearth_api_key") or worker.get("api_key"),
                 hearth_name=brother,
                 sender_name=mailbox_name,
             )
@@ -122,12 +142,15 @@ def create_conductor_tools(
             pass
 
         session = ember_result.get("session_name", "?")
-        return (
-            f"Task #{task_id} delegated to {brother}.\n"
-            f"  Subject: {subject or '(none)'}\n"
-            f"  Session: {session}\n"
-            f"  Status: launched"
-        )
+        result_lines = [
+            f"Task #{task_id} delegated to {brother}.",
+            f"  Subject: {subject or '(none)'}",
+            f"  Session: {session}",
+            f"  Status: launched",
+        ]
+        if card_id is not None:
+            result_lines.append(f"  Linked to card: #{card_id}")
+        return "\n".join(result_lines)
 
     @mcp.tool()
     async def check_worker_health(brother: str | None = None) -> str:
@@ -193,14 +216,21 @@ def create_conductor_tools(
                 continue
             try:
                 result = await ember.active_tasks()
-                active = result.get("active_task")
-                if active:
-                    lines.append(
-                        f"{name}: Active\n"
-                        f"  Task ID: {active.get('task_id', 'N/A')}\n"
-                        f"  Subject: {active.get('subject', '(none)')}\n"
-                        f"  Session: {active.get('session_name', '?')}"
-                    )
+                # New multi-aspen format, with fallback for old Embers
+                aspens = result.get("aspens")
+                if aspens is None:
+                    active = result.get("active_task")
+                    aspens = [active] if active else []
+
+                if aspens:
+                    n = len(aspens)
+                    lines.append(f"{name}: {n} active aspen{'s' if n != 1 else ''}")
+                    for a in aspens:
+                        lines.append(
+                            f"  - Task ID: {a.get('task_id', 'N/A')}\n"
+                            f"    Subject: {a.get('subject', '(none)')}\n"
+                            f"    Session: {a.get('session_name', '?')}"
+                        )
                 else:
                     lines.append(f"{name}: Idle")
             except Exception as e:

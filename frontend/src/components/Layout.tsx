@@ -7,7 +7,9 @@ const navItems = [
   { to: '/', label: 'Inbox' },
   { to: '/feed', label: 'Feed' },
   { to: '/tasks', label: 'Tasks' },
-  { to: '/thrums', label: 'Thrums' },
+  { to: '/trees', label: 'Trees' },
+  { to: '/board', label: 'Board' },
+  { to: '/morsels', label: 'Morsels' },
   { to: '/status', label: 'Status' },
   { to: '/compose', label: 'Compose' },
   { to: '/settings', label: 'Settings' },
@@ -35,7 +37,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <nav className="border-b border-gray-800 bg-gray-900">
-        <div className="mx-auto max-w-4xl flex items-center gap-1 px-4 py-3">
+        <div className="mx-auto max-w-6xl flex items-center gap-1 px-4 py-3">
           <span className="text-lg font-bold text-indigo-400 mr-6">The Hearth</span>
           {navItems.map(({ to, label }) => (
             <NavLink
@@ -59,7 +61,7 @@ export default function Layout() {
           ))}
         </div>
       </nav>
-      <main className="mx-auto max-w-4xl px-4 py-6">
+      <main className="mx-auto max-w-6xl px-4 py-6">
         <Outlet />
       </main>
     </div>

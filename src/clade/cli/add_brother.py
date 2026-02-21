@@ -164,6 +164,9 @@ def add_brother(
     ember_host = None
     actual_ember_port = None
     if setup_ember_flag and ssh_result.success:
+        # Load caller's key for Hearth registration
+        all_keys = load_keys(kp)
+        caller_key = all_keys.get(config.personal_name) or api_key
         ember_host, actual_ember_port = setup_ember(
             ssh_host=ssh_host,
             name=name,
@@ -172,6 +175,7 @@ def add_brother(
             working_dir=working_dir,
             server_url=config.server_url,
             yes=yes,
+            hearth_api_key=caller_key,
         )
 
     # Update config

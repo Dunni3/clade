@@ -130,7 +130,7 @@ curl http://worker:8100/tasks/active \
 
 The conductor runs on the `hearth` container — same as production where the Hearth and Conductor share an EC2 instance. The hearth image pre-bakes the conductor tick script, prompt, and MCP config into `/home/testuser/.config/clade/`.
 
-The Hearth fires conductor ticks automatically via `CONDUCTOR_TICK_CMD` on thrum creation and task completion. You can also trigger a tick manually:
+The Hearth fires conductor ticks automatically via `CONDUCTOR_TICK_CMD` on task completion/failure and messages to the conductor. You can also trigger a tick manually:
 
 ```bash
 # From the host machine — run a conductor tick as testuser:
@@ -177,12 +177,12 @@ From the personal container (or any container with the right env vars):
 3. Ember launches a tmux session with Claude Code
 4. Task status updates flow through the Hearth
 
-### End-to-end thrum flow (event-driven)
-1. Create a thrum via Claude Code on the personal container (using `clade-personal` MCP tools)
-2. Hearth auto-triggers a conductor tick via `CONDUCTOR_TICK_CMD`
-3. Conductor (Kamaji) picks up the thrum and delegates tasks to the worker's Ember
-4. Task completion triggers another conductor tick, which delegates the next step
-5. Thrum completes when all steps are done — no manual intervention needed
+### End-to-end task tree flow (event-driven)
+1. Delegate a task via Claude Code on the personal container (using `clade-personal` MCP tools)
+2. Task completion triggers a conductor tick via `CONDUCTOR_TICK_CMD`
+3. Conductor (Kamaji) reviews the result and delegates follow-up child tasks to the worker's Ember
+4. Each child completion triggers another conductor tick, which delegates the next step
+5. Task tree grows organically until work is complete — no manual intervention needed
 
 ## Common Operations
 
@@ -283,8 +283,8 @@ After `bash scripts/test-compose.sh`, just open `http://localhost:5173` in your 
 **Auth:** Use one of the test API keys (e.g. `testkey-personal`) on the Settings page.
 
 **What works:**
-- All Hearth API calls (messages, tasks, thrums, members, health)
-- Full page navigation (Inbox, Feed, Tasks, Thrums, Status, Compose, Settings)
+- All Hearth API calls (messages, tasks, trees, morsels, members, health)
+- Full page navigation (Inbox, Feed, Tasks, Trees, Morsels, Status, Compose, Settings)
 - Hot reload when editing files in `frontend/`
 
 **What doesn't work:**

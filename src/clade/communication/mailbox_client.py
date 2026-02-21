@@ -131,7 +131,7 @@ class MailboxClient:
         session_name: str | None = None,
         host: str | None = None,
         working_dir: str | None = None,
-        thrum_id: int | None = None,
+        parent_task_id: int | None = None,
     ) -> dict:
         payload: dict = {"assignee": assignee, "prompt": prompt, "subject": subject}
         if session_name is not None:
@@ -140,8 +140,8 @@ class MailboxClient:
             payload["host"] = host
         if working_dir is not None:
             payload["working_dir"] = working_dir
-        if thrum_id is not None:
-            payload["thrum_id"] = thrum_id
+        if parent_task_id is not None:
+            payload["parent_task_id"] = parent_task_id
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.post(
                 self._url("/tasks"),
@@ -222,21 +222,32 @@ class MailboxClient:
             resp.raise_for_status()
             return resp.json()
 
-    # -- Thrums --
-
-    async def create_thrum(
-        self,
-        title: str = "",
-        goal: str = "",
-        plan: str | None = None,
-        priority: str = "normal",
-    ) -> dict:
-        payload: dict = {"title": title, "goal": goal, "priority": priority}
-        if plan is not None:
-            payload["plan"] = plan
+    async def kill_task(self, task_id: int) -> dict:
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.post(
-                self._url("/thrums"),
+                self._url(f"/tasks/{task_id}/kill"),
+                headers=self.headers,
+                timeout=20,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    # -- Morsels --
+
+    async def create_morsel(
+        self,
+        body: str,
+        tags: list[str] | None = None,
+        links: list[dict] | None = None,
+    ) -> dict:
+        payload: dict = {"body": body}
+        if tags:
+            payload["tags"] = tags
+        if links:
+            payload["links"] = links
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.post(
+                self._url("/morsels"),
                 json=payload,
                 headers=self.headers,
                 timeout=10,
@@ -244,20 +255,27 @@ class MailboxClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def get_thrums(
+    async def get_morsels(
         self,
-        status: str | None = None,
         creator: str | None = None,
+        tag: str | None = None,
+        object_type: str | None = None,
+        object_id: int | None = None,
         limit: int = 50,
+        offset: int = 0,
     ) -> list[dict]:
-        params: dict = {"limit": limit}
-        if status:
-            params["status"] = status
+        params: dict = {"limit": limit, "offset": offset}
         if creator:
             params["creator"] = creator
+        if tag:
+            params["tag"] = tag
+        if object_type:
+            params["object_type"] = object_type
+        if object_id is not None:
+            params["object_id"] = object_id
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.get(
-                self._url("/thrums"),
+                self._url("/morsels"),
                 params=params,
                 headers=self.headers,
                 timeout=10,
@@ -265,43 +283,170 @@ class MailboxClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def get_thrum(self, thrum_id: int) -> dict:
+    async def get_morsel(self, morsel_id: int) -> dict:
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.get(
-                self._url(f"/thrums/{thrum_id}"),
+                self._url(f"/morsels/{morsel_id}"),
                 headers=self.headers,
                 timeout=10,
             )
             resp.raise_for_status()
             return resp.json()
 
-    async def update_thrum(
-        self,
-        thrum_id: int,
-        title: str | None = None,
-        goal: str | None = None,
-        plan: str | None = None,
-        status: str | None = None,
-        priority: str | None = None,
-        output: str | None = None,
-    ) -> dict:
-        payload: dict = {}
-        for field, value in [
-            ("title", title),
-            ("goal", goal),
-            ("plan", plan),
-            ("status", status),
-            ("priority", priority),
-            ("output", output),
-        ]:
-            if value is not None:
-                payload[field] = value
+    # -- Trees --
+
+    async def get_trees(self, limit: int = 50, offset: int = 0) -> list[dict]:
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
-            resp = await client.patch(
-                self._url(f"/thrums/{thrum_id}"),
+            resp = await client.get(
+                self._url("/trees"),
+                params={"limit": limit, "offset": offset},
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_tree(self, root_id: int) -> dict:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url(f"/trees/{root_id}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    # -- Ember Registration --
+
+    # -- Kanban --
+
+    async def create_card(
+        self,
+        title: str,
+        description: str = "",
+        col: str = "backlog",
+        priority: str = "normal",
+        assignee: str | None = None,
+        labels: list[str] | None = None,
+        links: list[dict] | None = None,
+    ) -> dict:
+        payload: dict = {"title": title, "description": description, "col": col, "priority": priority}
+        if assignee is not None:
+            payload["assignee"] = assignee
+        if labels:
+            payload["labels"] = labels
+        if links:
+            payload["links"] = links
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.post(
+                self._url("/kanban/cards"),
                 json=payload,
                 headers=self.headers,
                 timeout=10,
             )
             resp.raise_for_status()
             return resp.json()
+
+    async def get_cards(
+        self,
+        col: str | None = None,
+        assignee: str | None = None,
+        creator: str | None = None,
+        priority: str | None = None,
+        label: str | None = None,
+        include_archived: bool = False,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict]:
+        params: dict = {"limit": limit, "offset": offset}
+        if col:
+            params["col"] = col
+        if assignee:
+            params["assignee"] = assignee
+        if creator:
+            params["creator"] = creator
+        if priority:
+            params["priority"] = priority
+        if label:
+            params["label"] = label
+        if include_archived:
+            params["include_archived"] = True
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url("/kanban/cards"),
+                params=params,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_card(self, card_id: int) -> dict:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url(f"/kanban/cards/{card_id}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def update_card(
+        self,
+        card_id: int,
+        **kwargs,
+    ) -> dict:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.patch(
+                self._url(f"/kanban/cards/{card_id}"),
+                json=kwargs,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def add_card_link(
+        self,
+        card_id: int,
+        object_type: str,
+        object_id: str,
+    ) -> dict:
+        """Add a link to a card without replacing existing links."""
+        card = await self.get_card(card_id)
+        existing_links = card.get("links", [])
+        new_link = {"object_type": object_type, "object_id": object_id}
+        if new_link not in existing_links:
+            existing_links.append(new_link)
+            return await self.update_card(card_id, links=existing_links)
+        return card
+
+    async def archive_card(self, card_id: int) -> dict:
+        return await self.update_card(card_id, col="archived")
+
+    async def delete_card(self, card_id: int) -> bool:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.delete(
+                self._url(f"/kanban/cards/{card_id}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            return resp.status_code == 204
+
+    # -- Ember Registration --
+
+    def register_ember_sync(self, name: str, ember_url: str) -> bool:
+        """Register an Ember server with the Hearth. Returns True on success.
+
+        Uses synchronous httpx since ember registration is a one-shot call
+        during CLI setup (which is sync).
+        """
+        resp = httpx.put(
+            self._url(f"/embers/{name}"),
+            json={"ember_url": ember_url},
+            headers=self.headers,
+            timeout=10,
+            verify=self.verify_ssl,
+        )
+        return resp.status_code in (200, 201)
+

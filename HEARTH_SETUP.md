@@ -14,9 +14,9 @@ The Clade has three types of brothers, each with a different MCP server:
 
 | Type | MCP Server | Entry Point | Role |
 |------|-----------|-------------|------|
-| **Personal** | `clade-personal` | `clade.mcp.server_full` | Coordinator (e.g. Doot). Has mailbox, brother listing, SSH task delegation, ember tools, and thrum tools. |
+| **Personal** | `clade-personal` | `clade.mcp.server_full` | Coordinator (e.g. Doot). Has mailbox, brother listing, SSH task delegation, and ember tools. |
 | **Worker** | `clade-worker` | `clade.mcp.server_lite` | Remote workers (e.g. Oppy, Jerry). Has mailbox and ember tools. |
-| **Conductor** | `clade-conductor` | `clade.mcp.server_conductor` | Orchestrator (e.g. Kamaji). Has mailbox, thrum tools, and worker delegation via Ember. |
+| **Conductor** | `clade-conductor` | `clade.mcp.server_conductor` | Orchestrator (e.g. Kamaji). Has mailbox and worker delegation via Ember. |
 
 Most brothers doing self-setup will be **workers**. The personal and conductor servers are typically set up by `clade init` and `clade setup-conductor` respectively.
 
@@ -177,11 +177,9 @@ After restart, you should have the tools for your brother type.
 - `initiate_ssh_task(brother, prompt, subject?, max_turns?)` — delegate a task via SSH
 - `check_ember_health(url?)` — check Ember server health
 - `list_ember_tasks()` — list active tasks on configured Ember
-- Thrum tools (`create_thrum`, `list_thrums`, `get_thrum`, `update_thrum`)
 
 **Conductor** also gets:
-- Thrum tools (`create_thrum`, `list_thrums`, `get_thrum`, `update_thrum`)
-- `delegate_task(worker, prompt, subject?, thrum_id?, max_turns?)` — delegate a task to a worker via Ember
+- `delegate_task(worker, prompt, subject?, parent_task_id?, working_dir?, max_turns?)` — delegate a task to a worker via Ember
 - `check_worker_health(worker?)` — check one or all worker Ember servers
 - `list_worker_tasks(worker?)` — list active tasks on worker Embers
 

@@ -7,6 +7,7 @@ launches Claude Code sessions in local tmux sessions.
 from __future__ import annotations
 
 import os
+import subprocess
 import time
 from dataclasses import dataclass, field
 
@@ -27,7 +28,9 @@ from .runner import (
 
 
 @dataclass
-class ActiveTask:
+class Aspen:
+    """A single running Claude Code session on this Ember."""
+
     task_id: int | None
     session_name: str
     subject: str
@@ -35,44 +38,77 @@ class ActiveTask:
     working_dir: str | None = None
 
 
-@dataclass
-class TaskState:
-    """Tracks the currently running task. No DB — Hearth is source of truth."""
+# Backward-compat alias
+ActiveTask = Aspen
 
-    active: ActiveTask | None = None
+
+@dataclass
+class AspenRegistry:
+    """Tracks all running aspens (concurrent tasks). No DB — Hearth is source of truth."""
+
+    _aspens: dict[str, Aspen] = field(default_factory=dict)
     _history: list[dict] = field(default_factory=list)
 
-    def is_busy(self) -> bool:
-        """Check if there's an active task. Auto-clears stale tasks."""
-        if self.active is None:
-            return False
-        if not check_tmux_session(self.active.session_name):
-            # Session ended — clear it
+    def reap(self) -> None:
+        """Remove aspens whose tmux sessions have died."""
+        dead = [
+            name for name, aspen in self._aspens.items()
+            if not check_tmux_session(aspen.session_name)
+        ]
+        for name in dead:
+            aspen = self._aspens.pop(name)
             self._history.append({
-                "task_id": self.active.task_id,
-                "session_name": self.active.session_name,
-                "subject": self.active.subject,
-                "started_at": self.active.started_at,
+                "task_id": aspen.task_id,
+                "session_name": aspen.session_name,
+                "subject": aspen.subject,
+                "started_at": aspen.started_at,
                 "ended_at": time.time(),
             })
-            self.active = None
-            return False
-        return True
 
-    def set_active(self, task: ActiveTask) -> None:
-        self.active = task
+    def add(self, aspen: Aspen) -> None:
+        """Register a new aspen."""
+        self._aspens[aspen.session_name] = aspen
 
-    def get_info(self) -> dict | None:
-        if self.active is None:
-            return None
-        return {
-            "task_id": self.active.task_id,
-            "session_name": self.active.session_name,
-            "subject": self.active.subject,
-            "started_at": self.active.started_at,
-            "working_dir": self.active.working_dir,
-            "alive": check_tmux_session(self.active.session_name),
-        }
+    def count(self) -> int:
+        """Reap dead sessions and return active count."""
+        self.reap()
+        return len(self._aspens)
+
+    def find_by_task_id(self, task_id: int) -> Aspen | None:
+        """Find an aspen by its task_id. Linear scan."""
+        for aspen in self._aspens.values():
+            if aspen.task_id == task_id:
+                return aspen
+        return None
+
+    def remove(self, session_name: str) -> Aspen | None:
+        """Remove an aspen from the registry and record it in history."""
+        aspen = self._aspens.pop(session_name, None)
+        if aspen is not None:
+            self._history.append({
+                "task_id": aspen.task_id,
+                "session_name": aspen.session_name,
+                "subject": aspen.subject,
+                "started_at": aspen.started_at,
+                "ended_at": time.time(),
+                "killed": True,
+            })
+        return aspen
+
+    def list_info(self) -> list[dict]:
+        """Reap dead sessions and return info dicts for all active aspens."""
+        self.reap()
+        return [
+            {
+                "task_id": a.task_id,
+                "session_name": a.session_name,
+                "subject": a.subject,
+                "started_at": a.started_at,
+                "working_dir": a.working_dir,
+                "alive": check_tmux_session(a.session_name),
+            }
+            for a in self._aspens.values()
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +133,7 @@ class ExecuteTaskRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 _start_time = time.time()
-_state = TaskState()
+_state = AspenRegistry()
 
 _brother_name = os.environ.get("EMBER_BROTHER_NAME", "oppy")
 _default_working_dir = os.environ.get("EMBER_WORKING_DIR")
@@ -111,7 +147,7 @@ async def health():
     return {
         "status": "ok",
         "brother": _brother_name,
-        "active_tasks": 1 if _state.is_busy() else 0,
+        "active_tasks": _state.count(),
         "uptime_seconds": round(time.time() - _start_time, 1),
     }
 
@@ -122,14 +158,6 @@ async def execute_task(
     _token: str = Depends(verify_token),
 ):
     """Execute a task — launches Claude Code in a tmux session."""
-    if _state.is_busy():
-        active = _state.get_info()
-        return {
-            "error": "busy",
-            "message": f"Already running task (session: {active['session_name']})",
-            "active_task": active,
-        }
-
     # Resolve working directory
     wd = req.working_dir or _default_working_dir
 
@@ -175,8 +203,8 @@ async def execute_task(
             "stderr": result.stderr,
         }
 
-    # Track active task
-    _state.set_active(ActiveTask(
+    # Track aspen
+    _state.add(Aspen(
         task_id=req.task_id,
         session_name=session_name,
         subject=req.subject,
@@ -192,19 +220,43 @@ async def execute_task(
     }
 
 
+@app.post("/tasks/{task_id}/kill")
+async def kill_task(
+    task_id: int,
+    _token: str = Depends(verify_token),
+):
+    """Kill a running task by terminating its tmux session."""
+    aspen = _state.find_by_task_id(task_id)
+    if aspen is None:
+        _state.reap()
+        return {"status": "not_found", "task_id": task_id}
+
+    session_name = aspen.session_name
+    try:
+        subprocess.run(
+            ["tmux", "kill-session", "-t", session_name],
+            capture_output=True,
+            timeout=10,
+        )
+    except Exception:
+        pass  # Best-effort — session may already be dead
+
+    _state.remove(session_name)
+    return {"status": "killed", "session_name": session_name, "task_id": task_id}
+
+
 @app.get("/tasks/active")
 async def active_tasks(_token: str = Depends(verify_token)):
     """Get active task info and orphaned tmux sessions."""
-    active = _state.get_info() if _state.is_busy() else None
-    orphaned = list_tmux_sessions(prefix="task-")
-
-    # Filter out the active session from orphaned list
-    if active and active["session_name"] in orphaned:
-        orphaned.remove(active["session_name"])
+    aspens = _state.list_info()
+    active_names = {a["session_name"] for a in aspens}
+    orphaned = [s for s in list_tmux_sessions(prefix="task-") if s not in active_names]
 
     return {
-        "active_task": active,
+        "aspens": aspens,
         "orphaned_sessions": orphaned,
+        # Backward compat: first aspen or None
+        "active_task": aspens[0] if aspens else None,
     }
 
 

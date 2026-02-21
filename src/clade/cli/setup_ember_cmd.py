@@ -44,6 +44,9 @@ def setup_ember_cmd(ctx: click.Context, name: str, port: int, yes: bool) -> None
         click.echo("Run 'clade add-brother' to generate one.", err=True)
         raise SystemExit(1)
 
+    # Load caller's API key for Hearth registration
+    caller_key = keys.get(config.personal_name) or api_key
+
     # Run setup
     ember_host, ember_port = setup_ember(
         ssh_host=bro.ssh,
@@ -53,6 +56,7 @@ def setup_ember_cmd(ctx: click.Context, name: str, port: int, yes: bool) -> None
         working_dir=bro.working_dir,
         server_url=config.server_url,
         yes=yes,
+        hearth_api_key=caller_key,
     )
 
     # Update config

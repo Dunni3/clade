@@ -77,18 +77,20 @@ class TestListEmberTasks:
     async def test_with_active_task(self, mcp):
         mock_ember = AsyncMock(spec=EmberClient)
         mock_ember.active_tasks.return_value = {
-            "active_task": {
-                "task_id": 42,
-                "session_name": "task-oppy-review-123",
-                "subject": "Review code",
-                "working_dir": "~/projects/test",
-                "alive": True,
-            },
+            "aspens": [
+                {
+                    "task_id": 42,
+                    "session_name": "task-oppy-review-123",
+                    "subject": "Review code",
+                    "working_dir": "~/projects/test",
+                    "alive": True,
+                },
+            ],
             "orphaned_sessions": [],
         }
         tools = create_ember_tools(mcp, mock_ember)
         result = await tools["list_ember_tasks"]()
-        assert "Active task" in result
+        assert "Active aspens" in result
         assert "42" in result
         assert "Review code" in result
 
@@ -96,18 +98,18 @@ class TestListEmberTasks:
     async def test_no_active_task(self, mcp):
         mock_ember = AsyncMock(spec=EmberClient)
         mock_ember.active_tasks.return_value = {
-            "active_task": None,
+            "aspens": [],
             "orphaned_sessions": [],
         }
         tools = create_ember_tools(mcp, mock_ember)
         result = await tools["list_ember_tasks"]()
-        assert "No active task" in result
+        assert "No active aspens" in result
 
     @pytest.mark.asyncio
     async def test_orphaned_sessions(self, mcp):
         mock_ember = AsyncMock(spec=EmberClient)
         mock_ember.active_tasks.return_value = {
-            "active_task": None,
+            "aspens": [],
             "orphaned_sessions": ["task-oppy-old-1", "task-oppy-old-2"],
         }
         tools = create_ember_tools(mcp, mock_ember)

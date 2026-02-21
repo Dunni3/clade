@@ -5,17 +5,17 @@ from unittest.mock import patch, MagicMock
 import pytest
 import httpx
 
-from clade.worker.ember import app, _state, ActiveTask
+from clade.worker.ember import app, _state, Aspen, ActiveTask
 from clade.worker.runner import LocalTaskResult
 
 
 @pytest.fixture(autouse=True)
 def reset_state():
     """Reset in-memory state between tests."""
-    _state.active = None
+    _state._aspens = {}
     _state._history = []
     yield
-    _state.active = None
+    _state._aspens = {}
     _state._history = []
 
 
@@ -51,7 +51,7 @@ class TestHealthEndpoint:
     @pytest.mark.asyncio
     @patch("clade.worker.ember._state")
     async def test_health_shows_active_count(self, mock_state):
-        mock_state.is_busy.return_value = True
+        mock_state.count.return_value = 2
         with patch.dict("os.environ", {"HEARTH_API_KEY": "key"}):
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
@@ -59,7 +59,7 @@ class TestHealthEndpoint:
             ) as client:
                 resp = await client.get("/health")
                 data = resp.json()
-                assert data["active_tasks"] == 1
+                assert data["active_tasks"] == 2
 
 
 class TestExecuteEndpoint:
@@ -87,29 +87,37 @@ class TestExecuteEndpoint:
                         assert data["status"] == "launched"
 
     @pytest.mark.asyncio
-    async def test_execute_busy_409(self, auth_headers, env_vars):
+    async def test_execute_concurrent(self, auth_headers, env_vars):
+        """A second task can be launched while one is already running."""
         with patch.dict("os.environ", env_vars):
             with patch("clade.worker.ember.check_tmux_session", return_value=True):
-                # Set up an active task
-                _state.set_active(ActiveTask(
+                # Pre-add an existing aspen
+                _state.add(Aspen(
                     task_id=1,
                     session_name="task-oppy-existing-123",
                     subject="Existing task",
                     started_at=1000000,
                 ))
-                async with httpx.AsyncClient(
-                    transport=httpx.ASGITransport(app=app),
-                    base_url="http://test",
-                ) as client:
-                    resp = await client.post(
-                        "/tasks/execute",
-                        json={"prompt": "do more stuff"},
-                        headers=auth_headers,
+                with patch("clade.worker.ember.launch_local_task") as mock_launch:
+                    mock_launch.return_value = LocalTaskResult(
+                        success=True,
+                        session_name="task-oppy-second-456",
+                        message="Task launched",
                     )
-                    # The endpoint returns 202 with error payload (not a 409 HTTP status)
-                    assert resp.status_code == 202
-                    data = resp.json()
-                    assert data["error"] == "busy"
+                    async with httpx.AsyncClient(
+                        transport=httpx.ASGITransport(app=app),
+                        base_url="http://test",
+                    ) as client:
+                        resp = await client.post(
+                            "/tasks/execute",
+                            json={"prompt": "do more stuff", "subject": "Second"},
+                            headers=auth_headers,
+                        )
+                        assert resp.status_code == 202
+                        data = resp.json()
+                        assert data["status"] == "launched"
+                # Both aspens should be tracked
+                assert len(_state._aspens) == 2
 
     @pytest.mark.asyncio
     async def test_execute_launch_failure(self, auth_headers, env_vars):
@@ -246,13 +254,14 @@ class TestActiveTasksEndpoint:
                         )
                         assert resp.status_code == 200
                         data = resp.json()
+                        assert data["aspens"] == []
                         assert data["active_task"] is None
 
     @pytest.mark.asyncio
     async def test_with_active_task(self, auth_headers, env_vars):
         with patch.dict("os.environ", env_vars):
             with patch("clade.worker.ember.check_tmux_session", return_value=True):
-                _state.set_active(ActiveTask(
+                _state.add(Aspen(
                     task_id=42,
                     session_name="task-oppy-review-123",
                     subject="Review code",
@@ -268,6 +277,9 @@ class TestActiveTasksEndpoint:
                             headers=auth_headers,
                         )
                         data = resp.json()
+                        assert len(data["aspens"]) == 1
+                        assert data["aspens"][0]["task_id"] == 42
+                        # Backward compat shim
                         assert data["active_task"]["task_id"] == 42
                         # Active session should be filtered from orphaned list
                         assert "task-oppy-review-123" not in data["orphaned_sessions"]
@@ -289,6 +301,7 @@ class TestActiveTasksEndpoint:
                             headers=auth_headers,
                         )
                         data = resp.json()
+                        assert data["aspens"] == []
                         assert data["active_task"] is None
                         assert len(data["orphaned_sessions"]) == 2
 

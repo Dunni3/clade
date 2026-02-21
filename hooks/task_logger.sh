@@ -63,7 +63,7 @@ print(json.dumps(payload))
 [ -z "$POST_BODY" ] && exit 0
 
 # POST to the task events API (fire-and-forget, don't block Claude)
-curl -s --max-time 5 \
+curl -sk --max-time 5 \
     -X POST "$HEARTH_URL/api/v1/tasks/$CLAUDE_TASK_ID/log" \
     -H "Authorization: Bearer $HEARTH_API_KEY" \
     -H "Content-Type: application/json" \

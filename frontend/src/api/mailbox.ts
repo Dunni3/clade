@@ -9,9 +9,14 @@ import type {
   UnreadCountResponse,
   TaskSummary,
   TaskDetail,
-  ThrumSummary,
-  ThrumDetail,
   MemberActivityResponse,
+  EmberStatusResponse,
+  TreeSummary,
+  TreeNode,
+  MorselSummary,
+  CardSummary,
+  CreateCardRequest,
+  UpdateCardRequest,
 } from '../types/mailbox';
 
 export async function getInbox(unreadOnly = false, limit = 50): Promise<MessageSummary[]> {
@@ -84,17 +89,8 @@ export async function getTask(id: number): Promise<TaskDetail> {
   return data;
 }
 
-export async function getThrums(params: {
-  status?: string;
-  creator?: string;
-  limit?: number;
-} = {}): Promise<ThrumSummary[]> {
-  const { data } = await apiClient.get<ThrumSummary[]>('/thrums', { params });
-  return data;
-}
-
-export async function getThrum(id: number): Promise<ThrumDetail> {
-  const { data } = await apiClient.get<ThrumDetail>(`/thrums/${id}`);
+export async function killTask(id: number): Promise<TaskDetail> {
+  const { data } = await apiClient.post<TaskDetail>(`/tasks/${id}/kill`);
   return data;
 }
 
@@ -106,4 +102,74 @@ export async function getHealthCheck(): Promise<{ status: string }> {
 export async function getMemberActivity(): Promise<MemberActivityResponse> {
   const { data } = await apiClient.get<MemberActivityResponse>('/members/activity');
   return data;
+}
+
+export async function getEmberStatus(): Promise<EmberStatusResponse> {
+  const { data } = await apiClient.get<EmberStatusResponse>('/embers/status');
+  return data;
+}
+
+export async function getTrees(params: {
+  limit?: number;
+  offset?: number;
+} = {}): Promise<TreeSummary[]> {
+  const { data } = await apiClient.get<TreeSummary[]>('/trees', { params });
+  return data;
+}
+
+export async function getTree(rootId: number): Promise<TreeNode> {
+  const { data } = await apiClient.get<TreeNode>(`/trees/${rootId}`);
+  return data;
+}
+
+export async function getMorsels(params: {
+  creator?: string;
+  tag?: string;
+  object_type?: string;
+  object_id?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<MorselSummary[]> {
+  const { data } = await apiClient.get<MorselSummary[]>('/morsels', { params });
+  return data;
+}
+
+export async function getMorsel(id: number): Promise<MorselSummary> {
+  const { data } = await apiClient.get<MorselSummary>(`/morsels/${id}`);
+  return data;
+}
+
+// -- Kanban --
+
+export async function getCards(params: {
+  col?: string;
+  assignee?: string;
+  creator?: string;
+  priority?: string;
+  label?: string;
+  include_archived?: boolean;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<CardSummary[]> {
+  const { data } = await apiClient.get<CardSummary[]>('/kanban/cards', { params });
+  return data;
+}
+
+export async function getCard(id: number): Promise<CardSummary> {
+  const { data } = await apiClient.get<CardSummary>(`/kanban/cards/${id}`);
+  return data;
+}
+
+export async function createCard(req: CreateCardRequest): Promise<CardSummary> {
+  const { data } = await apiClient.post<CardSummary>('/kanban/cards', req);
+  return data;
+}
+
+export async function updateCard(id: number, req: UpdateCardRequest): Promise<CardSummary> {
+  const { data } = await apiClient.patch<CardSummary>(`/kanban/cards/${id}`, req);
+  return data;
+}
+
+export async function deleteCard(id: number): Promise<void> {
+  await apiClient.delete(`/kanban/cards/${id}`);
 }
