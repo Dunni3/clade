@@ -9,7 +9,6 @@ import click
 from .clade_config import CladeConfig, default_config_path, save_clade_config
 from .identity import generate_personal_identity, write_identity_local
 from .keys import add_key, keys_path
-from .clade_config import default_brothers_config_path
 from .mcp_utils import is_mcp_registered, register_mcp_server
 from .naming import format_suggestion, suggest_name
 
@@ -175,9 +174,6 @@ def _register_personal_mcp(
         env["HEARTH_URL"] = server_url
         env["HEARTH_API_KEY"] = api_key
         env["HEARTH_NAME"] = name
-
-    # Point to brothers-ember.yaml for Ember delegation (file may not exist yet)
-    env["BROTHERS_CONFIG"] = str(default_brothers_config_path())
 
     register_mcp_server(
         server_name,

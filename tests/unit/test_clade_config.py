@@ -464,3 +464,25 @@ class TestLoadBrothersRegistry:
 
         reg2 = load_brothers_registry(config_dir=tmp_path)
         assert reg2["oppy"]["working_dir"] == "~/new/path"
+
+    def test_corrupted_keys_json(self, tmp_path: Path):
+        """Corrupted keys.json should not crash — returns entries with empty keys."""
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_host="100.71.57.52",
+                    ember_port=8100,
+                ),
+            },
+        )
+        save_clade_config(cfg, tmp_path / "clade.yaml")
+
+        # Write corrupted keys.json
+        (tmp_path / "keys.json").write_text("{not valid json!!!")
+
+        registry = load_brothers_registry(config_dir=tmp_path)
+
+        # Should still return the brother, just with empty API keys
+        assert "oppy" in registry
+        assert registry["oppy"]["ember_api_key"] == ""

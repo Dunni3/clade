@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from datetime import date
@@ -104,7 +105,7 @@ def load_brothers_registry(config_dir: Path | None = None) -> dict[str, dict]:
 
     Returns:
         Dict mapping brother names to config dicts, or empty dict if
-        clade.yaml doesn't exist or has no Ember brothers.
+        clade.yaml doesn't exist, has no Ember brothers, or keys.json is unreadable.
     """
     from .keys import load_keys, keys_path
 
@@ -112,7 +113,10 @@ def load_brothers_registry(config_dir: Path | None = None) -> dict[str, dict]:
     if config is None:
         return {}
 
-    keys = load_keys(keys_path(config_dir))
+    try:
+        keys = load_keys(keys_path(config_dir))
+    except (json.JSONDecodeError, OSError):
+        keys = {}
     return build_brothers_registry(config, keys)
 
 
