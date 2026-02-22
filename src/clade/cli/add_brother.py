@@ -6,14 +6,16 @@ import click
 
 from .clade_config import (
     BrotherEntry,
+    default_brothers_config_path,
     default_config_path,
     load_clade_config,
     save_clade_config,
 )
+from .conductor_setup import build_brothers_config
 from .ember_setup import setup_ember
 from .identity import generate_worker_identity, write_identity_remote
 from .keys import add_key, keys_path, load_keys
-from .mcp_utils import register_mcp_remote
+from .mcp_utils import register_mcp_remote, update_mcp_env, update_mcp_env_remote
 from .naming import format_suggestion, suggest_name
 from .ssh_utils import check_remote_prereqs, deploy_clade_remote, run_remote, test_ssh
 
@@ -192,6 +194,30 @@ def add_brother(
     save_clade_config(config, config_path)
     click.echo(f"Brother '{name}' added to {config_path}")
 
+    # Regenerate brothers-ember.yaml if any brother has Ember
+    all_keys = load_keys(keys_path(config_dir))
+    has_ember_brothers = any(b.ember_host for b in config.brothers.values())
+    if has_ember_brothers:
+        brothers_yaml = build_brothers_config(config.brothers, all_keys)
+        brothers_path = default_brothers_config_path(config_dir)
+        brothers_path.parent.mkdir(parents=True, exist_ok=True)
+        brothers_path.write_text(brothers_yaml)
+        click.echo(f"Brothers config written to {brothers_path}")
+
+        # Update local MCP env to point to brothers config
+        updated = update_mcp_env("clade-personal", {"BROTHERS_CONFIG": str(brothers_path)})
+        if updated:
+            click.echo("  Updated local clade-personal MCP env")
+
+        # Deploy brothers config to each Ember brother and update their remote MCP env
+        for bro_name, bro in config.brothers.items():
+            if not bro.ember_host:
+                continue
+            _deploy_brothers_config_remote(
+                ssh_host=bro.ssh,
+                brothers_yaml=brothers_yaml,
+            )
+
     # Summary
     click.echo()
     click.echo(click.style("Summary:", bold=True))
@@ -324,3 +350,34 @@ def _register_key_with_hearth(
         click.echo(
             click.style(f"  Warning: could not reach Hearth to register key: {e}", fg="yellow")
         )
+
+
+def _deploy_brothers_config_remote(
+    ssh_host: str,
+    brothers_yaml: str,
+) -> None:
+    """Deploy brothers-ember.yaml to a remote brother and update their MCP env."""
+    import base64
+
+    encoded = base64.b64encode(brothers_yaml.encode()).decode()
+    script = f"""\
+#!/bin/bash
+set -e
+CONFIG_DIR="$HOME/.config/clade"
+mkdir -p "$CONFIG_DIR"
+echo "{encoded}" | base64 -d > "$CONFIG_DIR/brothers-ember.yaml"
+echo "BROTHERS_CONFIG_OK"
+"""
+    result = run_remote(ssh_host, script, timeout=15)
+    if result.success and "BROTHERS_CONFIG_OK" in result.stdout:
+        click.echo(click.style(f"  Deployed brothers config to {ssh_host}", fg="green"))
+        # Update remote MCP env
+        env_result = update_mcp_env_remote(
+            ssh_host,
+            "clade-worker",
+            {"BROTHERS_CONFIG": "~/.config/clade/brothers-ember.yaml"},
+        )
+        if env_result.success and "ENV_UPDATED" in env_result.stdout:
+            click.echo(click.style(f"  Updated remote clade-worker MCP env on {ssh_host}", fg="green"))
+    else:
+        click.echo(click.style(f"  Warning: failed to deploy brothers config to {ssh_host}", fg="yellow"))

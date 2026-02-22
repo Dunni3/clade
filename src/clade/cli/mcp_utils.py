@@ -91,6 +91,74 @@ def is_mcp_registered(name: str, path: Path | None = None) -> bool:
     return name in data.get("mcpServers", {})
 
 
+def update_mcp_env(
+    server_name: str,
+    env_updates: dict[str, str],
+    path: Path | None = None,
+) -> bool:
+    """Merge env vars into an existing MCP server registration.
+
+    Args:
+        server_name: MCP server name to update.
+        env_updates: Dict of env vars to merge.
+        path: Path to claude.json.
+
+    Returns:
+        True if the server existed and was updated, False otherwise.
+    """
+    config = read_claude_json(path)
+    servers = config.get("mcpServers", {})
+    if server_name not in servers:
+        return False
+    servers[server_name].setdefault("env", {}).update(env_updates)
+    write_claude_json(config, path)
+    return True
+
+
+def update_mcp_env_remote(
+    host: str,
+    server_name: str,
+    env_updates: dict[str, str],
+    ssh_key: str | None = None,
+) -> SSHResult:
+    """Merge env vars into an existing MCP server registration on a remote host.
+
+    Args:
+        host: SSH host string.
+        server_name: MCP server name to update.
+        env_updates: Dict of env vars to merge.
+        ssh_key: Optional SSH key path.
+
+    Returns:
+        SSHResult from the remote operation.
+    """
+    env_items = ", ".join(f"'{k}': '{v}'" for k, v in env_updates.items())
+    env_literal = f"{{{env_items}}}"
+    script = f"""\
+#!/bin/bash
+set -e
+python3 -c "
+import json, os, pathlib
+
+claude_json = pathlib.Path(os.path.expanduser('~/.claude.json'))
+if not claude_json.exists():
+    print('NO_FILE')
+    exit(0)
+
+data = json.loads(claude_json.read_text())
+servers = data.get('mcpServers', {{}})
+if '{server_name}' not in servers:
+    print('NOT_FOUND')
+    exit(0)
+
+servers['{server_name}'].setdefault('env', {{}}).update({env_literal})
+claude_json.write_text(json.dumps(data, indent=2) + '\\n')
+print('ENV_UPDATED')
+"
+"""
+    return run_remote(host, script, ssh_key=ssh_key, timeout=15)
+
+
 def register_mcp_remote(
     host: str,
     server_name: str,

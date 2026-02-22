@@ -6,10 +6,12 @@ Requires env vars: HEARTH_URL, HEARTH_API_KEY, HEARTH_NAME (or legacy MAILBOX_* 
 
 import os
 
+import yaml
 from mcp.server.fastmcp import FastMCP
 
 from ..communication.mailbox_client import MailboxClient
 from ..worker.client import EmberClient
+from .tools.delegation_tools import create_delegation_tools
 from .tools.ember_tools import create_ember_tools
 from .tools.kanban_tools import create_kanban_tools
 from .tools.mailbox_tools import create_mailbox_tools
@@ -37,6 +39,16 @@ create_kanban_tools(mcp, _mailbox)
 _ember_url = os.environ.get("EMBER_URL")
 _ember = EmberClient(_ember_url, _hearth_api_key, verify_ssl=False) if _ember_url and _hearth_api_key else None
 create_ember_tools(mcp, _ember)
+
+# Load brothers registry for Ember delegation
+_brothers_config_path = os.environ.get("BROTHERS_CONFIG")
+_brothers_registry: dict[str, dict] = {}
+if _brothers_config_path and os.path.exists(_brothers_config_path):
+    with open(_brothers_config_path) as f:
+        _brothers_data = yaml.safe_load(f) or {}
+    _brothers_registry = _brothers_data.get("brothers", {})
+
+create_delegation_tools(mcp, _mailbox, _brothers_registry, mailbox_name=_hearth_name)
 
 
 def main():

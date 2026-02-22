@@ -56,6 +56,20 @@ def default_config_path(config_dir: Path | None = None) -> Path:
     return Path.home() / ".config" / "clade" / "clade.yaml"
 
 
+def default_brothers_config_path(config_dir: Path | None = None) -> Path:
+    """Return the default path for brothers-ember.yaml.
+
+    Args:
+        config_dir: Override config directory. If None, uses ~/.config/clade.
+    """
+    if config_dir:
+        return config_dir / "brothers-ember.yaml"
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return Path(xdg) / "clade" / "brothers-ember.yaml"
+    return Path.home() / ".config" / "clade" / "brothers-ember.yaml"
+
+
 def load_clade_config(path: Path | None = None) -> CladeConfig | None:
     """Load a CladeConfig from YAML.
 

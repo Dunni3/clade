@@ -69,6 +69,34 @@ def build_runner_script(
     if working_dir:
         lines.append(f"cd {working_dir} || exit 1")
 
+        # Git worktree isolation: if inside a git repo, create an isolated worktree
+        # so concurrent tasks don't step on each other.
+        lines.append("")
+        lines.append("# Worktree isolation")
+        lines.append("if git rev-parse --git-dir > /dev/null 2>&1; then")
+        lines.append('    _WT_BASE="$HOME/.clade-worktrees"')
+        lines.append('    mkdir -p "$_WT_BASE"')
+        lines.append(f'    _WT_DIR="$_WT_BASE/{session_name}"')
+        lines.append('    _GIT_ROOT="$(git rev-parse --show-toplevel)"')
+        lines.append("")
+        lines.append(f'    git worktree add "$_WT_DIR" -b "clade/{session_name}" 2>/dev/null || \\')
+        lines.append('        git worktree add "$_WT_DIR" HEAD --detach 2>/dev/null')
+        lines.append("")
+        lines.append('    if [ -d "$_WT_DIR" ]; then')
+        lines.append('        cd "$_WT_DIR"')
+        lines.append("        _cleanup_worktree() {")
+        lines.append('            cd "$_GIT_ROOT" 2>/dev/null || cd /tmp')
+        lines.append('            if git -C "$_WT_DIR" diff --quiet 2>/dev/null && \\')
+        lines.append('               git -C "$_WT_DIR" diff --cached --quiet 2>/dev/null; then')
+        lines.append('                git worktree remove "$_WT_DIR" 2>/dev/null || true')
+        lines.append(f'                git branch -d "clade/{session_name}" 2>/dev/null || true')
+        lines.append("            fi")
+        lines.append("        }")
+        lines.append("        trap _cleanup_worktree EXIT HUP TERM")
+        lines.append("    fi")
+        lines.append("fi")
+        lines.append("")
+
     # Run Claude, capturing exit code
     lines.append('echo "$(date -Iseconds) launching claude" >> "$LOGFILE"')
     claude_cmd = f'claude -p "$(cat {prompt_path})" --dangerously-skip-permissions'
