@@ -416,7 +416,7 @@ export default function KanbanPage() {
       {/* Detail / Edit panel */}
       {selectedCard && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setSelectedCard(null)}>
-          <div className="bg-gray-900 border border-gray-700 rounded-lg w-full max-w-lg mx-4 p-5" onClick={e => e.stopPropagation()}>
+          <div className="bg-gray-900 border border-gray-700 rounded-lg w-full max-w-lg mx-4 p-5 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             {editingCard ? (
               <div className="space-y-3">
                 <h2 className="text-lg font-semibold text-gray-100">Edit Card</h2>
@@ -494,7 +494,7 @@ export default function KanbanPage() {
                   )}
                 </div>
                 {selectedCard.description && (
-                  <p className="text-sm text-gray-400 mb-4 whitespace-pre-wrap">{selectedCard.description}</p>
+                  <p className="text-sm text-gray-400 mb-4 whitespace-pre-wrap max-h-60 overflow-y-auto">{selectedCard.description}</p>
                 )}
                 {selectedCard.links && selectedCard.links.length > 0 && (() => {
                   const taskLinks = selectedCard.links.filter(l => l.object_type === 'task');
