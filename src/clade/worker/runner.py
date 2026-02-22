@@ -65,6 +65,29 @@ def build_runner_script(
     if hearth_name:
         lines.append(f"export HEARTH_NAME='{hearth_name}'")
 
+    # Failure reporting trap — catches pre-Claude failures (e.g. cd to bad dir)
+    if task_id is not None:
+        lines.append("")
+        lines.append("# Auto-report failure on unexpected exit")
+        lines.append("_CLAUDE_STARTED=0")
+        lines.append("_report_failure() {")
+        lines.append("    local rc=$1")
+        lines.append('    if [ "$rc" -ne 0 ] && [ -n "$CLAUDE_TASK_ID" ] && [ -n "$HEARTH_URL" ] && [ -n "$HEARTH_API_KEY" ]; then')
+        lines.append("        local msg")
+        lines.append('        if [ "$_CLAUDE_STARTED" -eq 0 ]; then')
+        lines.append('            msg="Runner script failed before Claude started (exit code $rc)"')
+        lines.append("        else")
+        lines.append('            msg="Session exited with code $rc"')
+        lines.append("        fi")
+        lines.append('        curl -skf -X PATCH "$HEARTH_URL/api/v1/tasks/$CLAUDE_TASK_ID" \\')
+        lines.append('            -H "Authorization: Bearer $HEARTH_API_KEY" \\')
+        lines.append('            -H "Content-Type: application/json" \\')
+        lines.append('            -d "{\\"status\\":\\"failed\\",\\"output\\":\\"$msg\\"}" \\')
+        lines.append("            >/dev/null 2>&1 || true")
+        lines.append("    fi")
+        lines.append("}")
+        lines.append("trap '_report_failure $?' EXIT")
+
     # Change to working directory
     if working_dir:
         lines.append(f"cd {working_dir} || exit 1")
@@ -92,13 +115,18 @@ def build_runner_script(
         lines.append(f'                git branch -d "clade/{session_name}" 2>/dev/null || true')
         lines.append("            fi")
         lines.append("        }")
-        lines.append("        trap _cleanup_worktree EXIT HUP TERM")
+        if task_id is not None:
+            lines.append("        trap '_rc=$?; _cleanup_worktree; _report_failure $_rc' EXIT HUP TERM")
+        else:
+            lines.append("        trap _cleanup_worktree EXIT HUP TERM")
         lines.append("    fi")
         lines.append("fi")
         lines.append("")
 
     # Run Claude, capturing exit code
     lines.append('echo "$(date -Iseconds) launching claude" >> "$LOGFILE"')
+    if task_id is not None:
+        lines.append("_CLAUDE_STARTED=1")
     claude_cmd = f'claude -p "$(cat {prompt_path})" --dangerously-skip-permissions'
     if max_turns is not None:
         claude_cmd += f" --max-turns {max_turns}"
@@ -106,21 +134,10 @@ def build_runner_script(
     lines.append('EXIT_CODE=$?')
     lines.append('echo "$(date -Iseconds) claude exited with code $EXIT_CODE" >> "$LOGFILE"')
 
-    # Auto-mark task failed if session exits without brother updating status
-    if task_id is not None:
-        lines.append("")
-        lines.append("# Auto-mark task failed if session exited without completing")
-        lines.append('if [ -n "$CLAUDE_TASK_ID" ] && [ -n "$HEARTH_URL" ] && [ -n "$HEARTH_API_KEY" ]; then')
-        lines.append('    curl -skf -X PATCH "$HEARTH_URL/api/v1/tasks/$CLAUDE_TASK_ID" \\')
-        lines.append('        -H "Authorization: Bearer $HEARTH_API_KEY" \\')
-        lines.append('        -H "Content-Type: application/json" \\')
-        lines.append('        -d "{\\"status\\":\\"failed\\",\\"output\\":\\"Session exited with code $EXIT_CODE\\"}" \\')
-        lines.append('        >/dev/null 2>&1 || true')
-        lines.append("fi")
-
     # Self-cleanup (keep log on failure for debugging)
     lines.append(f'rm -f "{prompt_path}" "$0"')
     lines.append('[ "$EXIT_CODE" -eq 0 ] && rm -f "$LOGFILE"')
+    lines.append('exit $EXIT_CODE')
 
     runner_fd, runner_path = tempfile.mkstemp(
         prefix="claude_runner_", suffix=".sh", dir="/tmp"

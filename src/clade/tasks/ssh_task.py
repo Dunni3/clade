@@ -136,23 +136,40 @@ fi"""
 
     # Export env vars for hook-based task logging (only if all three are provided)
     env_lines = ""
-    exit_handler = ""
+    trap_setup = ""
+    claude_started_flag = ""
+    capture_exit = ""
+    exit_line = ""
     if task_id is not None and mailbox_url and mailbox_api_key:
         env_lines = (
             f"export CLAUDE_TASK_ID={task_id}\n"
             f"export HEARTH_URL='{mailbox_url}'\n"
             f"export HEARTH_API_KEY='{mailbox_api_key}'"
         )
-        exit_handler = """\
-EXIT_CODE=\\$?
-# Auto-mark task failed if session exited without completing
-if [ -n "\\$CLAUDE_TASK_ID" ] && [ -n "\\$HEARTH_URL" ] && [ -n "\\$HEARTH_API_KEY" ]; then
-    curl -skf -X PATCH "\\$HEARTH_URL/api/v1/tasks/\\$CLAUDE_TASK_ID" \\
-        -H "Authorization: Bearer \\$HEARTH_API_KEY" \\
-        -H "Content-Type: application/json" \\
-        -d "{{\\"status\\":\\"failed\\",\\"output\\":\\"Session exited with code \\$EXIT_CODE\\"}}" \\
-        >/dev/null 2>&1 || true
-fi"""
+        trap_setup = """\
+
+# Auto-report failure on unexpected exit
+_CLAUDE_STARTED=0
+_report_failure() {
+    local rc=\\$1
+    if [ "\\$rc" -ne 0 ] && [ -n "\\$CLAUDE_TASK_ID" ] && [ -n "\\$HEARTH_URL" ] && [ -n "\\$HEARTH_API_KEY" ]; then
+        local msg
+        if [ "\\$_CLAUDE_STARTED" -eq 0 ]; then
+            msg="Runner script failed before Claude started (exit code \\$rc)"
+        else
+            msg="Session exited with code \\$rc"
+        fi
+        curl -skf -X PATCH "\\$HEARTH_URL/api/v1/tasks/\\$CLAUDE_TASK_ID" \\
+            -H "Authorization: Bearer \\$HEARTH_API_KEY" \\
+            -H "Content-Type: application/json" \\
+            -d "{\\"status\\":\\"failed\\",\\"output\\":\\"\\$msg\\"}" \\
+            >/dev/null 2>&1 || true
+    fi
+}
+trap '_report_failure \\$?' EXIT"""
+        claude_started_flag = "\n_CLAUDE_STARTED=1"
+        capture_exit = "\nEXIT_CODE=\\$?"
+        exit_line = "\nexit \\$EXIT_CODE"
 
     return f"""\
 #!/bin/bash
@@ -168,11 +185,10 @@ echo '{prompt_b64}' | base64 -d > "$PROMPT_FILE"
 RUNNER=$(mktemp /tmp/claude_runner_XXXXXX.sh)
 cat > "$RUNNER" << RUNNEREOF
 #!/bin/bash
-{env_lines}
-{cd_cmd}
-claude -p "\\$(cat $PROMPT_FILE)" --dangerously-skip-permissions{f' --max-turns {max_turns}' if max_turns is not None else ''}
-{exit_handler}
-rm -f "$PROMPT_FILE" "$RUNNER"
+{env_lines}{trap_setup}
+{cd_cmd}{claude_started_flag}
+claude -p "\\$(cat $PROMPT_FILE)" --dangerously-skip-permissions{f' --max-turns {max_turns}' if max_turns is not None else ''}{capture_exit}
+rm -f "$PROMPT_FILE" "$RUNNER"{exit_line}
 RUNNEREOF
 chmod +x "$RUNNER"
 
