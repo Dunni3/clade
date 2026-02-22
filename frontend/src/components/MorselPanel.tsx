@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { getMorsels } from '../api/mailbox';
+import Linkify from './Linkify';
 import type { MorselSummary, MorselLink } from '../types/mailbox';
 
 const senderColors: Record<string, string> = {
@@ -59,7 +60,7 @@ function MorselCard({ morsel }: { morsel: MorselSummary }) {
         ))}
         <span className="text-xs text-gray-600 ml-auto">{formatRelativeDate(morsel.created_at)}</span>
       </div>
-      <p className="text-sm text-gray-300 whitespace-pre-wrap">{morsel.body}</p>
+      <p className="text-sm text-gray-300 whitespace-pre-wrap"><Linkify>{morsel.body}</Linkify></p>
       {morsel.links.length > 0 && (
         <div className="flex items-center gap-2 mt-2">
           {morsel.links.map((link, i) => renderLink(link, i))}

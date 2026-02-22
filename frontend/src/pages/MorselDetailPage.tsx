@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getMorsel } from '../api/mailbox';
+import Linkify from '../components/Linkify';
 import type { MorselSummary } from '../types/mailbox';
 
 const senderColors: Record<string, string> = {
@@ -84,7 +85,7 @@ export default function MorselDetailPage() {
         )}
 
         {/* Body */}
-        <div className="text-sm text-gray-300 whitespace-pre-wrap mb-4">{morsel.body}</div>
+        <div className="text-sm text-gray-300 whitespace-pre-wrap mb-4"><Linkify>{morsel.body}</Linkify></div>
 
         {/* Linked objects */}
         {morsel.links.length > 0 && (
