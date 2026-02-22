@@ -17,7 +17,7 @@ def create_delegation_tools(
     brothers_registry: dict[str, dict],
     mailbox_name: str | None = None,
 ) -> dict:
-    """Register Ember delegation tools with an MCP server.
+    """Register Ember delegation tool with an MCP server.
 
     Args:
         mcp: FastMCP server instance to register tools with.
@@ -134,93 +134,6 @@ def create_delegation_tools(
             result_lines.append(f"  Linked to card: #{card_id}")
         return "\n".join(result_lines)
 
-    @mcp.tool()
-    async def check_brother_ember(brother: str | None = None) -> str:
-        """Check the health of brother Ember servers.
-
-        Args:
-            brother: Specific brother to check. If not provided, checks all.
-        """
-        brothers = (
-            {brother: brothers_registry[brother]}
-            if brother and brother in brothers_registry
-            else brothers_registry
-        )
-
-        if brother and brother not in brothers_registry:
-            return f"Unknown brother '{brother}'."
-
-        if not brothers:
-            return "No brothers with Ember configured."
-
-        lines = []
-        for name, _config in brothers.items():
-            ember = _get_ember_client(name)
-            if ember is None:
-                lines.append(f"{name}: No Ember configured")
-                continue
-            try:
-                result = await ember.health()
-                lines.append(
-                    f"{name}: Healthy\n"
-                    f"  Active tasks: {result.get('active_tasks', '?')}\n"
-                    f"  Uptime: {result.get('uptime_seconds', '?')}s"
-                )
-            except Exception as e:
-                lines.append(f"{name}: Unreachable ({e})")
-
-        return "\n\n".join(lines)
-
-    @mcp.tool()
-    async def list_brother_ember_tasks(brother: str | None = None) -> str:
-        """List active tasks on brother Ember servers.
-
-        Args:
-            brother: Specific brother to check. If not provided, checks all.
-        """
-        brothers = (
-            {brother: brothers_registry[brother]}
-            if brother and brother in brothers_registry
-            else brothers_registry
-        )
-
-        if brother and brother not in brothers_registry:
-            return f"Unknown brother '{brother}'."
-
-        if not brothers:
-            return "No brothers with Ember configured."
-
-        lines = []
-        for name, _config in brothers.items():
-            ember = _get_ember_client(name)
-            if ember is None:
-                lines.append(f"{name}: No Ember configured")
-                continue
-            try:
-                result = await ember.active_tasks()
-                aspens = result.get("aspens")
-                if aspens is None:
-                    active = result.get("active_task")
-                    aspens = [active] if active else []
-
-                if aspens:
-                    n = len(aspens)
-                    lines.append(f"{name}: {n} active aspen{'s' if n != 1 else ''}")
-                    for a in aspens:
-                        lines.append(
-                            f"  - Task ID: {a.get('task_id', 'N/A')}\n"
-                            f"    Subject: {a.get('subject', '(none)')}\n"
-                            f"    Session: {a.get('session_name', '?')}"
-                        )
-                else:
-                    lines.append(f"{name}: Idle")
-            except Exception as e:
-                lines.append(f"{name}: Unreachable ({e})")
-
-        return "\n\n".join(lines)
-
     return {
         "initiate_ember_task": initiate_ember_task,
-        "check_brother_ember": check_brother_ember,
-        "list_brother_ember_tasks": list_brother_ember_tasks,
     }

@@ -47,7 +47,6 @@ create_task_tools(mcp, _mailbox, config, mailbox_url=_hearth_url, mailbox_api_ke
 _ember_url = os.environ.get("EMBER_URL")
 _ember_api_key = os.environ.get("EMBER_API_KEY")
 _ember = EmberClient(_ember_url, _ember_api_key, verify_ssl=False) if _ember_url and _ember_api_key else None
-create_ember_tools(mcp, _ember)
 
 # Load brothers registry for Ember delegation
 _brothers_config_path = os.environ.get("BROTHERS_CONFIG")
@@ -57,6 +56,7 @@ if _brothers_config_path and os.path.exists(_brothers_config_path):
         _brothers_data = yaml.safe_load(f) or {}
     _brothers_registry = _brothers_data.get("brothers", {})
 
+create_ember_tools(mcp, _ember, brothers_registry=_brothers_registry)
 create_delegation_tools(mcp, _mailbox, _brothers_registry, mailbox_name=_hearth_name)
 
 

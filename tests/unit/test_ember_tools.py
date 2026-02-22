@@ -90,7 +90,7 @@ class TestListEmberTasks:
         }
         tools = create_ember_tools(mcp, mock_ember)
         result = await tools["list_ember_tasks"]()
-        assert "Active aspens" in result
+        assert "active aspen" in result
         assert "42" in result
         assert "Review code" in result
 
