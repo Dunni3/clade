@@ -2067,6 +2067,38 @@ class TestAutoSyncCardStatus:
         assert resp.json()["col"] == "done"
 
     @pytest.mark.asyncio
+    async def test_no_sync_when_card_archived(self, client):
+        """Cards in archived column should NOT be moved when a linked task moves to in_progress."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Archived card",
+                "col": "archived",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        card_id = resp.json()["id"]
+
+        # Move task to in_progress
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Card should still be archived
+        resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "archived"
+
+    @pytest.mark.asyncio
     async def test_no_sync_when_card_already_in_progress(self, client):
         """Cards already in_progress should not be touched (preserves existing assignee)."""
         resp = await client.post(

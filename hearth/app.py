@@ -77,7 +77,15 @@ _COLUMN_ORDER = {"backlog": 0, "todo": 1, "in_progress": 2, "done": 3, "archived
 
 
 async def _sync_linked_cards_to_in_progress(task_id: int, assignee: str) -> None:
-    """When a task moves to in_progress, sync any linked kanban cards forward."""
+    """When a task moves to in_progress, sync any linked kanban cards forward.
+
+    Only cards in columns before in_progress (backlog, todo) are moved.
+    Cards already in in_progress, done, or archived are left untouched.
+
+    Note: The card's assignee is unconditionally set to the task's assignee,
+    overwriting any existing card assignee. This ensures the card reflects
+    who is actively working on it.
+    """
     card_map = await db.get_cards_for_objects("task", [str(task_id)])
     cards = card_map.get(str(task_id), [])
     for card_info in cards:
@@ -410,7 +418,10 @@ async def update_task(
 
     # Auto-sync linked kanban cards when task moves to in_progress
     if req.status == "in_progress":
-        await _sync_linked_cards_to_in_progress(task_id, task["assignee"])
+        try:
+            await _sync_linked_cards_to_in_progress(task_id, updated["assignee"])
+        except Exception:
+            logger.warning("Failed to sync linked cards for task %d", task_id, exc_info=True)
 
     # Trigger conductor tick when any task reaches a terminal state
     # Note: "killed" is intentionally excluded — killed tasks must not trigger Kamaji
