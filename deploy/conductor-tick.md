@@ -13,11 +13,12 @@ Check the environment variables `TRIGGER_TASK_ID` and `TRIGGER_MESSAGE_ID`.
 ## Event-Driven Path
 
 1. **Fetch the triggering task** via `get_task(TRIGGER_TASK_ID)`
-2. **Assess the result** — does it warrant follow-up tasks?
+2. **Check for `on_complete` instructions** — if the completed/failed task has a non-null `on_complete` field, read it and follow those instructions as your **primary directive** for this tick. The `on_complete` field contains follow-up instructions attached by the task creator.
+3. **Assess the result** — does it warrant follow-up tasks (beyond any `on_complete` instructions)?
    - If yes, check worker load first (`check_worker_health`), then delegate children. They will auto-link as children via the `TRIGGER_TASK_ID` env var.
    - If no follow-up needed, note completion
-3. **Deposit a morsel** summarizing what happened (tagged `conductor-tick`, linked to the task)
-4. **Check mailbox** — read and respond to any unread messages
+4. **Deposit a morsel** summarizing what happened (tagged `conductor-tick`, linked to the task)
+5. **Check mailbox** — read and respond to any unread messages
 
 ## Message-Driven Path
 

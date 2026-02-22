@@ -88,6 +88,7 @@ export interface TaskDetail extends TaskSummary {
   host: string | null;
   working_dir: string | null;
   output: string | null;
+  on_complete: string | null;
   children: TaskSummary[];
   messages: FeedMessage[];
   events: TaskEvent[];

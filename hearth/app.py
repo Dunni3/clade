@@ -287,6 +287,7 @@ async def create_task(
             host=req.host,
             working_dir=req.working_dir,
             parent_task_id=req.parent_task_id,
+            on_complete=req.on_complete,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -514,6 +515,7 @@ async def retry_task(
             host=task.get("host"),
             working_dir=task.get("working_dir"),
             parent_task_id=task_id,
+            on_complete=task.get("on_complete"),
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
