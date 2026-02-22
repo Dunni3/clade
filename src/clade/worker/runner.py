@@ -56,33 +56,44 @@ def build_runner_script(
     # Each var is independent so callers can selectively override.
     # When launched via Ember, the process already inherits correct env vars;
     # only vars explicitly passed will be overridden.
+    env_exports = []
     if task_id is not None:
         lines.append(f"export CLAUDE_TASK_ID={task_id}")
+        env_exports.append(f"CLAUDE_TASK_ID={task_id}")
     if hearth_url:
         lines.append(f"export HEARTH_URL='{hearth_url}'")
+        env_exports.append(f"HEARTH_URL={hearth_url}")
     if hearth_api_key:
         lines.append(f"export HEARTH_API_KEY='{hearth_api_key}'")
+        env_exports.append("HEARTH_API_KEY=<redacted>")
     if hearth_name:
         lines.append(f"export HEARTH_NAME='{hearth_name}'")
+        env_exports.append(f"HEARTH_NAME={hearth_name}")
+    if env_exports:
+        lines.append(f'echo "$(date -Iseconds) exported env: {", ".join(env_exports)}" >> "$LOGFILE"')
 
     # Change to working directory
     if working_dir:
-        lines.append(f"cd {working_dir} || exit 1")
+        lines.append(f'echo "$(date -Iseconds) cd {working_dir}" >> "$LOGFILE"')
+        lines.append(f"cd {working_dir} || {{ echo \"$(date -Iseconds) FATAL: cd failed — directory does not exist or is not accessible: {working_dir}\" >> \"$LOGFILE\"; exit 1; }}")
 
         # Git worktree isolation: if inside a git repo, create an isolated worktree
         # so concurrent tasks don't step on each other.
         lines.append("")
         lines.append("# Worktree isolation")
+        lines.append('echo "$(date -Iseconds) checking git worktree eligibility" >> "$LOGFILE"')
         lines.append("if git rev-parse --git-dir > /dev/null 2>&1; then")
         lines.append('    _WT_BASE="$HOME/.clade-worktrees"')
         lines.append('    mkdir -p "$_WT_BASE"')
         lines.append(f'    _WT_DIR="$_WT_BASE/{session_name}"')
         lines.append('    _GIT_ROOT="$(git rev-parse --show-toplevel)"')
+        lines.append(f'    echo "$(date -Iseconds) inside git repo (root: $_GIT_ROOT), creating worktree at $_WT_DIR" >> "$LOGFILE"')
         lines.append("")
         lines.append(f'    git worktree add "$_WT_DIR" -b "clade/{session_name}" 2>/dev/null || \\')
         lines.append('        git worktree add "$_WT_DIR" HEAD --detach 2>/dev/null')
         lines.append("")
         lines.append('    if [ -d "$_WT_DIR" ]; then')
+        lines.append('        echo "$(date -Iseconds) worktree created, cd to $_WT_DIR" >> "$LOGFILE"')
         lines.append('        cd "$_WT_DIR"')
         lines.append("        _cleanup_worktree() {")
         lines.append('            cd "$_GIT_ROOT" 2>/dev/null || cd /tmp')
@@ -93,12 +104,16 @@ def build_runner_script(
         lines.append("            fi")
         lines.append("        }")
         lines.append("        trap _cleanup_worktree EXIT HUP TERM")
+        lines.append("    else")
+        lines.append('        echo "$(date -Iseconds) WARNING: worktree creation failed, continuing in original dir" >> "$LOGFILE"')
         lines.append("    fi")
+        lines.append("else")
+        lines.append('    echo "$(date -Iseconds) not a git repo, skipping worktree isolation" >> "$LOGFILE"')
         lines.append("fi")
         lines.append("")
 
     # Run Claude, capturing exit code
-    lines.append('echo "$(date -Iseconds) launching claude" >> "$LOGFILE"')
+    lines.append('echo "$(date -Iseconds) launching claude (pwd: $(pwd))" >> "$LOGFILE"')
     claude_cmd = f'claude -p "$(cat {prompt_path})" --dangerously-skip-permissions'
     if max_turns is not None:
         claude_cmd += f" --max-turns {max_turns}"
