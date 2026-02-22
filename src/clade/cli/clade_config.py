@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from datetime import date
@@ -55,6 +56,69 @@ def default_config_path(config_dir: Path | None = None) -> Path:
     if xdg:
         return Path(xdg) / "clade" / "clade.yaml"
     return Path.home() / ".config" / "clade" / "clade.yaml"
+
+
+def build_brothers_registry(
+    config: CladeConfig,
+    keys: dict[str, str],
+) -> dict[str, dict]:
+    """Build brothers registry dict from clade config and API keys.
+
+    Returns the same dict structure that brothers-ember.yaml would produce
+    under its 'brothers' key. Only includes brothers with ember_host set.
+
+    Args:
+        config: Loaded CladeConfig.
+        keys: Dict of brother names to API keys.
+
+    Returns:
+        Dict mapping brother names to config dicts with keys:
+        ember_url, ember_api_key, hearth_api_key, and optionally working_dir.
+    """
+    registry: dict[str, dict] = {}
+
+    for name, bro in config.brothers.items():
+        if not bro.ember_host:
+            continue
+
+        api_key = keys.get(name, "")
+        port = bro.ember_port or 8100
+        entry: dict[str, str] = {
+            "ember_url": f"http://{bro.ember_host}:{port}",
+            "ember_api_key": api_key,
+            "hearth_api_key": api_key,
+        }
+        if bro.working_dir:
+            entry["working_dir"] = bro.working_dir
+        registry[name] = entry
+
+    return registry
+
+
+def load_brothers_registry(config_dir: Path | None = None) -> dict[str, dict]:
+    """Load brothers registry from clade.yaml + keys.json.
+
+    Builds the registry at runtime from the source-of-truth config files,
+    eliminating the need for a derived brothers-ember.yaml file.
+
+    Args:
+        config_dir: Override config directory. If None, uses default (~/.config/clade).
+
+    Returns:
+        Dict mapping brother names to config dicts, or empty dict if
+        clade.yaml doesn't exist, has no Ember brothers, or keys.json is unreadable.
+    """
+    from .keys import load_keys, keys_path
+
+    config = load_clade_config(default_config_path(config_dir))
+    if config is None:
+        return {}
+
+    try:
+        keys = load_keys(keys_path(config_dir))
+    except (json.JSONDecodeError, OSError):
+        keys = {}
+    return build_brothers_registry(config, keys)
 
 
 def default_brothers_config_path(config_dir: Path | None = None) -> Path:
