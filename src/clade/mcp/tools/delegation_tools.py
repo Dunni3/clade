@@ -16,6 +16,7 @@ def create_delegation_tools(
     mailbox: MailboxClient | None,
     brothers_registry: dict[str, dict],
     mailbox_name: str | None = None,
+    hearth_url: str | None = None,
 ) -> dict:
     """Register Ember delegation tool with an MCP server.
 
@@ -25,6 +26,8 @@ def create_delegation_tools(
         brothers_registry: Dict of brother names to config dicts with keys:
             ember_url, ember_api_key, working_dir (optional).
         mailbox_name: The caller's own name (used as sender_name when delegating).
+        hearth_url: Hearth URL to pass to spawned worker sessions. If not set,
+            the Ember's own HEARTH_URL env var is used (which may have SSL issues).
 
     Returns:
         Dict mapping tool names to their callable functions (for testing).
@@ -104,7 +107,7 @@ def create_delegation_tools(
                 task_id=task_id,
                 working_dir=wd,
                 max_turns=max_turns,
-                hearth_url=None,
+                hearth_url=config.get("hearth_url") or hearth_url,
                 hearth_api_key=config.get("hearth_api_key") or config.get("ember_api_key") or config.get("api_key"),
                 hearth_name=brother,
                 sender_name=mailbox_name,

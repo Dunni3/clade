@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 from clade.cli.ember_setup import (
+    EMBER_ENV_TEMPLATE,
     SERVICE_NAME,
     SERVICE_TEMPLATE,
     detect_clade_dir,
@@ -87,22 +88,33 @@ class TestServiceTemplate:
             remote_user="ian",
             clade_ember_path="/usr/local/bin/clade-ember",
             clade_dir="/home/ian/clade",
-            port=8100,
-            working_dir="/home/ian/projects",
-            hearth_url="https://example.com",
-            api_key="test-key-123",
+            env_file_path="/home/ian/.config/clade/ember.env",
         )
         assert "Description=Clade Ember Server (oppy)" in result
         assert "User=ian" in result
         assert "WorkingDirectory=/home/ian/clade" in result
         assert "ExecStart=/usr/local/bin/clade-ember" in result
-        assert 'EMBER_PORT=8100' in result
-        assert 'EMBER_BROTHER_NAME=oppy' in result
-        assert 'EMBER_WORKING_DIR=/home/ian/projects' in result
-        assert 'HEARTH_URL=https://example.com' in result
-        assert 'HEARTH_API_KEY=test-key-123' in result
-        assert 'HEARTH_NAME=oppy' in result
+        assert "EnvironmentFile=/home/ian/.config/clade/ember.env" in result
         assert "WantedBy=multi-user.target" in result
+        # Should NOT contain inline Environment= lines
+        assert "Environment=" not in result
+
+
+class TestEmberEnvTemplate:
+    def test_template_formatting(self):
+        result = EMBER_ENV_TEMPLATE.format(
+            port=8100,
+            brother_name="oppy",
+            working_dir="/home/ian/projects",
+            hearth_url="https://example.com",
+            api_key="test-key-123",
+        )
+        assert "EMBER_PORT=8100" in result
+        assert "EMBER_BROTHER_NAME=oppy" in result
+        assert "EMBER_WORKING_DIR=/home/ian/projects" in result
+        assert "HEARTH_URL=https://example.com" in result
+        assert "HEARTH_API_KEY=test-key-123" in result
+        assert "HEARTH_NAME=oppy" in result
 
 
 class TestGenerateManualInstructions:
@@ -123,6 +135,10 @@ class TestGenerateManualInstructions:
         assert "sudo systemctl restart" in result
         assert "curl http://localhost:8100/health" in result
         assert "ExecStart=/usr/local/bin/clade-ember" in result
+        # Env file path and content should be present
+        assert "ember.env" in result
+        assert "HEARTH_API_KEY=test-key" in result
+        assert "chmod 600" in result
 
     def test_includes_correct_port(self):
         result = generate_manual_instructions(

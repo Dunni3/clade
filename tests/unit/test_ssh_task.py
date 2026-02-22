@@ -199,7 +199,7 @@ class TestBuildRemoteScript:
             mailbox_api_key="secret-key",
         )
         assert "Auto-mark task failed" in script
-        assert "curl -sf -X PATCH" in script
+        assert "curl -skf -X PATCH" in script
         assert "EXIT_CODE" in script
 
     def test_no_exit_handler_without_env_vars(self):

@@ -162,7 +162,7 @@ class TestBuildRunnerScript:
             with open(runner_path) as f:
                 content = f.read()
             assert "Auto-mark task failed" in content
-            assert "curl -sf -X PATCH" in content
+            assert "curl -skf -X PATCH" in content
             assert "CLAUDE_TASK_ID" in content
         finally:
             os.unlink(prompt_path)

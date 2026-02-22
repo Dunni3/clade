@@ -111,7 +111,7 @@ def build_runner_script(
         lines.append("")
         lines.append("# Auto-mark task failed if session exited without completing")
         lines.append('if [ -n "$CLAUDE_TASK_ID" ] && [ -n "$HEARTH_URL" ] && [ -n "$HEARTH_API_KEY" ]; then')
-        lines.append('    curl -sf -X PATCH "$HEARTH_URL/api/v1/tasks/$CLAUDE_TASK_ID" \\')
+        lines.append('    curl -skf -X PATCH "$HEARTH_URL/api/v1/tasks/$CLAUDE_TASK_ID" \\')
         lines.append('        -H "Authorization: Bearer $HEARTH_API_KEY" \\')
         lines.append('        -H "Content-Type: application/json" \\')
         lines.append('        -d "{\\"status\\":\\"failed\\",\\"output\\":\\"Session exited with code $EXIT_CODE\\"}" \\')

@@ -147,7 +147,7 @@ fi"""
 EXIT_CODE=\\$?
 # Auto-mark task failed if session exited without completing
 if [ -n "\\$CLAUDE_TASK_ID" ] && [ -n "\\$HEARTH_URL" ] && [ -n "\\$HEARTH_API_KEY" ]; then
-    curl -sf -X PATCH "\\$HEARTH_URL/api/v1/tasks/\\$CLAUDE_TASK_ID" \\
+    curl -skf -X PATCH "\\$HEARTH_URL/api/v1/tasks/\\$CLAUDE_TASK_ID" \\
         -H "Authorization: Bearer \\$HEARTH_API_KEY" \\
         -H "Content-Type: application/json" \\
         -d "{{\\"status\\":\\"failed\\",\\"output\\":\\"Session exited with code \\$EXIT_CODE\\"}}" \\

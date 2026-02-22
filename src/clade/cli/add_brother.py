@@ -195,17 +195,21 @@ def add_brother(
     click.echo(f"Brother '{name}' added to {config_path}")
 
     # Regenerate brothers-ember.yaml if any brother has Ember
-    all_keys = load_keys(keys_path(config_dir))
     has_ember_brothers = any(b.ember_host for b in config.brothers.values())
     if has_ember_brothers:
-        brothers_yaml = build_brothers_config(config.brothers, all_keys)
+        brothers_yaml = build_brothers_config(config.brothers)
         brothers_path = default_brothers_config_path(config_dir)
         brothers_path.parent.mkdir(parents=True, exist_ok=True)
         brothers_path.write_text(brothers_yaml)
         click.echo(f"Brothers config written to {brothers_path}")
 
-        # Update local MCP env to point to brothers config
-        updated = update_mcp_env("clade-personal", {"BROTHERS_CONFIG": str(brothers_path)})
+        # Update local MCP env to point to brothers config and keys file
+        kp_for_env = keys_path(config_dir)
+        mcp_env = {
+            "BROTHERS_CONFIG": str(brothers_path),
+            "KEYS_FILE": str(kp_for_env),
+        }
+        updated = update_mcp_env("clade-personal", mcp_env)
         if updated:
             click.echo("  Updated local clade-personal MCP env")
 

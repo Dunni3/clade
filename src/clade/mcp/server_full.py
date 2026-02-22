@@ -1,9 +1,11 @@
 """Personal Brother MCP server — Doot's full server with terminal, mailbox, and task tools."""
 import os
+from pathlib import Path
 
 import yaml
 from mcp.server.fastmcp import FastMCP
 
+from ..cli.keys import load_keys, merge_keys_into_registry
 from ..communication.mailbox_client import MailboxClient
 from ..core.config import load_config
 from ..worker.client import EmberClient
@@ -56,8 +58,14 @@ if _brothers_config_path and os.path.exists(_brothers_config_path):
         _brothers_data = yaml.safe_load(f) or {}
     _brothers_registry = _brothers_data.get("brothers", {})
 
+# Merge API keys from keys.json into registry at runtime
+_keys_file = os.environ.get("KEYS_FILE")
+if _keys_file and os.path.exists(_keys_file):
+    _all_keys = load_keys(Path(_keys_file))
+    merge_keys_into_registry(_brothers_registry, _all_keys)
+
 create_ember_tools(mcp, _ember, brothers_registry=_brothers_registry)
-create_delegation_tools(mcp, _mailbox, _brothers_registry, mailbox_name=_hearth_name)
+create_delegation_tools(mcp, _mailbox, _brothers_registry, mailbox_name=_hearth_name, hearth_url=_hearth_url)
 
 
 def main():

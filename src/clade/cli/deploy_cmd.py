@@ -23,7 +23,8 @@ from .deploy_utils import (
     scp_directory,
 )
 from .ember_setup import SERVICE_NAME as EMBER_SERVICE_NAME
-from .ember_setup import check_ember_health_remote
+from .ember_setup import check_ember_health_remote, deploy_ember_env, detect_remote_user
+from .keys import keys_path, load_keys
 from .ssh_utils import run_remote, test_ssh
 
 
@@ -273,7 +274,36 @@ def ember(ctx: click.Context, name: str) -> None:
         raise SystemExit(1)
     click.echo(click.style("  Package deployed", fg="green"))
 
-    # Step 3: Restart Ember service
+    # Step 3: Sync ember.env with current API key from keys.json
+    click.echo("Syncing ember.env with current API key...")
+    all_keys = load_keys(keys_path(config_dir))
+    brother_key = all_keys.get(name)
+    if not brother_key:
+        click.echo(click.style(f"  No API key found for '{name}' in keys.json", fg="red"))
+        raise SystemExit(1)
+
+    remote_user = detect_remote_user(ssh_host, ssh_key=ssh_key)
+    if not remote_user:
+        click.echo(click.style("  Could not detect remote user", fg="red"))
+        raise SystemExit(1)
+
+    ember_port = brother.ember_port or 8100
+    env_result = deploy_ember_env(
+        ssh_host=ssh_host,
+        remote_user=remote_user,
+        brother_name=name,
+        port=ember_port,
+        working_dir=brother.working_dir or f"/home/{remote_user}",
+        hearth_url=config.server_url or "",
+        api_key=brother_key,
+        ssh_key=ssh_key,
+    )
+    if env_result.success and "EMBER_ENV_OK" in env_result.stdout:
+        click.echo(click.style("  ember.env synced", fg="green"))
+    else:
+        click.echo(click.style("  Warning: could not sync ember.env", fg="yellow"))
+
+    # Step 4: Restart Ember service
     click.echo("Restarting Ember service...")
     restart_script = (
         f"sudo systemctl restart {EMBER_SERVICE_NAME} && sleep 2 && "
@@ -287,8 +317,7 @@ def ember(ctx: click.Context, name: str) -> None:
         raise SystemExit(1)
     click.echo(click.style("  Service restarted", fg="green"))
 
-    # Step 4: Health check
-    ember_port = brother.ember_port or 8100
+    # Step 5: Health check
     click.echo(f"Checking health at {brother.ember_host}:{ember_port}...")
     if check_ember_health_remote(brother.ember_host, ember_port):
         click.echo(click.style("  Ember is healthy!", fg="green"))
