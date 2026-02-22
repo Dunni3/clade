@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import aiosqlite
 
 from .config import DB_PATH
@@ -1069,6 +1071,94 @@ async def get_trees(limit: int = 50, offset: int = 0) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Bidirectional link helpers
+# ---------------------------------------------------------------------------
+
+
+async def _create_reverse_links(
+    db: aiosqlite.Connection,
+    source_type: str,
+    source_id: int,
+    links: list[dict],
+) -> None:
+    """Create reverse links for bidirectional linking.
+
+    Only cards and morsels have link tables, so reverse links are only created
+    when those types are involved on both sides. Silently skips if the target
+    object doesn't exist (foreign key constraint).
+    """
+    for link in links:
+        target_type = link["object_type"]
+        target_id = link["object_id"]
+
+        try:
+            if source_type == "card":
+                if target_type == "morsel":
+                    await db.execute(
+                        "INSERT OR IGNORE INTO morsel_links (morsel_id, object_type, object_id) VALUES (?, 'card', ?)",
+                        (int(target_id), str(source_id)),
+                    )
+                elif target_type == "card":
+                    await db.execute(
+                        "INSERT OR IGNORE INTO kanban_card_links (card_id, object_type, object_id) VALUES (?, 'card', ?)",
+                        (int(target_id), str(source_id)),
+                    )
+            elif source_type == "morsel":
+                if target_type == "card":
+                    await db.execute(
+                        "INSERT OR IGNORE INTO kanban_card_links (card_id, object_type, object_id) VALUES (?, 'morsel', ?)",
+                        (int(target_id), str(source_id)),
+                    )
+                elif target_type == "morsel":
+                    await db.execute(
+                        "INSERT OR IGNORE INTO morsel_links (morsel_id, object_type, object_id) VALUES (?, 'morsel', ?)",
+                        (int(target_id), str(source_id)),
+                    )
+        except (sqlite3.IntegrityError, ValueError):
+            # Target doesn't exist or ID is not a valid integer — skip
+            pass
+
+
+async def _remove_reverse_links(
+    db: aiosqlite.Connection,
+    source_type: str,
+    source_id: int,
+    links: list[dict],
+) -> None:
+    """Remove reverse links when source links are being replaced."""
+    for link in links:
+        target_type = link["object_type"]
+        target_id = link["object_id"]
+
+        try:
+            if source_type == "card":
+                if target_type == "morsel":
+                    await db.execute(
+                        "DELETE FROM morsel_links WHERE morsel_id = ? AND object_type = 'card' AND object_id = ?",
+                        (int(target_id), str(source_id)),
+                    )
+                elif target_type == "card":
+                    await db.execute(
+                        "DELETE FROM kanban_card_links WHERE card_id = ? AND object_type = 'card' AND object_id = ?",
+                        (int(target_id), str(source_id)),
+                    )
+            elif source_type == "morsel":
+                if target_type == "card":
+                    await db.execute(
+                        "DELETE FROM kanban_card_links WHERE card_id = ? AND object_type = 'morsel' AND object_id = ?",
+                        (int(target_id), str(source_id)),
+                    )
+                elif target_type == "morsel":
+                    await db.execute(
+                        "DELETE FROM morsel_links WHERE morsel_id = ? AND object_type = 'morsel' AND object_id = ?",
+                        (int(target_id), str(source_id)),
+                    )
+        except ValueError:
+            # ID is not a valid integer — skip
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Morsels
 # ---------------------------------------------------------------------------
 
@@ -1100,6 +1190,7 @@ async def insert_morsel(
                     "INSERT INTO morsel_links (morsel_id, object_type, object_id) VALUES (?, ?, ?)",
                     (morsel_id, link["object_type"], link["object_id"]),
                 )
+            await _create_reverse_links(db, "morsel", morsel_id, links)
 
         await db.commit()
         return morsel_id
@@ -1299,6 +1390,7 @@ async def insert_card(
                     "INSERT INTO kanban_card_links (card_id, object_type, object_id) VALUES (?, ?, ?)",
                     (card_id, link["object_type"], link["object_id"]),
                 )
+            await _create_reverse_links(db, "card", card_id, links)
         await db.commit()
         return card_id
     finally:
@@ -1463,6 +1555,15 @@ async def update_card(card_id: int, **kwargs) -> dict | None:
                     )
 
         if "links" in kwargs:
+            # Fetch old links to remove their reverse links
+            cursor = await db.execute(
+                "SELECT object_type, object_id FROM kanban_card_links WHERE card_id = ?",
+                (card_id,),
+            )
+            old_links = [dict(r) for r in await cursor.fetchall()]
+            if old_links:
+                await _remove_reverse_links(db, "card", card_id, old_links)
+
             # Replace links
             await db.execute("DELETE FROM kanban_card_links WHERE card_id = ?", (card_id,))
             links = kwargs["links"]
@@ -1472,6 +1573,7 @@ async def update_card(card_id: int, **kwargs) -> dict | None:
                         "INSERT INTO kanban_card_links (card_id, object_type, object_id) VALUES (?, ?, ?)",
                         (card_id, link["object_type"], link["object_id"]),
                     )
+                await _create_reverse_links(db, "card", card_id, links)
 
         await db.commit()
         return await get_card(card_id)
@@ -1482,6 +1584,15 @@ async def update_card(card_id: int, **kwargs) -> dict | None:
 async def delete_card(card_id: int) -> bool:
     db = await get_db()
     try:
+        # Remove reverse links for this card's outgoing links
+        cursor = await db.execute(
+            "SELECT object_type, object_id FROM kanban_card_links WHERE card_id = ?",
+            (card_id,),
+        )
+        old_links = [dict(r) for r in await cursor.fetchall()]
+        if old_links:
+            await _remove_reverse_links(db, "card", card_id, old_links)
+
         await db.execute("DELETE FROM kanban_card_links WHERE card_id = ?", (card_id,))
         await db.execute("DELETE FROM kanban_card_labels WHERE card_id = ?", (card_id,))
         cursor = await db.execute("DELETE FROM kanban_cards WHERE id = ?", (card_id,))
