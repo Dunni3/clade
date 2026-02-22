@@ -261,6 +261,20 @@ class TestBuildRemoteScript:
         )
         assert "-ne 0" in script
 
+    def test_exit_code_captured_before_cleanup(self):
+        """EXIT_CODE=$? must come right after claude, not after rm."""
+        script = build_remote_script(
+            "sess", None, "dGVzdA==",
+            task_id=42,
+            mailbox_url="https://example.com",
+            mailbox_api_key="secret-key",
+        )
+        claude_pos = script.index("claude -p")
+        exit_code_pos = script.index("EXIT_CODE=")
+        rm_pos = script.index("rm -f")
+        assert claude_pos < exit_code_pos < rm_pos, \
+            "EXIT_CODE must be captured after claude but before rm"
+
 
 # ---------------------------------------------------------------------------
 # initiate_task

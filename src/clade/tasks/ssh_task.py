@@ -138,6 +138,7 @@ fi"""
     env_lines = ""
     trap_setup = ""
     claude_started_flag = ""
+    capture_exit = ""
     exit_line = ""
     if task_id is not None and mailbox_url and mailbox_api_key:
         env_lines = (
@@ -167,7 +168,8 @@ _report_failure() {
 }
 trap '_report_failure \\$?' EXIT"""
         claude_started_flag = "\n_CLAUDE_STARTED=1"
-        exit_line = "\nEXIT_CODE=\\$?\nexit \\$EXIT_CODE"
+        capture_exit = "\nEXIT_CODE=\\$?"
+        exit_line = "\nexit \\$EXIT_CODE"
 
     return f"""\
 #!/bin/bash
@@ -185,7 +187,7 @@ cat > "$RUNNER" << RUNNEREOF
 #!/bin/bash
 {env_lines}{trap_setup}
 {cd_cmd}{claude_started_flag}
-claude -p "\\$(cat $PROMPT_FILE)" --dangerously-skip-permissions{f' --max-turns {max_turns}' if max_turns is not None else ''}
+claude -p "\\$(cat $PROMPT_FILE)" --dangerously-skip-permissions{f' --max-turns {max_turns}' if max_turns is not None else ''}{capture_exit}
 rm -f "$PROMPT_FILE" "$RUNNER"{exit_line}
 RUNNEREOF
 chmod +x "$RUNNER"
