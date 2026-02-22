@@ -32,6 +32,7 @@ from .ssh_utils import check_remote_prereqs, deploy_clade_remote, run_remote, te
 @click.option("--no-identity", is_flag=True, help="Skip writing identity to remote CLAUDE.md")
 @click.option("--ember", "setup_ember_flag", is_flag=True, help="Set up an Ember server on the remote")
 @click.option("--ember-port", default=None, type=int, help="Ember server port (default: 8100)")
+@click.option("--no-verify-ssl", is_flag=True, help="Disable SSL verification for self-signed certs")
 @click.option("--yes", "-y", is_flag=True, help="Accept defaults without prompting")
 @click.pass_context
 def add_brother(
@@ -47,6 +48,7 @@ def add_brother(
     no_identity: bool,
     setup_ember_flag: bool,
     ember_port: int | None,
+    no_verify_ssl: bool,
     yes: bool,
 ) -> None:
     """Add a new brother to the Clade."""
@@ -142,9 +144,12 @@ def add_brother(
     api_key = add_key(name, kp)
     click.echo(f"API key for '{name}' saved to {kp}")
 
+    # Apply --no-verify-ssl flag (overrides config)
+    verify_ssl = config.verify_ssl and not no_verify_ssl
+
     # Register API key with the Hearth
     if config.server_url:
-        _register_key_with_hearth(config.server_url, config.personal_name, name, api_key, kp)
+        _register_key_with_hearth(config.server_url, config.personal_name, name, api_key, kp, verify_ssl)
 
     # Register MCP on remote
     if not no_mcp and ssh_result.success:
@@ -178,6 +183,7 @@ def add_brother(
             server_url=config.server_url,
             yes=yes,
             hearth_api_key=caller_key,
+            verify_ssl=verify_ssl,
         )
 
     # Update config
@@ -325,6 +331,7 @@ def _register_key_with_hearth(
     brother_name: str,
     brother_key: str,
     kp,
+    verify_ssl: bool = True,
 ) -> None:
     """Register the brother's API key with the Hearth using the personal brother's key."""
     from ..communication.mailbox_client import MailboxClient
@@ -340,7 +347,6 @@ def _register_key_with_hearth(
         )
         return
 
-    verify_ssl = server_url.startswith("https")
     client = MailboxClient(server_url, personal_key, verify_ssl=verify_ssl)
     try:
         ok = client.register_key_sync(brother_name, brother_key)

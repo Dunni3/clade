@@ -302,6 +302,7 @@ def setup_ember(
     ssh_key: str | None = None,
     yes: bool = False,
     hearth_api_key: str | None = None,
+    verify_ssl: bool = True,
 ) -> tuple[str | None, int]:
     """Set up an Ember server on a remote brother.
 
@@ -414,7 +415,6 @@ def setup_ember(
         try:
             from ..communication.mailbox_client import MailboxClient
 
-            verify_ssl = server_url.startswith("https")
             client = MailboxClient(server_url, hearth_api_key, verify_ssl=verify_ssl)
             ok = client.register_ember_sync(name, f"http://{ember_host}:{port}")
             if ok:

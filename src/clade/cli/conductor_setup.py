@@ -416,7 +416,7 @@ def deploy_conductor(
         click.echo(f"Kamaji API key generated and saved to {kp}")
 
     # Step 5: Register key with Hearth
-    _register_kamaji_key(server_url, config.personal_name, kamaji_key, kp)
+    _register_kamaji_key(server_url, config.personal_name, kamaji_key, kp, config.verify_ssl)
 
     # Step 6: Detect correct Python on remote
     click.echo("Detecting Python with clade installed...")
@@ -520,6 +520,7 @@ def _register_kamaji_key(
     personal_name: str,
     kamaji_key: str,
     kp: Path,
+    verify_ssl: bool = True,
 ) -> None:
     """Register Kamaji's API key with the Hearth."""
     from ..communication.mailbox_client import MailboxClient
@@ -535,7 +536,6 @@ def _register_kamaji_key(
         )
         return
 
-    verify_ssl = server_url.startswith("https")
     client = MailboxClient(server_url, personal_key, verify_ssl=verify_ssl)
     try:
         ok = client.register_key_sync("kamaji", kamaji_key)

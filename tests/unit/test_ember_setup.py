@@ -193,7 +193,7 @@ class TestSetupEmberRegistration:
             assert ember_host == "100.1.2.3"
             assert port == 8100
             mock_client_cls.assert_called_once_with(
-                "https://hearth.example.com", "doot-key", verify_ssl=True
+                "https://hearth.example.com", "doot-key", verify_ssl=True  # default
             )
             mock_client_instance.register_ember_sync.assert_called_once_with(
                 "oppy", "http://100.1.2.3:8100"

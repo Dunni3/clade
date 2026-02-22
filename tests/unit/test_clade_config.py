@@ -239,6 +239,70 @@ class TestEmberFields:
         assert loaded.brothers["oppy"].ember_host is None
 
 
+class TestVerifySsl:
+    def test_default_true(self):
+        cfg = CladeConfig()
+        assert cfg.verify_ssl is True
+
+    def test_round_trip_false(self, tmp_path: Path):
+        config_file = tmp_path / "clade.yaml"
+        cfg = CladeConfig(
+            server_url="https://example.com",
+            verify_ssl=False,
+        )
+        save_clade_config(cfg, config_file)
+        loaded = load_clade_config(config_file)
+
+        assert loaded is not None
+        assert loaded.verify_ssl is False
+
+    def test_round_trip_true_not_saved(self, tmp_path: Path):
+        """verify_ssl=True (default) should not appear in YAML output."""
+        config_file = tmp_path / "clade.yaml"
+        cfg = CladeConfig(server_url="https://example.com", verify_ssl=True)
+        save_clade_config(cfg, config_file)
+
+        with open(config_file) as f:
+            data = yaml.safe_load(f)
+        assert "verify_ssl" not in data.get("server", {})
+
+    def test_false_saved_in_yaml(self, tmp_path: Path):
+        """verify_ssl=False should be explicitly saved."""
+        config_file = tmp_path / "clade.yaml"
+        cfg = CladeConfig(server_url="https://example.com", verify_ssl=False)
+        save_clade_config(cfg, config_file)
+
+        with open(config_file) as f:
+            data = yaml.safe_load(f)
+        assert data["server"]["verify_ssl"] is False
+
+    def test_load_without_verify_ssl(self, tmp_path: Path):
+        """Configs written before verify_ssl was added should default to True."""
+        config_file = tmp_path / "clade.yaml"
+        data = {
+            "clade": {"name": "Old Clade", "created": "2026-02-01"},
+            "personal": {"name": "doot", "description": "Coordinator"},
+            "server": {"url": "https://example.com"},
+        }
+        with open(config_file, "w") as f:
+            yaml.dump(data, f)
+
+        loaded = load_clade_config(config_file)
+        assert loaded is not None
+        assert loaded.verify_ssl is True
+
+    def test_verify_ssl_false_creates_server_section(self, tmp_path: Path):
+        """verify_ssl=False alone should create the server section."""
+        config_file = tmp_path / "clade.yaml"
+        cfg = CladeConfig(verify_ssl=False)
+        save_clade_config(cfg, config_file)
+
+        with open(config_file) as f:
+            data = yaml.safe_load(f)
+        assert "server" in data
+        assert data["server"]["verify_ssl"] is False
+
+
 class TestDefaultConfigPath:
     def test_returns_path(self):
         p = default_config_path()

@@ -104,7 +104,7 @@ def hearth(ctx: click.Context) -> None:
             resp = httpx.get(
                 f"{server_url}/api/v1/health",
                 timeout=10,
-                verify=not server_url.startswith("https"),
+                verify=config.verify_ssl,
             )
             if resp.status_code == 200:
                 click.echo(click.style("  Health check passed", fg="green"))
@@ -187,7 +187,7 @@ def frontend(ctx: click.Context, skip_build: bool) -> None:
             resp = httpx.get(
                 server_url,
                 timeout=10,
-                verify=not server_url.startswith("https"),
+                verify=config.verify_ssl,
                 follow_redirects=True,
             )
             if resp.status_code == 200:

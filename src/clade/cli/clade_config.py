@@ -35,6 +35,7 @@ class CladeConfig:
     server_url: str | None = None
     server_ssh: str | None = None
     server_ssh_key: str | None = None
+    verify_ssl: bool = True
     brothers: dict[str, BrotherEntry] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -118,6 +119,7 @@ def load_clade_config(path: Path | None = None) -> CladeConfig | None:
         server_url=server_sec.get("url"),
         server_ssh=server_sec.get("ssh"),
         server_ssh_key=server_sec.get("ssh_key"),
+        verify_ssl=server_sec.get("verify_ssl", True),
         brothers=brothers,
     )
 
@@ -149,7 +151,7 @@ def save_clade_config(config: CladeConfig, path: Path | None = None) -> Path:
         data["personal"]["personality"] = config.personal_personality
 
     # Only include server section if any server field is set
-    if config.server_url or config.server_ssh or config.server_ssh_key:
+    if config.server_url or config.server_ssh or config.server_ssh_key or not config.verify_ssl:
         server: dict = {}
         if config.server_url:
             server["url"] = config.server_url
@@ -157,6 +159,8 @@ def save_clade_config(config: CladeConfig, path: Path | None = None) -> Path:
             server["ssh"] = config.server_ssh
         if config.server_ssh_key:
             server["ssh_key"] = config.server_ssh_key
+        if not config.verify_ssl:
+            server["verify_ssl"] = False
         data["server"] = server
 
     # Brothers
