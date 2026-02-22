@@ -1,5 +1,6 @@
 """Tests for CladeConfig data model and YAML persistence."""
 
+import json
 from pathlib import Path
 
 import yaml
@@ -7,7 +8,9 @@ import yaml
 from clade.cli.clade_config import (
     BrotherEntry,
     CladeConfig,
+    build_brothers_registry,
     default_config_path,
+    load_brothers_registry,
     load_clade_config,
     save_clade_config,
 )
@@ -249,3 +252,215 @@ class TestDefaultConfigPath:
     def test_with_config_dir(self, tmp_path: Path):
         p = default_config_path(config_dir=tmp_path)
         assert p == tmp_path / "clade.yaml"
+
+
+class TestBuildBrothersRegistry:
+    """Tests for build_brothers_registry()."""
+
+    def test_basic(self):
+        """Brothers with ember_host produce correct registry entries."""
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    working_dir="~/projects/OMTRA",
+                    ember_host="100.71.57.52",
+                    ember_port=8100,
+                ),
+            },
+        )
+        keys = {"oppy": "key-oppy-123"}
+
+        registry = build_brothers_registry(cfg, keys)
+
+        assert "oppy" in registry
+        assert registry["oppy"]["ember_url"] == "http://100.71.57.52:8100"
+        assert registry["oppy"]["ember_api_key"] == "key-oppy-123"
+        assert registry["oppy"]["hearth_api_key"] == "key-oppy-123"
+        assert registry["oppy"]["working_dir"] == "~/projects/OMTRA"
+
+    def test_skips_brothers_without_ember(self):
+        """Brothers without ember_host are excluded."""
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_host="100.71.57.52",
+                    ember_port=8100,
+                ),
+                "jerry": BrotherEntry(ssh="ian@cluster"),
+            },
+        )
+        keys = {"oppy": "key-oppy", "jerry": "key-jerry"}
+
+        registry = build_brothers_registry(cfg, keys)
+
+        assert "oppy" in registry
+        assert "jerry" not in registry
+
+    def test_empty_when_no_ember_brothers(self):
+        """Empty dict when no brothers have Ember."""
+        cfg = CladeConfig(
+            brothers={"jerry": BrotherEntry(ssh="ian@cluster")},
+        )
+        keys = {"jerry": "key-jerry"}
+
+        registry = build_brothers_registry(cfg, keys)
+
+        assert registry == {}
+
+    def test_default_port(self):
+        """Uses port 8100 when ember_port is None."""
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_host="10.0.0.1",
+                ),
+            },
+        )
+        keys = {"oppy": "key-oppy"}
+
+        registry = build_brothers_registry(cfg, keys)
+
+        assert registry["oppy"]["ember_url"] == "http://10.0.0.1:8100"
+
+    def test_no_working_dir(self):
+        """Entries without working_dir omit that field."""
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_host="10.0.0.1",
+                    ember_port=8100,
+                ),
+            },
+        )
+        keys = {"oppy": "key-oppy"}
+
+        registry = build_brothers_registry(cfg, keys)
+
+        assert "working_dir" not in registry["oppy"]
+
+    def test_multiple_brothers(self):
+        """Multiple Ember brothers are all included."""
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_host="100.71.57.52",
+                    ember_port=8100,
+                ),
+                "jerry": BrotherEntry(
+                    ssh="ian@cluster",
+                    ember_host="100.99.88.77",
+                    ember_port=8200,
+                ),
+            },
+        )
+        keys = {"oppy": "key-oppy", "jerry": "key-jerry"}
+
+        registry = build_brothers_registry(cfg, keys)
+
+        assert len(registry) == 2
+        assert registry["oppy"]["ember_url"] == "http://100.71.57.52:8100"
+        assert registry["jerry"]["ember_url"] == "http://100.99.88.77:8200"
+
+    def test_missing_key_uses_empty_string(self):
+        """Brother without a key in keys dict gets empty API key."""
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_host="10.0.0.1",
+                ),
+            },
+        )
+        keys = {}  # no key for oppy
+
+        registry = build_brothers_registry(cfg, keys)
+
+        assert registry["oppy"]["ember_api_key"] == ""
+
+    def test_empty_config(self):
+        """Config with no brothers returns empty registry."""
+        cfg = CladeConfig()
+        registry = build_brothers_registry(cfg, {})
+        assert registry == {}
+
+
+class TestLoadBrothersRegistry:
+    """Tests for load_brothers_registry()."""
+
+    def test_loads_from_clade_yaml_and_keys(self, tmp_path: Path):
+        """Builds registry from clade.yaml + keys.json at runtime."""
+        # Write clade.yaml
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    working_dir="~/projects/OMTRA",
+                    ember_host="100.71.57.52",
+                    ember_port=8100,
+                ),
+            },
+        )
+        save_clade_config(cfg, tmp_path / "clade.yaml")
+
+        # Write keys.json
+        keys = {"oppy": "test-key-abc"}
+        with open(tmp_path / "keys.json", "w") as f:
+            json.dump(keys, f)
+
+        registry = load_brothers_registry(config_dir=tmp_path)
+
+        assert "oppy" in registry
+        assert registry["oppy"]["ember_url"] == "http://100.71.57.52:8100"
+        assert registry["oppy"]["ember_api_key"] == "test-key-abc"
+        assert registry["oppy"]["working_dir"] == "~/projects/OMTRA"
+
+    def test_returns_empty_when_no_clade_yaml(self, tmp_path: Path):
+        """Returns empty dict when clade.yaml doesn't exist."""
+        registry = load_brothers_registry(config_dir=tmp_path)
+        assert registry == {}
+
+    def test_returns_empty_when_no_ember_brothers(self, tmp_path: Path):
+        """Returns empty dict when no brothers have Ember configured."""
+        cfg = CladeConfig(
+            brothers={"jerry": BrotherEntry(ssh="ian@cluster")},
+        )
+        save_clade_config(cfg, tmp_path / "clade.yaml")
+
+        keys = {"jerry": "key-jerry"}
+        with open(tmp_path / "keys.json", "w") as f:
+            json.dump(keys, f)
+
+        registry = load_brothers_registry(config_dir=tmp_path)
+        assert registry == {}
+
+    def test_reflects_config_changes(self, tmp_path: Path):
+        """Registry reflects updated clade.yaml on each call (no stale cache)."""
+        # Initial config
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    working_dir="~/old/path",
+                    ember_host="100.71.57.52",
+                    ember_port=8100,
+                ),
+            },
+        )
+        save_clade_config(cfg, tmp_path / "clade.yaml")
+        with open(tmp_path / "keys.json", "w") as f:
+            json.dump({"oppy": "key-oppy"}, f)
+
+        reg1 = load_brothers_registry(config_dir=tmp_path)
+        assert reg1["oppy"]["working_dir"] == "~/old/path"
+
+        # Update config (simulating manual edit)
+        cfg.brothers["oppy"].working_dir = "~/new/path"
+        save_clade_config(cfg, tmp_path / "clade.yaml")
+
+        reg2 = load_brothers_registry(config_dir=tmp_path)
+        assert reg2["oppy"]["working_dir"] == "~/new/path"

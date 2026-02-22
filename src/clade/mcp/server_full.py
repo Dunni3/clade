@@ -4,6 +4,7 @@ import os
 import yaml
 from mcp.server.fastmcp import FastMCP
 
+from ..cli.clade_config import load_brothers_registry
 from ..communication.mailbox_client import MailboxClient
 from ..core.config import load_config
 from ..worker.client import EmberClient
@@ -48,13 +49,15 @@ _ember_url = os.environ.get("EMBER_URL")
 _ember_api_key = os.environ.get("EMBER_API_KEY")
 _ember = EmberClient(_ember_url, _ember_api_key, verify_ssl=False) if _ember_url and _ember_api_key else None
 
-# Load brothers registry for Ember delegation
-_brothers_config_path = os.environ.get("BROTHERS_CONFIG")
-_brothers_registry: dict[str, dict] = {}
-if _brothers_config_path and os.path.exists(_brothers_config_path):
-    with open(_brothers_config_path) as f:
-        _brothers_data = yaml.safe_load(f) or {}
-    _brothers_registry = _brothers_data.get("brothers", {})
+# Build brothers registry: prefer clade.yaml + keys.json (always fresh),
+# fall back to BROTHERS_CONFIG file (for backward compat / deployed workers)
+_brothers_registry = load_brothers_registry()
+if not _brothers_registry:
+    _brothers_config_path = os.environ.get("BROTHERS_CONFIG")
+    if _brothers_config_path and os.path.exists(_brothers_config_path):
+        with open(_brothers_config_path) as f:
+            _brothers_data = yaml.safe_load(f) or {}
+        _brothers_registry = _brothers_data.get("brothers", {})
 
 create_ember_tools(mcp, _ember, brothers_registry=_brothers_registry)
 create_delegation_tools(mcp, _mailbox, _brothers_registry, mailbox_name=_hearth_name)

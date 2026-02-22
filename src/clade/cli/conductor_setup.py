@@ -14,7 +14,7 @@ from pathlib import Path
 import click
 import yaml
 
-from .clade_config import CladeConfig
+from .clade_config import CladeConfig, build_brothers_registry
 from .ember_setup import detect_remote_user
 from .identity import generate_conductor_identity, write_identity_remote
 from .keys import add_key, keys_path, load_keys
@@ -136,7 +136,8 @@ def build_brothers_config(
 ) -> str:
     """Build brothers-ember.yaml for Ember delegation from personal/worker servers.
 
-    Only includes brothers that have ember_host set.
+    Only includes brothers that have ember_host set. Used when deploying
+    config to remote workers that don't have clade.yaml locally.
 
     Args:
         brothers: Dict of brother names to BrotherEntry objects.
@@ -145,24 +146,9 @@ def build_brothers_config(
     Returns:
         YAML string for brothers-ember.yaml.
     """
-    result: dict[str, dict] = {}
-
-    for name, bro in brothers.items():
-        if not bro.ember_host:
-            continue
-
-        api_key = keys.get(name, "")
-        port = bro.ember_port or 8100
-        entry: dict[str, str] = {
-            "ember_url": f"http://{bro.ember_host}:{port}",
-            "ember_api_key": api_key,
-            "hearth_api_key": api_key,
-        }
-        if bro.working_dir:
-            entry["working_dir"] = bro.working_dir
-        result[name] = entry
-
-    data = {"brothers": result}
+    config = CladeConfig(brothers=brothers)
+    registry = build_brothers_registry(config, keys)
+    data = {"brothers": registry}
     return yaml.dump(data, default_flow_style=False, sort_keys=False)
 
 
