@@ -72,6 +72,21 @@ def _now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# Column ordering for forward-only card sync
+_COLUMN_ORDER = {"backlog": 0, "todo": 1, "in_progress": 2, "done": 3, "archived": 4}
+
+
+async def _sync_linked_cards_to_in_progress(task_id: int, assignee: str) -> None:
+    """When a task moves to in_progress, sync any linked kanban cards forward."""
+    card_map = await db.get_cards_for_objects("task", [str(task_id)])
+    cards = card_map.get(str(task_id), [])
+    for card_info in cards:
+        card_col = card_info.get("col", "")
+        # Only sync forward: don't overwrite cards already in_progress, done, or archived
+        if _COLUMN_ORDER.get(card_col, 0) < _COLUMN_ORDER["in_progress"]:
+            await db.update_card(card_info["id"], col="in_progress", assignee=assignee)
+
+
 def _maybe_trigger_conductor_tick(
     task_id: int | None = None, message_id: int | None = None
 ) -> None:
@@ -392,6 +407,10 @@ async def update_task(
     else:
         # Re-fetch to pick up parent_task_id changes
         updated = await db.get_task(task_id)
+
+    # Auto-sync linked kanban cards when task moves to in_progress
+    if req.status == "in_progress":
+        await _sync_linked_cards_to_in_progress(task_id, task["assignee"])
 
     # Trigger conductor tick when any task reaches a terminal state
     # Note: "killed" is intentionally excluded — killed tasks must not trigger Kamaji
