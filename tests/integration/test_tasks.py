@@ -1957,3 +1957,269 @@ class TestUpdateTaskParentTool:
         mock_client.update_task.assert_called_once_with(
             2, status=None, output=None, parent_task_id=1
         )
+
+
+# ---------------------------------------------------------------------------
+# Auto-sync card status from linked tasks
+# ---------------------------------------------------------------------------
+
+
+class TestAutoSyncCardStatus:
+    @pytest.mark.asyncio
+    async def test_task_in_progress_syncs_linked_card(self, client):
+        """When a task moves to in_progress, linked cards in backlog/todo move to in_progress."""
+        # Create a task
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff", "subject": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        # Create a card linked to the task
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Feature card",
+                "col": "todo",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        card_id = resp.json()["id"]
+        assert resp.json()["col"] == "todo"
+
+        # Move task to in_progress
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+        assert resp.status_code == 200
+
+        # Card should now be in_progress with assignee set
+        resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "in_progress"
+        assert resp.json()["assignee"] == "oppy"
+
+    @pytest.mark.asyncio
+    async def test_task_in_progress_syncs_backlog_card(self, client):
+        """Cards in backlog also sync forward to in_progress."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "jerry", "prompt": "GPU job"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Backlog card",
+                "col": "backlog",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        card_id = resp.json()["id"]
+
+        # Move task to in_progress
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=JERRY_HEADERS,
+        )
+
+        resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "in_progress"
+        assert resp.json()["assignee"] == "jerry"
+
+    @pytest.mark.asyncio
+    async def test_no_sync_when_card_already_done(self, client):
+        """Cards in done/archived should NOT be moved back to in_progress."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Done card",
+                "col": "done",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        card_id = resp.json()["id"]
+
+        # Move task to in_progress
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Card should still be done
+        resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_no_sync_when_card_archived(self, client):
+        """Cards in archived column should NOT be moved when a linked task moves to in_progress."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Archived card",
+                "col": "archived",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        card_id = resp.json()["id"]
+
+        # Move task to in_progress
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Card should still be archived
+        resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "archived"
+
+    @pytest.mark.asyncio
+    async def test_no_sync_when_card_already_in_progress(self, client):
+        """Cards already in_progress should not be touched (preserves existing assignee)."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Active card",
+                "col": "in_progress",
+                "assignee": "jerry",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        card_id = resp.json()["id"]
+
+        # Move task to in_progress
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Card should still have jerry as assignee
+        resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "in_progress"
+        assert resp.json()["assignee"] == "jerry"
+
+    @pytest.mark.asyncio
+    async def test_no_sync_on_other_status_changes(self, client):
+        """Moving a task to completed should NOT trigger card sync."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Todo card",
+                "col": "todo",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        card_id = resp.json()["id"]
+
+        # Move task directly to completed (skip in_progress)
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "completed"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Card should still be in todo
+        resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "todo"
+
+    @pytest.mark.asyncio
+    async def test_no_linked_cards_no_error(self, client):
+        """Task with no linked cards should update fine without errors."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "in_progress"
+
+    @pytest.mark.asyncio
+    async def test_multiple_linked_cards(self, client):
+        """Multiple cards linked to the same task all get synced."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        card_ids = []
+        for title, col in [("Card A", "backlog"), ("Card B", "todo"), ("Card C", "done")]:
+            resp = await client.post(
+                "/api/v1/kanban/cards",
+                json={
+                    "title": title,
+                    "col": col,
+                    "links": [{"object_type": "task", "object_id": str(task_id)}],
+                },
+                headers=DOOT_HEADERS,
+            )
+            card_ids.append(resp.json()["id"])
+
+        # Move task to in_progress
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Card A (was backlog) -> in_progress
+        resp = await client.get(f"/api/v1/kanban/cards/{card_ids[0]}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "in_progress"
+
+        # Card B (was todo) -> in_progress
+        resp = await client.get(f"/api/v1/kanban/cards/{card_ids[1]}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "in_progress"
+
+        # Card C (was done) -> still done
+        resp = await client.get(f"/api/v1/kanban/cards/{card_ids[2]}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "done"
