@@ -37,8 +37,13 @@ Check the environment variables `TRIGGER_TASK_ID` and `TRIGGER_MESSAGE_ID`.
    - If the worker is healthy, mark the stuck task as `failed` with output "tmux session died", then retry it using `retry_task(task_id)` — this automatically creates a child task with the same prompt
    - If the worker is unreachable, mark the task as `failed` with output "worker unreachable"
    - Deposit a morsel noting the stuck task and action taken
-3. **Check worker health** — verify all workers are reachable
-4. **Deposit a morsel** if anything noteworthy happened (tagged `conductor-tick`)
+3. **Scan for orphaned pending tasks** — call `list_tasks(status="pending")`. Any task stuck in `pending` for more than 5 minutes was likely created in the Hearth but never reached the Ember (e.g. the delegation call failed and the status update was lost). For each orphaned pending task:
+   - Check if the assigned worker is healthy (`check_worker_health`)
+   - If the worker is healthy, **re-delegate** by creating a new child task with the same prompt and marking the orphaned one as `failed` with output "orphaned in pending — re-delegated as task #N"
+   - If the worker is unreachable, mark the task as `failed` with output "worker unreachable — task never reached Ember"
+   - Deposit a morsel noting the orphaned task and action taken
+4. **Check worker health** — verify all workers are reachable
+5. **Deposit a morsel** if anything noteworthy happened (tagged `conductor-tick`)
 
 ## Rules
 

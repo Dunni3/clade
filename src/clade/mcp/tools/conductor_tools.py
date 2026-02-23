@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 from mcp.server.fastmcp import FastMCP
 
 from ...communication.mailbox_client import MailboxClient
 from ...worker.client import EmberClient
+
+logger = logging.getLogger(__name__)
 
 
 _NOT_CONFIGURED = "Conductor not configured. Ensure HEARTH_URL and HEARTH_API_KEY are set."
@@ -131,18 +134,25 @@ def create_conductor_tools(
                 sender_name=mailbox_name,
             )
         except Exception as e:
-            # Mark task as failed
+            # Mark task as failed so it doesn't get orphaned in pending
             try:
-                await mailbox.update_task(task_id, status="failed", output=str(e))
-            except Exception:
-                pass
+                await mailbox.update_task(task_id, status="failed", output=f"Ember delegation failed: {e}")
+            except Exception as status_err:
+                logger.error(
+                    "Task #%d orphaned in pending: Ember failed (%s) AND status update failed (%s)",
+                    task_id, e, status_err,
+                )
+                return (
+                    f"Task #{task_id} created but Ember delegation failed: {e}\n"
+                    f"WARNING: Failed to mark task as failed ({status_err}) — task is orphaned in pending status."
+                )
             return f"Task #{task_id} created but Ember delegation failed: {e}"
 
         # Update task status
         try:
             await mailbox.update_task(task_id, status="launched")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("Task #%d may be orphaned: launched on Ember but status update failed: %s", task_id, e)
 
         session = ember_result.get("session_name", "?")
         result_lines = [
