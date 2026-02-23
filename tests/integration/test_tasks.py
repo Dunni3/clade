@@ -332,6 +332,111 @@ class TestDatabaseTaskTrees:
         assert task["root_task_id"] == task_id
         assert task["children"] == []
 
+    @pytest.mark.asyncio
+    async def test_depth_computed_on_insert(self):
+        """Root task has depth 0, children depth 1, grandchildren depth 2."""
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root", subject="Root"
+        )
+        child_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Child",
+            parent_task_id=root_id,
+        )
+        grandchild_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Grandchild",
+            parent_task_id=child_id,
+        )
+
+        root = await mailbox_db.get_task(root_id)
+        child = await mailbox_db.get_task(child_id)
+        grandchild = await mailbox_db.get_task(grandchild_id)
+        assert root["depth"] == 0
+        assert child["depth"] == 1
+        assert grandchild["depth"] == 2
+
+    @pytest.mark.asyncio
+    async def test_depth_in_tree(self):
+        """get_tree returns correct depth at each level."""
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root", subject="Root"
+        )
+        c1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C1", parent_task_id=root_id,
+        )
+        c1_1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C1.1", parent_task_id=c1,
+        )
+
+        tree = await mailbox_db.get_tree(root_id)
+        assert tree["depth"] == 0
+        assert tree["children"][0]["depth"] == 1
+        assert tree["children"][0]["children"][0]["depth"] == 2
+
+    @pytest.mark.asyncio
+    async def test_metadata_round_trip(self):
+        """Metadata dict is stored as JSON and returned parsed."""
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root",
+            metadata={"max_depth": 10, "strategy": "conservative"},
+        )
+        task = await mailbox_db.get_task(task_id)
+        assert task["metadata"] == {"max_depth": 10, "strategy": "conservative"}
+
+    @pytest.mark.asyncio
+    async def test_metadata_none_by_default(self):
+        """Tasks without metadata have metadata=None."""
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="No metadata"
+        )
+        task = await mailbox_db.get_task(task_id)
+        assert task["metadata"] is None
+
+    @pytest.mark.asyncio
+    async def test_metadata_in_tree(self):
+        """get_tree parses metadata JSON on root and descendants."""
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root",
+            metadata={"max_depth": 15},
+        )
+        child_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Child",
+            parent_task_id=root_id,
+        )
+        tree = await mailbox_db.get_tree(root_id)
+        assert tree["metadata"] == {"max_depth": 15}
+        assert tree["children"][0]["metadata"] is None
+
+    @pytest.mark.asyncio
+    async def test_depth_cascades_on_reparent(self):
+        """Reparenting updates depth for task and all descendants."""
+        a = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="A", subject="A"
+        )
+        b = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="B", parent_task_id=a
+        )
+        c = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C", parent_task_id=b
+        )
+        # B is depth 1, C is depth 2
+
+        # Create new root D
+        d = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="D", subject="D"
+        )
+        e = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="E", parent_task_id=d
+        )
+        # E is depth 1
+
+        # Reparent B under E (so B goes from depth 1 to depth 2)
+        await mailbox_db.update_task_parent(b, e)
+
+        task_b = await mailbox_db.get_task(b)
+        task_c = await mailbox_db.get_task(c)
+        assert task_b["depth"] == 2  # was 1, now under E (depth 1)
+        assert task_c["depth"] == 3  # was 2, shifted by +1
+
 
 class TestDatabaseGetApiKeyForName:
     @pytest.mark.asyncio
@@ -712,6 +817,98 @@ class TestAPITasks:
         data = resp.json()
         assert len(data["messages"]) == 1
         assert data["messages"][0]["body"] == "Task received"
+
+
+# ---------------------------------------------------------------------------
+# Tasks — API: metadata and depth
+# ---------------------------------------------------------------------------
+
+
+class TestAPIMetadataAndDepth:
+    @pytest.mark.asyncio
+    async def test_create_task_with_metadata(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Root task",
+                "subject": "Root",
+                "metadata": {"max_depth": 10},
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        task_id = resp.json()["id"]
+
+        resp = await client.get(f"/api/v1/tasks/{task_id}", headers=DOOT_HEADERS)
+        data = resp.json()
+        assert data["metadata"] == {"max_depth": 10}
+        assert data["depth"] == 0
+
+    @pytest.mark.asyncio
+    async def test_depth_increases_with_nesting(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Root", "subject": "Root"},
+            headers=DOOT_HEADERS,
+        )
+        root_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Child", "parent_task_id": root_id},
+            headers=DOOT_HEADERS,
+        )
+        child_id = resp.json()["id"]
+
+        resp = await client.get(f"/api/v1/tasks/{child_id}", headers=DOOT_HEADERS)
+        assert resp.json()["depth"] == 1
+
+    @pytest.mark.asyncio
+    async def test_task_list_includes_depth(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Root", "subject": "Root"},
+            headers=DOOT_HEADERS,
+        )
+        root_id = resp.json()["id"]
+        await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Child", "parent_task_id": root_id},
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get("/api/v1/tasks", headers=DOOT_HEADERS)
+        tasks = resp.json()
+        depths = {t["subject"]: t["depth"] for t in tasks}
+        assert depths.get("Root") == 0
+
+    @pytest.mark.asyncio
+    async def test_tree_includes_metadata_and_depth(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Root",
+                "subject": "Root",
+                "metadata": {"max_depth": 5},
+            },
+            headers=DOOT_HEADERS,
+        )
+        root_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Child", "parent_task_id": root_id},
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get(f"/api/v1/trees/{root_id}", headers=DOOT_HEADERS)
+        tree = resp.json()
+        assert tree["metadata"] == {"max_depth": 5}
+        assert tree["depth"] == 0
+        assert tree["children"][0]["depth"] == 1
+        assert tree["children"][0]["metadata"] is None
 
 
 # ---------------------------------------------------------------------------
