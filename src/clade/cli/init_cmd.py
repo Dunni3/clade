@@ -176,6 +176,7 @@ def _register_personal_mcp(
     # bin dir as the current Python (correct venv), fall back to PATH.
     bin_dir = Path(sys.executable).parent
     entry_point = bin_dir / "clade-personal"
+    fallback_args: list[str] | None = None
     if not entry_point.exists():
         found = shutil.which("clade-personal")
         if found:
@@ -189,6 +190,7 @@ def _register_personal_mcp(
             )
             # Last resort fallback — should not happen if clade is properly installed
             entry_point = Path(sys.executable)
+            fallback_args = ["-m", "clade.mcp.server_full"]
 
     command = str(entry_point)
     env: dict[str, str] = {}
@@ -203,6 +205,7 @@ def _register_personal_mcp(
     register_mcp_server(
         server_name,
         command,
+        args=fallback_args,
         env=env if env else None,
     )
     click.echo(f"Registered '{server_name}' MCP server in ~/.claude.json")

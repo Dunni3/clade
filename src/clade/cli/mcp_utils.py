@@ -49,6 +49,7 @@ def write_claude_json(data: dict, path: Path | None = None) -> None:
 def register_mcp_server(
     name: str,
     command: str,
+    args: list[str] | None = None,
     env: dict[str, str] | None = None,
     path: Path | None = None,
 ) -> None:
@@ -61,6 +62,7 @@ def register_mcp_server(
     Args:
         name: Server name (e.g. 'clade-personal').
         command: Absolute path to the entry point binary.
+        args: Command arguments (default: empty list).
         env: Environment variables to set for the server.
         path: Path to claude.json.
     """
@@ -70,7 +72,7 @@ def register_mcp_server(
 
     server_config: dict = {
         "command": command,
-        "args": [],
+        "args": args if args is not None else [],
     }
     if env:
         server_config["env"] = env
