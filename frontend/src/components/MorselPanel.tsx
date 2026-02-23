@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getMorsels } from '../api/mailbox';
+import Linkify from './Linkify';
 import type { MorselSummary, MorselLink } from '../types/mailbox';
 
 const senderColors: Record<string, string> = {
@@ -28,7 +29,7 @@ function formatRelativeDate(iso: string) {
 function renderLink(link: MorselLink, index: number) {
   if (link.object_type === 'task') {
     return (
-      <Link key={index} to={`/tasks/${link.object_id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
+      <Link key={index} to={`/tasks/${link.object_id}`} className="text-xs text-indigo-400 hover:text-indigo-300" onClick={(e) => e.stopPropagation()}>
         task #{link.object_id}
       </Link>
     );
@@ -42,7 +43,10 @@ function renderLink(link: MorselLink, index: number) {
 
 function MorselCard({ morsel }: { morsel: MorselSummary }) {
   return (
-    <div className="rounded-lg border border-gray-800 p-3">
+    <Link
+      to={`/morsels/${morsel.id}`}
+      className="block rounded-lg border border-gray-800 p-3 hover:bg-gray-800/50 transition-colors"
+    >
       <div className="flex items-center gap-2 mb-1.5">
         <span className="text-xs font-mono text-gray-500">#{morsel.id}</span>
         <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${senderColors[morsel.creator] || 'bg-gray-700 text-gray-300'}`}>
@@ -55,13 +59,13 @@ function MorselCard({ morsel }: { morsel: MorselSummary }) {
         ))}
         <span className="text-xs text-gray-600 ml-auto">{formatRelativeDate(morsel.created_at)}</span>
       </div>
-      <p className="text-sm text-gray-300 whitespace-pre-wrap">{morsel.body}</p>
+      <p className="text-sm text-gray-300 whitespace-pre-wrap"><Linkify>{morsel.body}</Linkify></p>
       {morsel.links.length > 0 && (
         <div className="flex items-center gap-2 mt-2">
           {morsel.links.map((link, i) => renderLink(link, i))}
         </div>
       )}
-    </div>
+    </Link>
   );
 }
 

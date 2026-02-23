@@ -161,8 +161,8 @@ class TestBuildRunnerScript:
         try:
             with open(runner_path) as f:
                 content = f.read()
-            assert "Auto-mark task failed" in content
-            assert "curl -sf -X PATCH" in content
+            assert "Auto-report failure" in content
+            assert "curl -skf -X PATCH" in content
             assert "CLAUDE_TASK_ID" in content
         finally:
             os.unlink(prompt_path)
@@ -176,7 +176,7 @@ class TestBuildRunnerScript:
         try:
             with open(runner_path) as f:
                 content = f.read()
-            assert "Auto-mark task failed" not in content
+            assert "Auto-report failure" not in content
             assert "curl" not in content
         finally:
             os.unlink(prompt_path)
@@ -195,6 +195,24 @@ class TestBuildRunnerScript:
             # FATAL log on cd failure
             assert "FATAL: cd failed" in content
             assert "~/projects/test" in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_failure_trap_before_cd(self):
+        """Trap is set before cd so pre-Claude failures are caught."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", "~/projects/test", "hello",
+            task_id=42,
+            hearth_url="https://example.com",
+            hearth_api_key="secret",
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            trap_pos = content.index("trap '_report_failure $?' EXIT")
+            cd_pos = content.index("cd ~/projects/test")
+            assert trap_pos < cd_pos, "trap must be set before cd"
         finally:
             os.unlink(prompt_path)
             os.unlink(runner_path)
@@ -240,6 +258,25 @@ class TestBuildRunnerScript:
             os.unlink(prompt_path)
             os.unlink(runner_path)
 
+    def test_failure_trap_contains_report_function(self):
+        """Trap includes _report_failure function with diagnostic info."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello",
+            task_id=42,
+            hearth_url="https://example.com",
+            hearth_api_key="secret",
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "_report_failure()" in content
+            assert "_CLAUDE_STARTED=0" in content
+            assert "before Claude started" in content
+            assert "Session exited with code" in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
     def test_no_env_export_logging_without_env(self):
         """No exported env log line when no env vars are set."""
         prompt_path, runner_path = build_runner_script(
@@ -253,6 +290,39 @@ class TestBuildRunnerScript:
             os.unlink(prompt_path)
             os.unlink(runner_path)
 
+    def test_claude_started_flag_before_claude(self):
+        """_CLAUDE_STARTED=1 is set just before the claude command."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello",
+            task_id=42,
+            hearth_url="https://example.com",
+            hearth_api_key="secret",
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            started_pos = content.index("_CLAUDE_STARTED=1")
+            claude_pos = content.index("claude -p")
+            assert started_pos < claude_pos, "_CLAUDE_STARTED=1 must be before claude command"
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_no_trap_without_task_id(self):
+        """No trap or _report_failure when task_id is not set."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello"
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "_report_failure" not in content
+            assert "_CLAUDE_STARTED" not in content
+            assert "trap " not in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
     def test_launch_log_includes_pwd(self):
         """The launching claude log line includes pwd."""
         prompt_path, runner_path = build_runner_script(
@@ -262,6 +332,55 @@ class TestBuildRunnerScript:
             with open(runner_path) as f:
                 content = f.read()
             assert "launching claude (pwd:" in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_trap_not_fire_on_success(self):
+        """Trap function checks exit code != 0, so it won't report on success."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello",
+            task_id=42,
+            hearth_url="https://example.com",
+            hearth_api_key="secret",
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            # The function checks for non-zero exit code
+            assert '"$rc" -ne 0' in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_combined_trap_with_worktree(self):
+        """When worktree isolation is active, trap combines cleanup + failure report."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", "~/projects/test", "hello",
+            task_id=42,
+            hearth_url="https://example.com",
+            hearth_api_key="secret",
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "_cleanup_worktree; _report_failure" in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_exit_with_exit_code(self):
+        """Script ends with exit $EXIT_CODE to propagate correct code to trap."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello",
+            task_id=42,
+            hearth_url="https://example.com",
+            hearth_api_key="secret",
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "exit $EXIT_CODE" in content
         finally:
             os.unlink(prompt_path)
             os.unlink(runner_path)
