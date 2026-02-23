@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getCards, createCard, updateCard, deleteCard, getTask } from '../api/mailbox';
 import type { CardSummary, CreateCardRequest, TaskSummary } from '../types/mailbox';
+import Linkify from '../components/Linkify';
 import PeekDrawer from '../components/PeekDrawer';
 
 const COLUMNS = ['backlog', 'todo', 'in_progress', 'done'] as const;
@@ -494,7 +495,7 @@ export default function KanbanPage() {
                   )}
                 </div>
                 {selectedCard.description && (
-                  <p className="text-sm text-gray-400 mb-4 whitespace-pre-wrap max-h-60 overflow-y-auto">{selectedCard.description}</p>
+                  <p className="text-sm text-gray-400 mb-4 whitespace-pre-wrap max-h-60 overflow-y-auto"><Linkify>{selectedCard.description}</Linkify></p>
                 )}
                 {selectedCard.links && selectedCard.links.length > 0 && (() => {
                   const taskLinks = selectedCard.links.filter(l => l.object_type === 'task');

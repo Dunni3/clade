@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { viewMessage, editMessage, deleteMessage, markUnread } from '../api/mailbox';
+import Linkify from '../components/Linkify';
 import { useAuthStore } from '../store/authStore';
 import DeleteModal from '../components/DeleteModal';
 import type { FeedMessage, EditMessageRequest } from '../types/mailbox';
@@ -137,7 +138,7 @@ export default function MessageDetailPage() {
             <span className="text-xs text-gray-500 whitespace-nowrap">{formatDate(message.created_at)}</span>
           </div>
 
-          <div className="text-sm text-gray-300 whitespace-pre-wrap mb-6">{message.body}</div>
+          <div className="text-sm text-gray-300 whitespace-pre-wrap mb-6"><Linkify>{message.body}</Linkify></div>
 
           {message.read_by.length > 0 && (
             <div className="border-t border-gray-800 pt-4 mb-4">
