@@ -73,7 +73,7 @@ def create_task_tools(
             auto_pull: If true, git pull the MCP server repo on the remote host before launching. Default true.
             parent_task_id: Optional parent task ID for task tree linking.
             on_complete: Optional follow-up instructions for the Conductor when this task completes or fails.
-            card_id: Optional kanban card ID to link this task to. Creates a formal link so the card tracks which tasks are working on it.
+            card_id: Optional kanban card ID to link this task to.
         """
         if mailbox is None:
             return _NOT_CONFIGURED

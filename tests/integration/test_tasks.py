@@ -1194,6 +1194,45 @@ class TestInitiateSSHTaskTool:
         assert call_kwargs["mailbox_url"] == "https://54.84.119.14"
         assert call_kwargs["mailbox_api_key"] == "secret-key"
 
+    @pytest.mark.asyncio
+    @patch("clade.mcp.tools.task_tools.initiate_task")
+    async def test_card_id_links_to_card(self, mock_initiate):
+        mock_client = AsyncMock()
+        mock_client.create_task.return_value = {"id": 11}
+        mock_client.update_task.return_value = {"id": 11, "status": "launched"}
+        mock_client.add_card_link.return_value = {}
+        mock_initiate.return_value = TaskResult(
+            success=True,
+            session_name="task-oppy-test-card-123",
+            host="masuda",
+            message="Task launched",
+        )
+        tools = _make_task_tools(mock_client)
+        result = await tools["initiate_ssh_task"](
+            "oppy", "Do stuff", subject="Test", card_id=38
+        )
+        assert "Task #11" in result
+        assert "launched successfully" in result
+        assert "Linked to card: #38" in result
+        mock_client.add_card_link.assert_called_once_with(38, "task", "11")
+
+    @pytest.mark.asyncio
+    @patch("clade.mcp.tools.task_tools.initiate_task")
+    async def test_no_card_id_no_link(self, mock_initiate):
+        mock_client = AsyncMock()
+        mock_client.create_task.return_value = {"id": 12}
+        mock_client.update_task.return_value = {"id": 12, "status": "launched"}
+        mock_initiate.return_value = TaskResult(
+            success=True,
+            session_name="task-oppy-test-nocard-456",
+            host="masuda",
+            message="Task launched",
+        )
+        tools = _make_task_tools(mock_client)
+        result = await tools["initiate_ssh_task"]("oppy", "Do stuff", subject="Test")
+        assert "Linked to card" not in result
+        mock_client.add_card_link.assert_not_called()
+
 
 class TestKillTaskTool:
     @pytest.mark.asyncio
