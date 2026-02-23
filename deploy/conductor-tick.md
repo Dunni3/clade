@@ -16,7 +16,7 @@ Check the environment variables `TRIGGER_TASK_ID` and `TRIGGER_MESSAGE_ID`.
 2. **Check for `on_complete` instructions** — if the completed/failed task has a non-null `on_complete` field, read it and follow those instructions as your **primary directive** for this tick. The `on_complete` field contains follow-up instructions attached by the task creator.
 3. **Assess the result** — does it warrant follow-up tasks (beyond any `on_complete` instructions)?
    - If the task **failed** and retries remain, prefer `retry_task(TRIGGER_TASK_ID)` — it automatically re-delegates with the same prompt as a child task, server-side.
-   - If the task **completed** and needs follow-up, check worker load first (`check_worker_health`), then delegate children. They will auto-link as children via the `TRIGGER_TASK_ID` env var.
+   - If the task **completed** and needs follow-up, check worker load first (`check_worker_health`), then delegate children. **Always pass `parent_task_id=TRIGGER_TASK_ID` explicitly** when calling `delegate_task()` so the new task is linked as a child of the triggering task. (The env var provides a safety net, but passing it explicitly ensures the tree is built correctly.)
    - If no follow-up needed, note completion
 4. **Deposit a morsel** summarizing what happened (tagged `conductor-tick`, linked to the task)
 5. **Check mailbox** — read and respond to any unread messages
