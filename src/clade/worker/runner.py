@@ -37,6 +37,8 @@ def build_runner_script(
 
     Returns (prompt_file_path, runner_script_path).
     """
+    from ..templates import render_template
+
     # Write prompt to temp file
     prompt_fd, prompt_path = tempfile.mkstemp(
         prefix="claude_task_", suffix=".txt", dir="/tmp"
@@ -44,128 +46,37 @@ def build_runner_script(
     with os.fdopen(prompt_fd, "w") as f:
         f.write(prompt)
 
-    # Build runner script with logging for debugging dead sessions
-    log_path = f"/tmp/claude_runner_{session_name}.log"
-    lines = ["#!/bin/bash"]
-
-    # Log file for post-mortem debugging
-    lines.append(f'LOGFILE="{log_path}"')
-    lines.append('echo "$(date -Iseconds) runner started (pid $$)" > "$LOGFILE"')
-
-    # Export env vars for Hearth access.
-    # Each var is independent so callers can selectively override.
-    # When launched via Ember, the process already inherits correct env vars;
-    # only vars explicitly passed will be overridden.
+    # Build env exports log line (redacted key)
     env_exports = []
     if task_id is not None:
-        lines.append(f"export CLAUDE_TASK_ID={task_id}")
         env_exports.append(f"CLAUDE_TASK_ID={task_id}")
     if hearth_url:
-        lines.append(f"export HEARTH_URL='{hearth_url}'")
         env_exports.append(f"HEARTH_URL={hearth_url}")
     if hearth_api_key:
-        lines.append(f"export HEARTH_API_KEY='{hearth_api_key}'")
         env_exports.append("HEARTH_API_KEY=<redacted>")
     if hearth_name:
-        lines.append(f"export HEARTH_NAME='{hearth_name}'")
         env_exports.append(f"HEARTH_NAME={hearth_name}")
-    if env_exports:
-        lines.append(f'echo "$(date -Iseconds) exported env: {", ".join(env_exports)}" >> "$LOGFILE"')
 
-    # Failure reporting trap — catches pre-Claude failures (e.g. cd to bad dir)
-    if task_id is not None:
-        lines.append("")
-        lines.append("# Auto-report failure on unexpected exit")
-        lines.append("_CLAUDE_STARTED=0")
-        lines.append("_report_failure() {")
-        lines.append("    local rc=$1")
-        lines.append('    if [ "$rc" -ne 0 ] && [ -n "$CLAUDE_TASK_ID" ] && [ -n "$HEARTH_URL" ] && [ -n "$HEARTH_API_KEY" ]; then')
-        lines.append("        local msg")
-        lines.append('        if [ "$_CLAUDE_STARTED" -eq 0 ]; then')
-        lines.append('            msg="Runner script failed before Claude started (exit code $rc)"')
-        lines.append("        else")
-        lines.append('            msg="Session exited with code $rc"')
-        lines.append("        fi")
-        lines.append("        # Append log tail for context")
-        lines.append('        if [ -f "$LOGFILE" ]; then')
-        lines.append("            local logtail")
-        lines.append(r"""            logtail=$(tail -5 "$LOGFILE" | tr '\n' '|' | tr -d '"\\' | head -c 500)""")
-        lines.append('            msg="$msg — log: $logtail"')
-        lines.append("        fi")
-        lines.append('        curl -skf -X PATCH "$HEARTH_URL/api/v1/tasks/$CLAUDE_TASK_ID" \\')
-        lines.append('            -H "Authorization: Bearer $HEARTH_API_KEY" \\')
-        lines.append('            -H "Content-Type: application/json" \\')
-        lines.append('            -d "{\\"status\\":\\"failed\\",\\"output\\":\\"$msg\\"}" \\')
-        lines.append("            >/dev/null 2>&1 || true")
-        lines.append("    fi")
-        lines.append("}")
-        lines.append("trap '_report_failure $?' EXIT")
-
-    # Change to working directory
-    if working_dir:
-        lines.append(f'echo "$(date -Iseconds) cd {working_dir}" >> "$LOGFILE"')
-        lines.append(f"cd {working_dir} || {{ echo \"$(date -Iseconds) FATAL: cd failed — directory does not exist or is not accessible: {working_dir}\" >> \"$LOGFILE\"; exit 1; }}")
-        lines.append(f'echo "$(date -Iseconds) cd to {working_dir} ok (pwd=$(pwd))" >> "$LOGFILE"')
-
-        # Git worktree isolation: if inside a git repo, create an isolated worktree
-        # so concurrent tasks don't step on each other.
-        lines.append("")
-        lines.append("# Worktree isolation")
-        lines.append('echo "$(date -Iseconds) checking git worktree eligibility" >> "$LOGFILE"')
-        lines.append("if git rev-parse --git-dir > /dev/null 2>&1; then")
-        lines.append('    _WT_BASE="$HOME/.clade-worktrees"')
-        lines.append('    mkdir -p "$_WT_BASE"')
-        lines.append(f'    _WT_DIR="$_WT_BASE/{session_name}"')
-        lines.append('    _GIT_ROOT="$(git rev-parse --show-toplevel)"')
-        lines.append(f'    echo "$(date -Iseconds) inside git repo (root: $_GIT_ROOT), creating worktree at $_WT_DIR" >> "$LOGFILE"')
-        lines.append("")
-        lines.append(f'    git worktree add "$_WT_DIR" -b "clade/{session_name}" 2>/dev/null || \\')
-        lines.append('        git worktree add "$_WT_DIR" HEAD --detach 2>/dev/null')
-        lines.append("")
-        lines.append('    if [ -d "$_WT_DIR" ]; then')
-        lines.append('        echo "$(date -Iseconds) worktree created, cd to $_WT_DIR" >> "$LOGFILE"')
-        lines.append('        cd "$_WT_DIR"')
-        lines.append("        _cleanup_worktree() {")
-        lines.append('            cd "$_GIT_ROOT" 2>/dev/null || cd /tmp')
-        lines.append('            if git -C "$_WT_DIR" diff --quiet 2>/dev/null && \\')
-        lines.append('               git -C "$_WT_DIR" diff --cached --quiet 2>/dev/null; then')
-        lines.append('                git worktree remove "$_WT_DIR" 2>/dev/null || true')
-        lines.append(f'                git branch -d "clade/{session_name}" 2>/dev/null || true')
-        lines.append("            fi")
-        lines.append("        }")
-        if task_id is not None:
-            lines.append("        trap '_rc=$?; _cleanup_worktree; _report_failure $_rc' EXIT HUP TERM")
-        else:
-            lines.append("        trap _cleanup_worktree EXIT HUP TERM")
-        lines.append("    else")
-        lines.append('        echo "$(date -Iseconds) WARNING: worktree creation failed, continuing in original dir" >> "$LOGFILE"')
-        lines.append("    fi")
-        lines.append("else")
-        lines.append('    echo "$(date -Iseconds) not a git repo, skipping worktree isolation" >> "$LOGFILE"')
-        lines.append("fi")
-        lines.append("")
-
-    # Run Claude, capturing exit code
-    lines.append('echo "$(date -Iseconds) launching claude (pwd: $(pwd))" >> "$LOGFILE"')
-    if task_id is not None:
-        lines.append("_CLAUDE_STARTED=1")
-    claude_cmd = f'claude -p "$(cat {prompt_path})" --dangerously-skip-permissions'
-    if max_turns is not None:
-        claude_cmd += f" --max-turns {max_turns}"
-    lines.append(claude_cmd)
-    lines.append('EXIT_CODE=$?')
-    lines.append('echo "$(date -Iseconds) claude exited with code $EXIT_CODE" >> "$LOGFILE"')
-
-    # Self-cleanup (keep log on failure for debugging)
-    lines.append(f'rm -f "{prompt_path}" "$0"')
-    lines.append('[ "$EXIT_CODE" -eq 0 ] && rm -f "$LOGFILE"')
-    lines.append('exit $EXIT_CODE')
+    log_path = f"/tmp/claude_runner_{session_name}.log"
+    content = render_template(
+        "local_runner.sh.j2",
+        session_name=session_name,
+        working_dir=working_dir,
+        prompt_path=prompt_path,
+        max_turns=max_turns,
+        task_id=task_id,
+        hearth_url=hearth_url,
+        hearth_api_key=hearth_api_key,
+        hearth_name=hearth_name,
+        env_exports_log=", ".join(env_exports) if env_exports else "",
+        log_path=log_path,
+    )
 
     runner_fd, runner_path = tempfile.mkstemp(
         prefix="claude_runner_", suffix=".sh", dir="/tmp"
     )
     with os.fdopen(runner_fd, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write(content)
     os.chmod(runner_path, 0o755)
 
     return prompt_path, runner_path
