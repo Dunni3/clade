@@ -133,6 +133,8 @@ class MailboxClient:
         working_dir: str | None = None,
         parent_task_id: int | None = None,
         on_complete: str | None = None,
+        blocked_by_task_id: int | None = None,
+        max_turns: int | None = None,
     ) -> dict:
         payload: dict = {"assignee": assignee, "prompt": prompt, "subject": subject}
         if session_name is not None:
@@ -145,6 +147,10 @@ class MailboxClient:
             payload["parent_task_id"] = parent_task_id
         if on_complete is not None:
             payload["on_complete"] = on_complete
+        if blocked_by_task_id is not None:
+            payload["blocked_by_task_id"] = blocked_by_task_id
+        if max_turns is not None:
+            payload["max_turns"] = max_turns
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.post(
                 self._url("/tasks"),

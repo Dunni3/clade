@@ -62,11 +62,14 @@ def create_delegation_tools(
         max_turns: int | None = None,
         card_id: int | None = None,
         on_complete: str | None = None,
+        blocked_by_task_id: int | None = None,
     ) -> str:
         """Delegate a task to a brother via their Ember server.
 
         Creates a task in the Hearth, sends it to the brother's Ember, and
-        updates the task status.
+        updates the task status. If blocked_by_task_id is set, the task is
+        created but not delegated — it will be auto-delegated when the
+        blocking task completes.
 
         Args:
             brother: Brother name (e.g. "oppy").
@@ -77,6 +80,7 @@ def create_delegation_tools(
             max_turns: Optional maximum Claude turns. If not set, no turn limit is applied.
             card_id: Optional kanban card ID to link this task to.
             on_complete: Optional follow-up instructions for the Conductor when this task completes or fails.
+            blocked_by_task_id: Optional task ID that must complete before this task runs. The task will stay in 'pending' until the blocking task completes, then auto-delegate.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -99,6 +103,8 @@ def create_delegation_tools(
                 subject=subject,
                 parent_task_id=parent_task_id,
                 on_complete=on_complete,
+                blocked_by_task_id=blocked_by_task_id,
+                max_turns=max_turns,
             )
             task_id = task_result["id"]
         except Exception as e:
@@ -110,6 +116,21 @@ def create_delegation_tools(
                 await mailbox.add_card_link(card_id, "task", str(task_id))
             except Exception:
                 pass  # Non-fatal
+
+        # Check the *actual DB state* of blocked_by_task_id (not the input param).
+        # insert_task auto-clears blocked_by when the blocker is already completed,
+        # so the input param may say "blocked" while the DB says "ready to go".
+        actual_blocked_by = task_result.get("blocked_by_task_id")
+        if actual_blocked_by is not None:
+            result_lines = [
+                f"Task #{task_id} created (deferred — blocked by #{actual_blocked_by}).",
+                f"  Subject: {subject or '(none)'}",
+                f"  Assignee: {brother}",
+                f"  Status: pending (waiting for #{actual_blocked_by} to complete)",
+            ]
+            if card_id is not None:
+                result_lines.append(f"  Linked to card: #{card_id}")
+            return "\n".join(result_lines)
 
         # Send to Ember
         wd = working_dir or config.get("working_dir")
