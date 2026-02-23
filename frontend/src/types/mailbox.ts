@@ -64,6 +64,7 @@ export interface TaskSummary {
   completed_at: string | null;
   parent_task_id: number | null;
   root_task_id: number | null;
+  depth: number;
 }
 
 export interface TaskEvent {
@@ -88,6 +89,7 @@ export interface TaskDetail extends TaskSummary {
   host: string | null;
   working_dir: string | null;
   output: string | null;
+  metadata: Record<string, unknown> | null;
   children: TaskSummary[];
   messages: FeedMessage[];
   events: TaskEvent[];
@@ -147,6 +149,8 @@ export interface TreeNode {
   host: string | null;
   working_dir: string | null;
   output: string | null;
+  metadata: Record<string, unknown> | null;
+  depth: number;
   children: TreeNode[];
   linked_cards?: LinkedCardInfo[];
 }

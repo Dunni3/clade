@@ -49,6 +49,7 @@ def create_delegation_tools(
         working_dir: str | None = None,
         max_turns: int | None = None,
         card_id: int | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """Delegate a task to a brother via their Ember server.
 
@@ -63,6 +64,7 @@ def create_delegation_tools(
             working_dir: Override the brother's default working directory.
             max_turns: Optional maximum Claude turns. If not set, no turn limit is applied.
             card_id: Optional kanban card ID to link this task to.
+            metadata: Optional dict stored on root tasks. Supports keys like "max_depth" to configure tree behavior.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -83,6 +85,7 @@ def create_delegation_tools(
                 prompt=prompt,
                 subject=subject,
                 parent_task_id=parent_task_id,
+                metadata=metadata,
             )
             task_id = task_result["id"]
         except Exception as e:

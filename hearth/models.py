@@ -84,6 +84,7 @@ class CreateTaskRequest(BaseModel):
     host: str | None = None
     working_dir: str | None = None
     parent_task_id: int | None = None
+    metadata: dict | None = None
 
 
 class UpdateTaskRequest(BaseModel):
@@ -103,6 +104,7 @@ class TaskSummary(BaseModel):
     completed_at: str | None = None
     parent_task_id: int | None = None
     root_task_id: int | None = None
+    depth: int = 0
 
 
 class LinkedCardInfo(BaseModel):
@@ -118,6 +120,7 @@ class TaskDetail(TaskSummary):
     host: str | None = None
     working_dir: str | None = None
     output: str | None = None
+    metadata: dict | None = None
     messages: list[FeedMessage] = []
     events: list["TaskEvent"] = []
     children: list[TaskSummary] = []
@@ -214,6 +217,8 @@ class TreeNode(BaseModel):
     host: str | None = None
     working_dir: str | None = None
     output: str | None = None
+    metadata: dict | None = None
+    depth: int = 0
     children: list["TreeNode"] = []
     linked_cards: list[LinkedCardInfo] = []
 

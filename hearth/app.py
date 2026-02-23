@@ -287,6 +287,7 @@ async def create_task(
             host=req.host,
             working_dir=req.working_dir,
             parent_task_id=req.parent_task_id,
+            metadata=req.metadata,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
