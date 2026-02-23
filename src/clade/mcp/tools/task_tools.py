@@ -51,6 +51,7 @@ def create_task_tools(
         max_turns: int | None = None,
         auto_pull: bool = False,
         parent_task_id: int | None = None,
+        on_complete: str | None = None,
     ) -> str:
         """Send a task to a brother via SSH. Launches Claude Code in a detached tmux session.
 
@@ -70,6 +71,7 @@ def create_task_tools(
             max_turns: Optional maximum Claude turns. If not set, no turn limit is applied.
             auto_pull: If true, git pull the MCP server repo on the remote host before launching. Default true.
             parent_task_id: Optional parent task ID for task tree linking.
+            on_complete: Optional follow-up instructions for the Conductor when this task completes or fails.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -93,6 +95,7 @@ def create_task_tools(
                 host=host,
                 working_dir=wd,
                 parent_task_id=parent_task_id,
+                on_complete=on_complete,
             )
             task_id = task_resp["id"]
         except Exception as e:

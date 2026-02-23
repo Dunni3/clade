@@ -161,6 +161,13 @@ async def init_db() -> None:
             )
         except Exception:
             pass
+        # Migration: add on_complete column to tasks
+        try:
+            await db.execute(
+                "ALTER TABLE tasks ADD COLUMN on_complete TEXT"
+            )
+        except Exception:
+            pass
         await db.commit()
     finally:
         await db.close()
@@ -515,6 +522,7 @@ async def insert_task(
     host: str | None = None,
     working_dir: str | None = None,
     parent_task_id: int | None = None,
+    on_complete: str | None = None,
 ) -> int:
     db = await get_db()
     try:
@@ -532,9 +540,9 @@ async def insert_task(
             root_task_id = parent["root_task_id"] if parent["root_task_id"] is not None else parent["id"]
 
         cursor = await db.execute(
-            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id),
+            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, on_complete)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, on_complete),
         )
         task_id = cursor.lastrowid
         # Every task is a root of its own tree when it has no parent
@@ -1001,7 +1009,7 @@ async def get_tree(root_task_id: int) -> dict | None:
     try:
         # Fetch root task
         cursor = await db.execute(
-            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output FROM tasks WHERE id = ?",
+            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, on_complete FROM tasks WHERE id = ?",
             (root_task_id,),
         )
         root_row = await cursor.fetchone()
@@ -1011,7 +1019,7 @@ async def get_tree(root_task_id: int) -> dict | None:
 
         # Fetch all descendants (exclude root itself)
         cursor = await db.execute(
-            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output FROM tasks WHERE root_task_id = ? AND id != ? ORDER BY created_at ASC",
+            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, on_complete FROM tasks WHERE root_task_id = ? AND id != ? ORDER BY created_at ASC",
             (root_task_id, root_task_id),
         )
         desc_rows = await cursor.fetchall()

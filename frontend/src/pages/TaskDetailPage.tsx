@@ -315,6 +315,14 @@ export default function TaskDetailPage() {
         </div>
       )}
 
+      {/* On Complete */}
+      {task.on_complete && (
+        <div className="rounded-xl border border-indigo-700/50 bg-indigo-950/20 p-4 mb-4">
+          <p className="text-sm font-medium text-indigo-300 mb-2">On Complete Instructions</p>
+          <pre className="text-sm text-gray-400 whitespace-pre-wrap overflow-x-auto">{task.on_complete}</pre>
+        </div>
+      )}
+
       {/* Morsels */}
       <MorselPanel objectType="task" objectId={task.id} />
 

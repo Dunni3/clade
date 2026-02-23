@@ -1960,6 +1960,94 @@ class TestUpdateTaskParentTool:
 
 
 # ---------------------------------------------------------------------------
+# on_complete field
+# ---------------------------------------------------------------------------
+
+
+class TestOnCompleteDB:
+    @pytest.mark.asyncio
+    async def test_insert_task_with_on_complete(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot",
+            assignee="oppy",
+            prompt="Do work",
+            subject="Test task",
+            on_complete="Deploy to production after completion",
+        )
+        task = await mailbox_db.get_task(task_id)
+        assert task["on_complete"] == "Deploy to production after completion"
+
+    @pytest.mark.asyncio
+    async def test_insert_task_without_on_complete(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot",
+            assignee="oppy",
+            prompt="Do work",
+        )
+        task = await mailbox_db.get_task(task_id)
+        assert task["on_complete"] is None
+
+    @pytest.mark.asyncio
+    async def test_on_complete_in_tree(self):
+        root_id = await mailbox_db.insert_task(
+            creator="doot",
+            assignee="oppy",
+            prompt="Root task",
+            on_complete="Run tests when done",
+        )
+        tree = await mailbox_db.get_tree(root_id)
+        assert tree["on_complete"] == "Run tests when done"
+
+
+class TestOnCompleteAPI:
+    @pytest.mark.asyncio
+    async def test_create_task_with_on_complete(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Do the thing",
+                "subject": "Test",
+                "on_complete": "Notify Ian when done",
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        task_id = resp.json()["id"]
+
+        detail = await client.get(f"/api/v1/tasks/{task_id}", headers=DOOT_HEADERS)
+        assert detail.status_code == 200
+        assert detail.json()["on_complete"] == "Notify Ian when done"
+
+    @pytest.mark.asyncio
+    async def test_create_task_without_on_complete(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do work"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+        detail = await client.get(f"/api/v1/tasks/{task_id}", headers=DOOT_HEADERS)
+        assert detail.json()["on_complete"] is None
+
+    @pytest.mark.asyncio
+    async def test_on_complete_in_tree_api(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Root",
+                "on_complete": "Follow up instructions",
+            },
+            headers=DOOT_HEADERS,
+        )
+        root_id = resp.json()["id"]
+        tree_resp = await client.get(f"/api/v1/trees/{root_id}", headers=DOOT_HEADERS)
+        assert tree_resp.status_code == 200
+        assert tree_resp.json()["on_complete"] == "Follow up instructions"
+
+
+# ---------------------------------------------------------------------------
 # Auto-sync card status from linked tasks
 # ---------------------------------------------------------------------------
 

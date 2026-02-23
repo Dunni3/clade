@@ -126,6 +126,7 @@ class ExecuteTaskRequest(BaseModel):
     hearth_api_key: str | None = None
     hearth_name: str | None = None
     sender_name: str | None = None
+    on_complete: str | None = None
 
 
 # ---------------------------------------------------------------------------
