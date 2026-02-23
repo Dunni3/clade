@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from mcp.server.fastmcp import FastMCP
 
 from ...worker.client import EmberClient
@@ -14,21 +16,27 @@ def create_ember_tools(
     mcp: FastMCP,
     ember: EmberClient | None,
     brothers_registry: dict[str, dict] | None = None,
+    registry_loader: Callable[[], dict[str, dict]] | None = None,
 ) -> dict:
     """Register Ember tools with an MCP server.
 
     Args:
         mcp: FastMCP server instance to register tools with
         ember: EmberClient instance, or None if not configured (for local/default Ember)
-        brothers_registry: Optional dict of brother names to config dicts with
-            ember_url and ember_api_key keys. Enables name-based lookups.
+        brothers_registry: Static dict of brother configs (deprecated, use registry_loader)
+        registry_loader: Callable that returns fresh registry on each call
 
     Returns:
         Dict mapping tool names to their callable functions (for testing).
     """
-    registry = brothers_registry or {}
+
+    def _get_registry() -> dict[str, dict]:
+        if registry_loader is not None:
+            return registry_loader()
+        return brothers_registry or {}
 
     def _get_ember_client(brother: str) -> EmberClient | None:
+        registry = _get_registry()
         config = registry.get(brother)
         if not config:
             return None
@@ -66,7 +74,8 @@ def create_ember_tools(
 
         # Named brother check
         if brother:
-            if brother not in registry:
+            reg = _get_registry()
+            if brother not in reg:
                 return f"Unknown brother '{brother}'."
             client = _get_ember_client(brother)
             if client is None:
@@ -82,9 +91,10 @@ def create_ember_tools(
                 return f"{brother}: Unreachable ({e})"
 
         # No brother specified — check all in registry, or fall back to configured Ember
-        if registry:
+        reg = _get_registry()
+        if reg:
             lines = []
-            for name in registry:
+            for name in reg:
                 client = _get_ember_client(name)
                 if client is None:
                     lines.append(f"{name}: No Ember configured")
@@ -124,7 +134,8 @@ def create_ember_tools(
         """
         # Named brother check
         if brother:
-            if brother not in registry:
+            reg = _get_registry()
+            if brother not in reg:
                 return f"Unknown brother '{brother}'."
             client = _get_ember_client(brother)
             if client is None:
@@ -136,9 +147,10 @@ def create_ember_tools(
                 return f"{brother}: Unreachable ({e})"
 
         # No brother specified — check all in registry, or fall back to configured Ember
-        if registry:
+        reg = _get_registry()
+        if reg:
             lines = []
-            for name in registry:
+            for name in reg:
                 client = _get_ember_client(name)
                 if client is None:
                     lines.append(f"{name}: No Ember configured")

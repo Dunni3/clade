@@ -9,7 +9,6 @@ import click
 from .clade_config import CladeConfig, default_config_path, save_clade_config
 from .identity import generate_personal_identity, write_identity_local
 from .keys import add_key, keys_path
-from .clade_config import default_brothers_config_path
 from .mcp_utils import is_mcp_registered, register_mcp_server
 from .naming import format_suggestion, suggest_name
 
@@ -25,6 +24,7 @@ from .naming import format_suggestion, suggest_name
 @click.option("--server-key", default=None, help="Existing API key for bootstrapping registration with the Hearth")
 @click.option("--no-mcp", is_flag=True, help="Skip MCP registration in ~/.claude.json")
 @click.option("--no-identity", is_flag=True, help="Skip writing identity to CLAUDE.md")
+@click.option("--no-verify-ssl", is_flag=True, help="Disable SSL verification for self-signed certs")
 @click.option("--yes", "-y", is_flag=True, help="Accept defaults without prompting")
 @click.pass_context
 def init_cmd(
@@ -39,6 +39,7 @@ def init_cmd(
     server_key: str | None,
     no_mcp: bool,
     no_identity: bool,
+    no_verify_ssl: bool,
     yes: bool,
 ) -> None:
     """Initialize a new Clade configuration."""
@@ -117,6 +118,7 @@ def init_cmd(
         server_url=server_url,
         server_ssh=server_ssh,
         server_ssh_key=server_ssh_key,
+        verify_ssl=not no_verify_ssl,
     )
 
     # Save config
@@ -130,7 +132,7 @@ def init_cmd(
 
     # Register API key with the Hearth
     if server_url and server_key:
-        _register_key_with_hearth(server_url, server_key, personal_name, key)
+        _register_key_with_hearth(server_url, server_key, personal_name, key, config.verify_ssl)
 
     # Register MCP server
     if not no_mcp:
@@ -176,9 +178,6 @@ def _register_personal_mcp(
         env["HEARTH_API_KEY"] = api_key
         env["HEARTH_NAME"] = name
 
-    # Point to brothers-ember.yaml for Ember delegation (file may not exist yet)
-    env["BROTHERS_CONFIG"] = str(default_brothers_config_path())
-
     register_mcp_server(
         server_name,
         python_path,
@@ -193,11 +192,11 @@ def _register_key_with_hearth(
     bootstrap_key: str,
     name: str,
     api_key: str,
+    verify_ssl: bool = True,
 ) -> None:
     """Register a newly generated API key with the Hearth server."""
     from ..communication.mailbox_client import MailboxClient
 
-    verify_ssl = server_url.startswith("https")
     client = MailboxClient(server_url, bootstrap_key, verify_ssl=verify_ssl)
     try:
         ok = client.register_key_sync(name, api_key)

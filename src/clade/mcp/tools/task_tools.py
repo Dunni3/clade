@@ -1,6 +1,9 @@
 """SSH task delegation MCP tool definitions."""
 
+from __future__ import annotations
+
 import os
+from collections.abc import Callable
 
 from mcp.server.fastmcp import FastMCP
 
@@ -16,6 +19,7 @@ def create_task_tools(
     mcp: FastMCP,
     mailbox: MailboxClient | None,
     config: dict | None = None,
+    config_loader: Callable[[], dict] | None = None,
     mailbox_url: str | None = None,
     mailbox_api_key: str | None = None,
 ) -> dict:
@@ -24,14 +28,18 @@ def create_task_tools(
     Args:
         mcp: FastMCP server instance to register tools with
         mailbox: MailboxClient instance, or None if not configured
-        config: Terminal spawner config (for brother definitions). If None, loads from default.
+        config: Static terminal spawner config (deprecated, use config_loader)
+        config_loader: Callable that returns fresh config on each call
         mailbox_url: Mailbox API URL (passed to remote task for hook-based logging)
         mailbox_api_key: Mailbox API key (passed to remote task for hook-based logging)
     """
-    if config is None:
-        config = load_config()
 
-    brothers = config.get("brothers", {})
+    def _get_brothers() -> dict:
+        if config_loader is not None:
+            return config_loader().get("brothers", {})
+        if config is not None:
+            return config.get("brothers", {})
+        return load_config().get("brothers", {})
     mailbox_name = os.environ.get("HEARTH_NAME") or os.environ.get("MAILBOX_NAME")
 
     @mcp.tool()
@@ -68,6 +76,7 @@ def create_task_tools(
         if mailbox is None:
             return _NOT_CONFIGURED
 
+        brothers = _get_brothers()
         bro = brothers.get(brother)
         if not bro:
             return f"Unknown brother: {brother}. Available: {', '.join(brothers.keys())}"

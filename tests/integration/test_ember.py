@@ -139,9 +139,9 @@ class TestExecuteEndpoint:
                             json={"prompt": "do stuff"},
                             headers=auth_headers,
                         )
-                        assert resp.status_code == 202
+                        assert resp.status_code == 500
                         data = resp.json()
-                        assert data["error"] == "launch_failed"
+                        assert data["detail"]["error"] == "launch_failed"
 
     @pytest.mark.asyncio
     async def test_execute_no_auth(self, env_vars):
