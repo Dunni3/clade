@@ -186,7 +186,7 @@ class TestBuildConductorMcpConfig:
         assert env["CONDUCTOR_WORKERS_CONFIG"] == "/home/ubuntu/.config/clade/conductor-workers.yaml"
 
     def test_command_and_args(self):
-        """MCP config uses python3 -m to launch the conductor server."""
+        """MCP config uses entry point to launch the conductor server."""
         result = build_conductor_mcp_config(
             kamaji_key="key",
             server_url="https://example.com",
@@ -194,5 +194,18 @@ class TestBuildConductorMcpConfig:
 
         data = json.loads(result)
         server = data["mcpServers"]["clade-conductor"]
-        assert server["command"] == "python3"
-        assert server["args"] == ["-m", "clade.mcp.server_conductor"]
+        assert server["command"] == "clade-conductor"
+        assert server["args"] == []
+
+    def test_custom_conductor_cmd(self):
+        """MCP config uses provided entry point path."""
+        result = build_conductor_mcp_config(
+            kamaji_key="key",
+            server_url="https://example.com",
+            conductor_cmd="/home/ubuntu/.local/venv/bin/clade-conductor",
+        )
+
+        data = json.loads(result)
+        server = data["mcpServers"]["clade-conductor"]
+        assert server["command"] == "/home/ubuntu/.local/venv/bin/clade-conductor"
+        assert server["args"] == []

@@ -46,28 +46,42 @@ def detect_remote_user(ssh_host: str, ssh_key: str | None = None) -> str | None:
     return None
 
 
-def detect_clade_ember_path(ssh_host: str, ssh_key: str | None = None) -> str | None:
-    """Detect the path to the clade-ember binary on the remote.
+def detect_clade_entry_point(
+    ssh_host: str,
+    entry_point: str = "clade-ember",
+    ssh_key: str | None = None,
+) -> str | None:
+    """Detect the path to a clade console_scripts entry point on a remote host.
 
     Tries `which` first, then searches common conda/mamba/venv locations
     since non-interactive SSH sessions don't activate environments.
+
+    Args:
+        ssh_host: SSH host string.
+        entry_point: Name of the entry point binary (e.g. 'clade-ember', 'clade-worker').
+        ssh_key: Optional SSH key path.
+
+    Returns:
+        Absolute path to the entry point binary, or None if not found.
     """
-    result = run_remote(ssh_host, "which clade-ember 2>/dev/null", ssh_key=ssh_key, timeout=10)
+    result = run_remote(
+        ssh_host, f"which {entry_point} 2>/dev/null", ssh_key=ssh_key, timeout=10
+    )
     if result.success and result.stdout.strip():
         return result.stdout.strip()
 
     # Search common env locations
-    search_script = r"""
-for d in \
-    ~/mambaforge/envs/*/bin \
-    ~/miniforge3/envs/*/bin \
-    ~/miniconda3/envs/*/bin \
-    ~/anaconda3/envs/*/bin \
-    ~/.conda/envs/*/bin \
-    ~/.local/venv/bin \
+    search_script = f"""
+for d in \\
+    ~/mambaforge/envs/*/bin \\
+    ~/miniforge3/envs/*/bin \\
+    ~/miniconda3/envs/*/bin \\
+    ~/anaconda3/envs/*/bin \\
+    ~/.conda/envs/*/bin \\
+    ~/.local/venv/bin \\
     ~/.local/bin; do
-    if [ -x "$d/clade-ember" ]; then
-        echo "$d/clade-ember"
+    if [ -x "$d/{entry_point}" ]; then
+        echo "$d/{entry_point}"
         exit 0
     fi
 done
@@ -77,6 +91,14 @@ exit 1
     if result.success and result.stdout.strip():
         return result.stdout.strip()
     return None
+
+
+def detect_clade_ember_path(ssh_host: str, ssh_key: str | None = None) -> str | None:
+    """Detect the path to the clade-ember binary on the remote.
+
+    Convenience wrapper around detect_clade_entry_point().
+    """
+    return detect_clade_entry_point(ssh_host, "clade-ember", ssh_key=ssh_key)
 
 
 def detect_clade_dir(ssh_host: str, ssh_key: str | None = None) -> str | None:

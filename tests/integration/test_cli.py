@@ -499,50 +499,27 @@ class TestDoctor:
         )
 
         mock_ssh.return_value = SSHResult(success=True)
-        # Different responses for different remote checks
-        mock_run.side_effect = [
-            SSHResult(success=True, stdout="OK"),        # clade package check
-            SSHResult(success=True, stdout="True"),       # MCP check
-            SSHResult(success=True, stdout="1"),           # identity check
-            SSHResult(success=True, stdout="HEARTH_OK"),  # Hearth check
-        ]
 
-        # Create a fake CLAUDE.md with identity markers
-        local_claude_md = tmp_path / "CLAUDE.md"
-        local_claude_md.write_text("<!-- CLADE_IDENTITY_START -->\nidentity\n<!-- CLADE_IDENTITY_END -->")
+        # Create the structure doctor expects
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir(exist_ok=True)
+        (claude_dir / "CLAUDE.md").write_text(
+            "<!-- CLADE_IDENTITY_START -->\nidentity\n<!-- CLADE_IDENTITY_END -->"
+        )
 
         runner = CliRunner()
         with patch("clade.cli.doctor.load_clade_config", return_value=cfg), \
              patch("clade.cli.doctor.load_keys", return_value={"doot": "k1", "oppy": "k2"}), \
              patch("clade.cli.doctor.is_mcp_registered", return_value=True), \
-             patch("clade.cli.doctor._check_server", return_value=True), \
-             patch("clade.cli.doctor.Path") as mock_path_cls:
-            # Make Path.home() / ".claude" / "CLAUDE.md" point to our tmp file
-            mock_path_instance = MagicMock()
-            mock_path_instance.__truediv__ = lambda self, other: tmp_path / other if other == ".claude" else MagicMock()
-            mock_path_cls.home.return_value = tmp_path
-            # We need the real Path for other uses, so let's mock differently
-            pass
-
-        # Simpler approach: patch the specific file check
-        with patch("clade.cli.doctor.load_clade_config", return_value=cfg), \
-             patch("clade.cli.doctor.load_keys", return_value={"doot": "k1", "oppy": "k2"}), \
-             patch("clade.cli.doctor.is_mcp_registered", return_value=True), \
+             patch("clade.cli.doctor._check_local_mcp_command", return_value=0), \
              patch("clade.cli.doctor._check_server", return_value=True), \
              patch("clade.cli.doctor.Path.home", return_value=tmp_path):
 
-            # Create the structure doctor expects
-            claude_dir = tmp_path / ".claude"
-            claude_dir.mkdir(exist_ok=True)
-            (claude_dir / "CLAUDE.md").write_text(
-                "<!-- CLADE_IDENTITY_START -->\nidentity\n<!-- CLADE_IDENTITY_END -->"
-            )
-
             mock_run.side_effect = [
-                SSHResult(success=True, stdout="OK"),        # clade package check
-                SSHResult(success=True, stdout="True"),       # MCP check
-                SSHResult(success=True, stdout="1"),           # identity check
-                SSHResult(success=True, stdout="HEARTH_OK"),  # Hearth check
+                SSHResult(success=True, stdout="OK"),                          # clade-worker entry point check
+                SSHResult(success=True, stdout="CMD:/usr/bin/clade-worker\nMCP_CMD_OK"),  # MCP command check
+                SSHResult(success=True, stdout="1"),                            # identity check
+                SSHResult(success=True, stdout="HEARTH_OK"),                    # Hearth check
             ]
             result = runner.invoke(cli, ["doctor"])
 

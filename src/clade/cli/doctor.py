@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import click
@@ -10,7 +11,7 @@ import httpx
 from .clade_config import default_config_path, load_clade_config
 from .identity import MARKER_START
 from .keys import keys_path, load_keys
-from .mcp_utils import is_mcp_registered
+from .mcp_utils import is_mcp_registered, read_claude_json
 from .ssh_utils import run_remote, test_ssh
 
 
@@ -58,6 +59,9 @@ def doctor() -> None:
     else:
         _fail("Personal MCP: not registered in ~/.claude.json", fix="clade init")
         issues += 1
+
+    # 3b. Local MCP config command check
+    issues += _check_local_mcp_command("clade-personal")
 
     # 4. Personal API key
     if config.personal_name in keys:
@@ -107,24 +111,48 @@ def doctor() -> None:
             _fail(f"No API key for '{name}'", fix=f"clade add-brother --name {name} --ssh {bro.ssh}")
             issues += 1
 
-        # Clade package installed
-        pkg_result = run_remote(bro.ssh, "python3 -c 'import clade; print(\"OK\")' 2>&1", timeout=15)
-        if pkg_result.success and "OK" in pkg_result.stdout:
-            _pass("Clade package installed")
-        else:
-            _fail("Clade package not installed on remote", fix=f"clade add-brother --name {name} --ssh {bro.ssh}")
-            issues += 1
-
-        # MCP registered on remote
-        mcp_result = run_remote(
+        # Clade package installed (use entry point check instead of bare python3)
+        pkg_result = run_remote(
             bro.ssh,
-            "python3 -c \"import json; d=json.load(open('$HOME/.claude.json')); print('clade-worker' in d.get('mcpServers',{}))\" 2>&1",
+            "which clade-worker >/dev/null 2>&1 && echo OK || echo NOT_FOUND",
             timeout=15,
         )
-        if mcp_result.success and "True" in mcp_result.stdout:
-            _pass("MCP registered on remote")
+        if pkg_result.success and "OK" in pkg_result.stdout:
+            _pass("Clade package installed (clade-worker found)")
         else:
-            _fail("MCP not registered on remote", fix=f"clade add-brother --name {name} --ssh {bro.ssh}")
+            _fail("Clade package not installed on remote (clade-worker not found)",
+                  fix=f"clade add-brother --name {name} --ssh {bro.ssh}")
+            issues += 1
+
+        # MCP registered on remote + command path check
+        mcp_check_result = run_remote(
+            bro.ssh,
+            _build_remote_mcp_check_script("clade-worker"),
+            timeout=15,
+        )
+        if mcp_check_result.success:
+            stdout = mcp_check_result.stdout.strip()
+            if "MCP_CMD_OK" in stdout:
+                cmd_line = [l for l in stdout.splitlines() if l.startswith("CMD:")]
+                cmd_path = cmd_line[0].split(":", 1)[1] if cmd_line else "unknown"
+                _pass(f"MCP registered on remote (command: {cmd_path})")
+            elif "MCP_CMD_BAD" in stdout:
+                cmd_line = [l for l in stdout.splitlines() if l.startswith("CMD:")]
+                cmd_path = cmd_line[0].split(":", 1)[1] if cmd_line else "unknown"
+                _fail(
+                    f"MCP command not found or not executable: {cmd_path}",
+                    fix=f"clade add-brother --name {name} --ssh {bro.ssh}",
+                )
+                issues += 1
+            elif "MCP_NOT_FOUND" in stdout:
+                _fail("MCP not registered on remote",
+                      fix=f"clade add-brother --name {name} --ssh {bro.ssh}")
+                issues += 1
+            else:
+                _fail("MCP check inconclusive on remote")
+                issues += 1
+        else:
+            _fail("Could not check MCP on remote")
             issues += 1
 
         # Identity written on remote
@@ -138,11 +166,11 @@ def doctor() -> None:
         else:
             _warn(f"Identity not found on remote (run 'clade add-brother --name {name} --ssh {bro.ssh}' to write)")
 
-        # Can reach Hearth
+        # Can reach Hearth (use curl instead of bare python3)
         if config.server_url:
             hearth_result = run_remote(
                 bro.ssh,
-                f"python3 -c \"import urllib.request; r=urllib.request.urlopen('{config.server_url}/api/v1/health', timeout=5); print('HEARTH_OK' if r.status==200 else 'HEARTH_FAIL')\" 2>&1",
+                f'curl -sf -o /dev/null -w "%{{http_code}}" "{config.server_url}/api/v1/health" 2>/dev/null && echo HEARTH_OK || echo HEARTH_FAIL',
                 timeout=20,
             )
             if hearth_result.success and "HEARTH_OK" in hearth_result.stdout:
@@ -179,6 +207,76 @@ def doctor() -> None:
     else:
         click.echo(click.style(f"{issues} issue(s) found.", fg="red", bold=True))
     raise SystemExit(0 if issues == 0 else 1)
+
+
+def _check_local_mcp_command(server_name: str) -> int:
+    """Check that a local MCP server's command points to an executable that exists.
+
+    Returns:
+        Number of issues found (0 or 1).
+    """
+    data = read_claude_json()
+    servers = data.get("mcpServers", {})
+    if server_name not in servers:
+        return 0  # Already reported as not registered
+
+    cmd = servers[server_name].get("command", "")
+    if not cmd:
+        _fail(f"MCP {server_name}: no command configured")
+        return 1
+
+    cmd_path = Path(cmd)
+    if cmd_path.is_absolute() and cmd_path.exists():
+        _pass(f"MCP {server_name}: command exists ({cmd})")
+        return 0
+    elif cmd_path.is_absolute():
+        _fail(
+            f"MCP {server_name}: command not found ({cmd})",
+            fix="clade init (will re-register with correct path)",
+        )
+        return 1
+    else:
+        _warn(f"MCP {server_name}: command is not an absolute path ({cmd})")
+        return 0
+
+
+def _build_remote_mcp_check_script(server_name: str) -> str:
+    """Build a shell script that checks if an MCP server is registered on a
+    remote host and verifies its command path is executable."""
+    return f"""\
+#!/bin/bash
+CLAUDE_JSON="$HOME/.claude.json"
+if [ ! -f "$CLAUDE_JSON" ]; then
+    echo "MCP_NOT_FOUND"
+    exit 0
+fi
+
+# Extract command for the server using python (any python will do for JSON parsing)
+CMD=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open('$CLAUDE_JSON'))
+    srv = d.get('mcpServers', {{}}).get('{server_name}')
+    if srv is None:
+        print('MISSING')
+    else:
+        print(srv.get('command', ''))
+except Exception:
+    print('ERROR')
+" 2>/dev/null)
+
+if [ "$CMD" = "MISSING" ] || [ -z "$CMD" ]; then
+    echo "MCP_NOT_FOUND"
+    exit 0
+fi
+
+echo "CMD:$CMD"
+if [ -x "$CMD" ]; then
+    echo "MCP_CMD_OK"
+else
+    echo "MCP_CMD_BAD"
+fi
+"""
 
 
 def _check_ember(host: str, port: int) -> bool:

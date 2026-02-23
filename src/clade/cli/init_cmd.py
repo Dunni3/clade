@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import click
 
@@ -164,12 +165,32 @@ def _register_personal_mcp(
     server_url: str | None,
 ) -> None:
     """Register the personal MCP server in ~/.claude.json."""
+    import shutil
+
     server_name = "clade-personal"
     if is_mcp_registered(server_name):
         click.echo(f"MCP server '{server_name}' already registered in ~/.claude.json")
         return
 
-    python_path = sys.executable
+    # Find the clade-personal entry point — prefer the one in the same
+    # bin dir as the current Python (correct venv), fall back to PATH.
+    bin_dir = Path(sys.executable).parent
+    entry_point = bin_dir / "clade-personal"
+    if not entry_point.exists():
+        found = shutil.which("clade-personal")
+        if found:
+            entry_point = Path(found)
+        else:
+            click.echo(
+                click.style(
+                    "  Warning: clade-personal entry point not found, falling back to python -m",
+                    fg="yellow",
+                )
+            )
+            # Last resort fallback — should not happen if clade is properly installed
+            entry_point = Path(sys.executable)
+
+    command = str(entry_point)
     env: dict[str, str] = {}
     if server_url:
         env["HEARTH_URL"] = server_url
@@ -181,8 +202,7 @@ def _register_personal_mcp(
 
     register_mcp_server(
         server_name,
-        python_path,
-        "clade.mcp.server_full",
+        command,
         env=env if env else None,
     )
     click.echo(f"Registered '{server_name}' MCP server in ~/.claude.json")

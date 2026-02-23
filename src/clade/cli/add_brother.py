@@ -12,7 +12,7 @@ from .clade_config import (
     save_clade_config,
 )
 from .conductor_setup import build_brothers_config
-from .ember_setup import setup_ember
+from .ember_setup import detect_clade_entry_point, setup_ember
 from .identity import generate_worker_identity, write_identity_remote
 from .keys import add_key, keys_path, load_keys
 from .mcp_utils import register_mcp_remote, update_mcp_env, update_mcp_env_remote
@@ -261,6 +261,15 @@ def _register_remote_mcp(
         click.echo("  Skipping remote MCP registration (no server URL configured)")
         return
 
+    # Detect the clade-worker entry point on the remote
+    click.echo(f"Detecting clade-worker entry point on {ssh_host}...")
+    worker_cmd = detect_clade_entry_point(ssh_host, "clade-worker")
+    if worker_cmd:
+        click.echo(click.style(f"  Found: {worker_cmd}", fg="green"))
+    else:
+        click.echo(click.style("  clade-worker not found — MCP config will use bare 'clade-worker'", fg="yellow"))
+        worker_cmd = "clade-worker"
+
     click.echo(f"Registering MCP on {ssh_host}...")
     env = {
         "HEARTH_URL": server_url,
@@ -270,8 +279,7 @@ def _register_remote_mcp(
     result = register_mcp_remote(
         ssh_host,
         "clade-worker",
-        "python3",
-        "clade.mcp.server_lite",
+        worker_cmd,
         env,
     )
     if result.success and "MCP_REGISTERED" in result.stdout:
