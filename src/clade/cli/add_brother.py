@@ -12,7 +12,14 @@ from .clade_config import (
     save_clade_config,
 )
 from .conductor_setup import build_brothers_config
-from .ember_setup import setup_ember
+from .ember_setup import (
+    detect_remote_user,
+    detect_systemctl_path,
+    generate_sudoers_command,
+    install_sudoers_remote,
+    setup_ember,
+    verify_sudoers_remote,
+)
 from .identity import generate_worker_identity, write_identity_remote
 from .keys import add_key, keys_path, load_keys
 from .mcp_utils import register_mcp_remote, update_mcp_env, update_mcp_env_remote
@@ -32,6 +39,7 @@ from .ssh_utils import check_remote_prereqs, deploy_clade_remote, run_remote, te
 @click.option("--no-identity", is_flag=True, help="Skip writing identity to remote CLAUDE.md")
 @click.option("--ember", "setup_ember_flag", is_flag=True, help="Set up an Ember server on the remote")
 @click.option("--ember-port", default=None, type=int, help="Ember server port (default: 8100)")
+@click.option("--sudoers", "setup_sudoers", is_flag=True, help="Set up passwordless sudo for Ember restarts")
 @click.option("--yes", "-y", is_flag=True, help="Accept defaults without prompting")
 @click.pass_context
 def add_brother(
@@ -47,6 +55,7 @@ def add_brother(
     no_identity: bool,
     setup_ember_flag: bool,
     ember_port: int | None,
+    setup_sudoers: bool,
     yes: bool,
 ) -> None:
     """Add a new brother to the Clade."""
@@ -180,6 +189,11 @@ def add_brother(
             hearth_api_key=caller_key,
         )
 
+    # Sudoers setup
+    sudoers_ok = False
+    if setup_sudoers and setup_ember_flag and ember_host and ssh_result.success:
+        sudoers_ok = _setup_sudoers(ssh_host)
+
     # Update config
     config.brothers[name] = BrotherEntry(
         ssh=ssh_host,
@@ -189,6 +203,7 @@ def add_brother(
         personality=personality,
         ember_port=actual_ember_port if ember_host else None,
         ember_host=ember_host,
+        sudoers_configured=sudoers_ok,
     )
     config_path = default_config_path(config_dir)
     save_clade_config(config, config_path)
@@ -381,3 +396,54 @@ echo "BROTHERS_CONFIG_OK"
             click.echo(click.style(f"  Updated remote clade-worker MCP env on {ssh_host}", fg="green"))
     else:
         click.echo(click.style(f"  Warning: failed to deploy brothers config to {ssh_host}", fg="yellow"))
+
+
+def _setup_sudoers(ssh_host: str) -> bool:
+    """Set up passwordless sudo for Ember service restarts.
+
+    Returns True if sudoers was successfully configured and verified.
+    """
+    click.echo()
+    click.echo(click.style("Setting up passwordless sudo for Ember restarts...", bold=True))
+
+    remote_user = detect_remote_user(ssh_host)
+    if not remote_user:
+        click.echo(click.style("  Could not detect remote user", fg="red"))
+        return False
+
+    systemctl_path = detect_systemctl_path(ssh_host)
+    if not systemctl_path:
+        click.echo(click.style("  Could not detect systemctl path on remote", fg="red"))
+        return False
+
+    click.echo(f"  User: {remote_user}")
+    click.echo(f"  systemctl: {systemctl_path}")
+
+    cmd = generate_sudoers_command(ssh_host, remote_user, systemctl_path)
+    click.echo()
+    click.echo("  The following command will install a scoped sudoers rule:")
+    click.echo()
+    click.echo(f"    {cmd}")
+    click.echo()
+
+    if not click.confirm("  Install this sudoers rule now?", default=True):
+        click.echo("  Skipped. You can run the command above manually.")
+        return False
+
+    result = install_sudoers_remote(ssh_host, remote_user, systemctl_path)
+    if not result.success or "SUDOERS_OK" not in result.stdout:
+        click.echo(click.style("  Failed to install sudoers rule", fg="red"))
+        if result.stderr:
+            click.echo(f"  Error: {result.stderr[:200]}")
+        click.echo("  You can run the command above manually instead.")
+        return False
+
+    click.echo(click.style("  Sudoers rule installed", fg="green"))
+
+    click.echo("  Verifying passwordless sudo...")
+    if verify_sudoers_remote(ssh_host, systemctl_path):
+        click.echo(click.style("  Verification passed!", fg="green"))
+        return True
+    else:
+        click.echo(click.style("  Verification failed — sudo may still require a password", fg="yellow"))
+        return False

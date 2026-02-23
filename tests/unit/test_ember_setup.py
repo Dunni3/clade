@@ -8,9 +8,14 @@ from clade.cli.ember_setup import (
     detect_clade_dir,
     detect_clade_ember_path,
     detect_remote_user,
+    detect_systemctl_path,
     detect_tailscale_ip,
     generate_manual_instructions,
+    generate_sudoers_command,
+    generate_sudoers_rule,
+    install_sudoers_remote,
     setup_ember,
+    verify_sudoers_remote,
 )
 from clade.cli.ssh_utils import SSHResult
 
@@ -136,6 +141,98 @@ class TestGenerateManualInstructions:
             api_key="key",
         )
         assert "9200" in result
+
+
+class TestDetectSystemctlPath:
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_success(self, mock_run):
+        mock_run.return_value = SSHResult(success=True, stdout="/bin/systemctl\n")
+        assert detect_systemctl_path("ian@masuda") == "/bin/systemctl"
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_usr_bin(self, mock_run):
+        mock_run.return_value = SSHResult(success=True, stdout="/usr/bin/systemctl\n")
+        assert detect_systemctl_path("ian@masuda") == "/usr/bin/systemctl"
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_failure(self, mock_run):
+        mock_run.return_value = SSHResult(success=False, message="error")
+        assert detect_systemctl_path("ian@masuda") is None
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_empty_output(self, mock_run):
+        mock_run.return_value = SSHResult(success=True, stdout="")
+        assert detect_systemctl_path("ian@masuda") is None
+
+
+class TestGenerateSudoersRule:
+    def test_basic(self):
+        rule = generate_sudoers_rule("ian", "/bin/systemctl")
+        assert rule == (
+            "ian ALL=(ALL) NOPASSWD: "
+            "/bin/systemctl restart clade-ember, "
+            "/bin/systemctl status clade-ember"
+        )
+
+    def test_custom_service_name(self):
+        rule = generate_sudoers_rule("bob", "/usr/bin/systemctl", service_name="custom-ember")
+        assert "custom-ember" in rule
+        assert "bob" in rule
+        assert "/usr/bin/systemctl" in rule
+
+
+class TestGenerateSudoersCommand:
+    def test_basic(self):
+        cmd = generate_sudoers_command("ian@masuda", "ian", "/bin/systemctl")
+        assert "ssh -t ian@masuda" in cmd
+        assert "sudo tee /etc/sudoers.d/clade-ember" in cmd
+        assert "chmod 440" in cmd
+        assert "ian ALL=(ALL) NOPASSWD" in cmd
+
+
+class TestInstallSudoersRemote:
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_success(self, mock_run):
+        mock_run.return_value = SSHResult(success=True, stdout="SUDOERS_OK")
+        result = install_sudoers_remote("ian@masuda", "ian", "/bin/systemctl")
+        assert result.success
+        assert "SUDOERS_OK" in result.stdout
+        # Verify the script contains the sudoers rule
+        call_args = mock_run.call_args
+        script = call_args[0][1]
+        assert "ian ALL=(ALL) NOPASSWD" in script
+        assert "/etc/sudoers.d/clade-ember" in script
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_failure(self, mock_run):
+        mock_run.return_value = SSHResult(success=False, message="sudo: a password is required")
+        result = install_sudoers_remote("ian@masuda", "ian", "/bin/systemctl")
+        assert not result.success
+
+
+class TestVerifySudoersRemote:
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_success_running(self, mock_run):
+        """Verify passes when service is running (exit 0)."""
+        mock_run.return_value = SSHResult(success=True, stdout="active\nEXIT_0")
+        assert verify_sudoers_remote("ian@masuda", "/bin/systemctl") is True
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_success_stopped(self, mock_run):
+        """Verify passes when service is stopped (exit 3) — sudo still worked."""
+        mock_run.return_value = SSHResult(success=True, stdout="inactive\nEXIT_3")
+        assert verify_sudoers_remote("ian@masuda", "/bin/systemctl") is True
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_failure_password_required(self, mock_run):
+        """Verify fails when sudo requires password (exit 1)."""
+        mock_run.return_value = SSHResult(success=True, stdout="EXIT_1")
+        assert verify_sudoers_remote("ian@masuda", "/bin/systemctl") is False
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_failure_ssh_error(self, mock_run):
+        mock_run.return_value = SSHResult(success=False, message="Connection refused")
+        assert verify_sudoers_remote("ian@masuda", "/bin/systemctl") is False
 
 
 def _make_deploy_ok():

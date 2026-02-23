@@ -38,6 +38,99 @@ WantedBy=multi-user.target
 """
 
 
+def detect_systemctl_path(ssh_host: str, ssh_key: str | None = None) -> str | None:
+    """Detect the path to systemctl on the remote host."""
+    result = run_remote(ssh_host, "which systemctl 2>/dev/null", ssh_key=ssh_key, timeout=10)
+    if result.success and result.stdout.strip():
+        return result.stdout.strip()
+    return None
+
+
+def generate_sudoers_rule(
+    remote_user: str,
+    systemctl_path: str,
+    service_name: str = SERVICE_NAME,
+) -> str:
+    """Generate a scoped sudoers rule for passwordless Ember service management.
+
+    Returns the sudoers rule string (one line).
+    """
+    return (
+        f"{remote_user} ALL=(ALL) NOPASSWD: "
+        f"{systemctl_path} restart {service_name}, "
+        f"{systemctl_path} status {service_name}"
+    )
+
+
+def generate_sudoers_command(
+    ssh_host: str,
+    remote_user: str,
+    systemctl_path: str,
+    service_name: str = SERVICE_NAME,
+) -> str:
+    """Generate the full SSH command to install the sudoers rule."""
+    rule = generate_sudoers_rule(remote_user, systemctl_path, service_name)
+    sudoers_file = f"/etc/sudoers.d/{service_name}"
+    return (
+        f'ssh -t {ssh_host} \'echo "{rule}" '
+        f"| sudo tee {sudoers_file} > /dev/null "
+        f"&& sudo chmod 440 {sudoers_file}'"
+    )
+
+
+def install_sudoers_remote(
+    ssh_host: str,
+    remote_user: str,
+    systemctl_path: str,
+    ssh_key: str | None = None,
+    service_name: str = SERVICE_NAME,
+) -> SSHResult:
+    """Install the sudoers rule on the remote host.
+
+    Returns SSHResult from the installation.
+    """
+    rule = generate_sudoers_rule(remote_user, systemctl_path, service_name)
+    sudoers_file = f"/etc/sudoers.d/{service_name}"
+    script = f"""\
+#!/bin/bash
+set -e
+echo '{rule}' | sudo tee {sudoers_file} > /dev/null
+sudo chmod 440 {sudoers_file}
+echo "SUDOERS_OK"
+"""
+    return run_remote(ssh_host, script, ssh_key=ssh_key, timeout=15)
+
+
+def verify_sudoers_remote(
+    ssh_host: str,
+    systemctl_path: str,
+    ssh_key: str | None = None,
+    service_name: str = SERVICE_NAME,
+) -> bool:
+    """Verify that passwordless sudo works for the Ember service."""
+    result = run_remote(
+        ssh_host,
+        f"sudo -n {systemctl_path} status {service_name} 2>/dev/null; echo EXIT_$?",
+        ssh_key=ssh_key,
+        timeout=10,
+    )
+    # sudo -n exits 1 if password is required. We check that it didn't prompt.
+    # The service may not be running (exit 3), but sudo itself should succeed (exit 0).
+    if result.success and "EXIT_" in result.stdout:
+        # Extract the exit code. sudo -n returns 1 if it would prompt.
+        # systemctl status returns 0 (running), 3 (stopped), or 4 (not found).
+        # All of those are fine — we just need sudo not to fail.
+        exit_line = result.stdout.strip().split("EXIT_")[-1].strip()
+        try:
+            code = int(exit_line)
+            # sudo failure is typically exit code 1 from sudo itself
+            # systemctl codes: 0=active, 3=inactive, 4=not-found are all OK (sudo worked)
+            return code != 1
+        except ValueError:
+            pass
+    return False
+
+
 def detect_remote_user(ssh_host: str, ssh_key: str | None = None) -> str | None:
     """Detect the remote username via whoami."""
     result = run_remote(ssh_host, "whoami", ssh_key=ssh_key, timeout=10)
