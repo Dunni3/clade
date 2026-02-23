@@ -102,7 +102,7 @@ if [ -d "$CLADE_DIR/.git" ]; then
     info "Updating existing clone at $CLADE_DIR..."
     git -C "$CLADE_DIR" pull --ff-only 2>/dev/null || git -C "$CLADE_DIR" fetch
     ok "Repository updated"
-elif [ -d "$CLADE_DIR/pyproject.toml" ] 2>/dev/null; then
+elif [ -f "$CLADE_DIR/pyproject.toml" ] 2>/dev/null; then
     # Exists but not a git repo (deployed via tar-pipe). Clone fresh.
     info "Replacing tar-pipe deploy with git clone..."
     rm -rf "$CLADE_DIR"

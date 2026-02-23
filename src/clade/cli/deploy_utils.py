@@ -285,6 +285,13 @@ def deploy_clade_package(
     # Step 2: Find pip and install
     if pip_path:
         # Explicit pip path provided (e.g. from bootstrap)
+        # Validate pip_path to prevent shell injection (value comes from remote output)
+        import re
+        if not re.match(r'^[a-zA-Z0-9/_.\-~]+$', pip_path):
+            return SSHResult(
+                success=False,
+                message=f"Invalid pip path (contains unsafe characters): {pip_path}",
+            )
         install_script = f"""\
 #!/bin/bash
 set -e
