@@ -8,14 +8,13 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 from pathlib import Path
 
 import click
 import yaml
 
 from .clade_config import CladeConfig, build_brothers_registry
-from .ember_setup import detect_remote_user
+from .ember_setup import detect_clade_entry_point, detect_remote_user
 from .identity import generate_conductor_identity, write_identity_remote
 from .keys import add_key, keys_path, load_keys, save_keys
 from .ssh_utils import SSHResult, deploy_clade_remote, run_remote, test_ssh
@@ -60,41 +59,6 @@ REMOTE_ENV_FILE = "~/.config/clade/conductor.env"
 REMOTE_WORKERS_CONFIG = "~/.config/clade/conductor-workers.yaml"
 REMOTE_MCP_CONFIG = "~/.config/clade/conductor-mcp.json"
 
-
-def detect_clade_python(ssh_host: str, ssh_key: str | None = None) -> str | None:
-    """Detect the Python executable on a remote host that has clade installed.
-
-    Searches common locations (venvs, conda envs, system python) and returns
-    the absolute path to the first python that can import clade.mcp.server_conductor.
-
-    Returns:
-        Absolute path to python, or None if not found.
-    """
-    script = """\
-#!/bin/bash
-for candidate in \
-    ~/.local/venv/bin/python3 \
-    ~/mambaforge/envs/*/bin/python \
-    ~/miniforge3/envs/*/bin/python \
-    ~/miniconda3/envs/*/bin/python \
-    ~/.conda/envs/*/bin/python \
-    $(command -v python3 2>/dev/null); do
-    if [ -x "$candidate" ]; then
-        if "$candidate" -c "import clade.mcp.server_conductor" 2>/dev/null; then
-            # Resolve to absolute path
-            realpath "$candidate" 2>/dev/null || readlink -f "$candidate" 2>/dev/null || echo "$candidate"
-            exit 0
-        fi
-    fi
-done
-echo "NOT_FOUND"
-"""
-    result = run_remote(ssh_host, script, ssh_key=ssh_key, timeout=15)
-    if result.success:
-        path = result.stdout.strip().splitlines()[-1]
-        if path and path != "NOT_FOUND":
-            return path
-    return None
 
 
 def build_workers_config(
@@ -179,7 +143,7 @@ def build_conductor_mcp_config(
     server_url: str,
     workers_config_path: str = REMOTE_WORKERS_CONFIG,
     keys_file_path: str = REMOTE_KEYS_FILE,
-    python_cmd: str = "python3",
+    conductor_cmd: str = "clade-conductor",
 ) -> str:
     """Build the conductor-mcp.json for claude --mcp-config.
 
@@ -188,7 +152,7 @@ def build_conductor_mcp_config(
         server_url: Hearth server URL.
         workers_config_path: Path to workers config on remote.
         keys_file_path: Path to keys.json on remote.
-        python_cmd: Python executable path (should be the one with clade installed).
+        conductor_cmd: Absolute path to the clade-conductor entry point.
 
     Returns:
         JSON string for conductor-mcp.json.
@@ -196,8 +160,8 @@ def build_conductor_mcp_config(
     config = {
         "mcpServers": {
             "clade-conductor": {
-                "command": python_cmd,
-                "args": ["-m", "clade.mcp.server_conductor"],
+                "command": conductor_cmd,
+                "args": [],
                 "env": {
                     "HEARTH_URL": server_url,
                     "HEARTH_API_KEY": kamaji_key,
@@ -408,14 +372,14 @@ def deploy_conductor(
     # Step 5: Register key with Hearth
     _register_kamaji_key(server_url, config.personal_name, kamaji_key, kp, config.verify_ssl)
 
-    # Step 6: Detect correct Python on remote
-    click.echo("Detecting Python with clade installed...")
-    python_cmd = detect_clade_python(ssh_host, ssh_key=ssh_key)
-    if python_cmd:
-        click.echo(click.style(f"  Python: {python_cmd}", fg="green"))
+    # Step 6: Detect clade-conductor entry point on remote
+    click.echo("Detecting clade-conductor entry point...")
+    conductor_cmd = detect_clade_entry_point(ssh_host, "clade-conductor", ssh_key=ssh_key)
+    if conductor_cmd:
+        click.echo(click.style(f"  Entry point: {conductor_cmd}", fg="green"))
     else:
-        python_cmd = "python3"
-        click.echo(click.style(f"  Could not detect — falling back to {python_cmd}", fg="yellow"))
+        conductor_cmd = "clade-conductor"
+        click.echo(click.style(f"  Could not detect — falling back to bare '{conductor_cmd}'", fg="yellow"))
 
     # Step 6b: Deploy keys.json to remote
     click.echo("Deploying keys.json to remote...")
@@ -437,7 +401,7 @@ def deploy_conductor(
     mcp_keys_path = f"{home}/.config/clade/keys.json"
     mcp_json = build_conductor_mcp_config(
         kamaji_key, server_url, mcp_workers_path,
-        keys_file_path=mcp_keys_path, python_cmd=python_cmd,
+        keys_file_path=mcp_keys_path, conductor_cmd=conductor_cmd
     )
 
     # Step 8: Deploy config files
