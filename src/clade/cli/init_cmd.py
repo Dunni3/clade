@@ -24,6 +24,7 @@ from .naming import format_suggestion, suggest_name
 @click.option("--server-key", default=None, help="Existing API key for bootstrapping registration with the Hearth")
 @click.option("--no-mcp", is_flag=True, help="Skip MCP registration in ~/.claude.json")
 @click.option("--no-identity", is_flag=True, help="Skip writing identity to CLAUDE.md")
+@click.option("--no-skills", is_flag=True, help="Skip installing bundled skills")
 @click.option("--no-verify-ssl", is_flag=True, help="Disable SSL verification for self-signed certs")
 @click.option("--yes", "-y", is_flag=True, help="Accept defaults without prompting")
 @click.pass_context
@@ -39,6 +40,7 @@ def init_cmd(
     server_key: str | None,
     no_mcp: bool,
     no_identity: bool,
+    no_skills: bool,
     no_verify_ssl: bool,
     yes: bool,
 ) -> None:
@@ -137,6 +139,24 @@ def init_cmd(
     # Register MCP server
     if not no_mcp:
         _register_personal_mcp(personal_name, key, server_url)
+
+    # Install bundled skills
+    if not no_skills:
+        from .skills import install_all_skills
+
+        try:
+            skills_dir = (config_dir / "skills") if config_dir else None
+            results = install_all_skills(target_dir=skills_dir)
+            installed = [k for k, v in results.items() if v]
+            if installed:
+                click.echo(f"Installed skills: {', '.join(installed)}")
+            failed = [k for k, v in results.items() if not v]
+            if failed:
+                click.echo(
+                    click.style(f"  Warning: failed to install skills: {', '.join(failed)}", fg="yellow")
+                )
+        except Exception as e:
+            click.echo(click.style(f"  Warning: could not install skills: {e}", fg="yellow"))
 
     # Write identity to CLAUDE.md
     if not no_identity:

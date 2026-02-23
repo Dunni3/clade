@@ -36,7 +36,7 @@ clade-ember = "clade.worker.ember:main"
 clade-conductor = "clade.mcp.server_conductor:main"
 
 [tool.setuptools.package-data]
-clade = ["templates/*.j2"]
+clade = ["templates/*.j2", "skills/**/*.md"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

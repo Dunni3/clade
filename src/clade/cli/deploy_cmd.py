@@ -327,6 +327,36 @@ def ember(ctx: click.Context, name: str) -> None:
     click.echo(click.style(f"\nEmber ({name}) deployed successfully!", fg="green", bold=True))
 
 
+@deploy.command()
+@click.pass_context
+def skills(ctx: click.Context) -> None:
+    """Install bundled skills to ~/.claude/skills/."""
+    from .skills import install_all_skills
+
+    config_dir = ctx.obj.get("config_dir") if ctx.obj else None
+    skills_dir = (Path(config_dir) / "skills") if config_dir else None
+
+    click.echo("Installing bundled skills...")
+    results = install_all_skills(target_dir=skills_dir)
+
+    all_ok = True
+    for name, ok in results.items():
+        if ok:
+            click.echo(click.style(f"  {name}: installed", fg="green"))
+        else:
+            click.echo(click.style(f"  {name}: FAILED", fg="red"))
+            all_ok = False
+
+    if not results:
+        click.echo("  No bundled skills found")
+        return
+
+    if all_ok:
+        click.echo(click.style("\nSkills installed successfully!", fg="green", bold=True))
+    else:
+        raise SystemExit(1)
+
+
 @deploy.command("all")
 @click.option("--skip-build", is_flag=True, help="Skip frontend npm build")
 @click.pass_context
@@ -377,6 +407,16 @@ def deploy_all(ctx: click.Context, skip_build: bool) -> None:
         except SystemExit:
             results[f"ember:{bro_name}"] = False
             click.echo()
+
+    # Skills
+    click.echo()
+    click.echo(click.style("=== Installing Skills ===", bold=True))
+    try:
+        ctx.invoke(skills)
+        results["skills"] = True
+    except SystemExit:
+        results["skills"] = False
+        click.echo()
 
     # Summary
     click.echo()
