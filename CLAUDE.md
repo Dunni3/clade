@@ -33,9 +33,14 @@ clade/
 │   │   └── mailbox_client.py      # MailboxClient (messages + tasks + morsels + trees + ember registry API)
 │   ├── tasks/                     # SSH task delegation
 │   │   └── ssh_task.py            # build_remote_script, wrap_prompt, initiate_task
+│   ├── templates/                 # Jinja2 shell script templates
+│   │   ├── local_runner.sh.j2     # Ember runner (worktree isolation + claude launch)
+│   │   ├── remote_wrapper.sh.j2   # SSH wrapper (b64 decode + tmux launch)
+│   │   ├── remote_inner_runner.sh.j2 # Inner runner (nested in wrapper heredoc)
+│   │   └── _failure_trap.sh.j2    # Shared trap: auto-PATCH task to failed on exit
 │   ├── worker/                    # Ember server (HTTP-based task execution on workers)
 │   │   ├── auth.py                # Bearer token auth (reuses HEARTH_API_KEY)
-│   │   ├── runner.py              # Local tmux task launcher (like ssh_task without SSH)
+│   │   ├── runner.py              # Local tmux launcher (Jinja2 templates, git worktree isolation)
 │   │   ├── ember.py               # FastAPI Ember server (endpoints + in-memory state)
 │   │   └── client.py              # EmberClient (httpx client for Ember API)
 │   ├── utils/                     # Shared utilities
@@ -48,9 +53,12 @@ clade/
 │   │       ├── brother_tools.py   # list_brothers
 │   │       ├── kanban_tools.py    # create_card/list_board/get_card/move_card/update_card/archive_card
 │   │       ├── mailbox_tools.py   # send/check/read/browse/unread + task list/get/update/kill + deposit_morsel/list_morsels/list_trees/get_tree
-│   │       ├── task_tools.py      # initiate_ssh_task (coordinator only, supports parent_task_id)
+│   │       ├── task_tools.py      # initiate_ssh_task (coordinator only)
+│   │       ├── delegation_tools.py # initiate_ember_task (coordinator + worker)
 │   │       ├── ember_tools.py     # check_ember_health, list_ember_tasks
-│   │       └── conductor_tools.py # delegate_task (auto-parent linking via TRIGGER_TASK_ID), check_worker_health, list_worker_tasks
+│   │       └── conductor_tools.py # delegate_task, check_worker_health, list_worker_tasks
+│   ├── skills/                    # Bundled skills (SKILL.md format)
+│   │   └── implement-card/        # Card implementation + review delegation
 │   └── web/                       # Web app backend (unused currently)
 ├── hearth/                        # Hearth API server (FastAPI + SQLite, deployed on EC2)
 │   ├── app.py                     # FastAPI routes (/api/v1/messages, /api/v1/tasks, etc.)
@@ -132,6 +140,7 @@ Each brother gets an identity section in their `~/.claude/CLAUDE.md`, telling th
   - `generate_personal_identity()` — for the coordinator (lists all personal server tools)
   - `generate_worker_identity()` — for worker brothers (lists worker server tools + family list)
   - `generate_conductor_identity()` — for the conductor (lists conductor tools + workers + brothers)
+- **Shared concepts:** `_shared_concepts()` generates a "Key Concepts" section (Task Trees, Morsels, Board Cards) included in all three flavors. Each flavor adds role-specific guidance (Delegation Best Practices, Conductor Rules, Worker Guidelines).
 - **Personality:** Optional free-text description stored in `clade.yaml`, included in the identity section
 - **Local writing:** `write_identity_local()` reads/upserts/writes `~/.claude/CLAUDE.md`
 - **Remote writing:** `write_identity_remote()` base64-encodes the identity, SSHes to remote, runs a Python upsert script
@@ -143,64 +152,105 @@ Each brother gets an identity section in their `~/.claude/CLAUDE.md`, telling th
 ### Coordinator tools (clade-personal)
 - `list_brothers()` — List available brother instances
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
-- `initiate_ssh_task(brother, prompt, subject?, max_turns?, auto_pull?, parent_task_id?)` — Delegate a task via SSH + tmux
-- `list_tasks(assignee?, status?, limit?)` — Browse tasks
+- `initiate_ember_task(brother, prompt, subject?, parent_task_id?, working_dir?, max_turns?, card_id?, on_complete?, blocked_by_task_id?)` — **Primary delegation path.** Delegate a task to a brother via their Ember server. Supports deferred execution via `blocked_by_task_id`.
+- `initiate_ssh_task(brother, prompt, subject?, working_dir?, max_turns?, auto_pull?, parent_task_id?, on_complete?, card_id?)` — Delegate a task via SSH + tmux (legacy path)
+- `list_tasks(assignee?, status?, limit?)`, `get_task(task_id)`, `update_task(task_id, ...)` — Task management
 - `kill_task(task_id)` — Kill a running task (terminates tmux session on Ember, marks as `killed`)
-- `deposit_morsel(body, tags?, task_id?, brother?, card_id?)` — Deposit an observation/note into the morsel repository
+- `retry_task(task_id)` — Retry a failed task (creates child task with same prompt, sends to Ember)
+- `deposit_morsel(body, tags?, task_id?, brother?, card_id?)` — Deposit an observation/note
 - `list_morsels(creator?, tag?, task_id?, card_id?, limit?)` — List morsels with filters
 - `list_trees(limit?)` — List task trees with status summaries
 - `get_tree(root_task_id)` — Get full task tree hierarchy
-- `check_ember_health(url?)` — Check Ember server health (optional URL for ad-hoc checks)
-- `list_ember_tasks()` — List active tasks and orphaned tmux sessions on configured Ember
-- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)
+- `check_ember_health(brother?, url?)` — Check Ember health (by brother name, URL, or all brothers in registry)
+- `list_ember_tasks(brother?)` — List active tasks on Ember(s) (by brother name or all)
+- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board
 
 ### Conductor tools (clade-conductor)
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
 - `list_tasks`, `get_task`, `update_task` — Task visibility and status updates
-- `delegate_task(worker, prompt, subject?, parent_task_id?, working_dir?, max_turns?)` — Delegate a task to a worker via Ember. Auto-reads `TRIGGER_TASK_ID` from env for parent linking when `parent_task_id` is not explicitly set.
+- `delegate_task(brother, prompt, subject?, parent_task_id?, working_dir?, max_turns?, card_id?, on_complete?, blocked_by_task_id?)` — Delegate a task to a worker via Ember. Auto-reads `TRIGGER_TASK_ID` from env for parent linking when `parent_task_id` is not explicitly set. Supports deferred execution via `blocked_by_task_id`.
 - `check_worker_health(worker?)` — Check one or all worker Ember servers
 - `list_worker_tasks(worker?)` — List active tasks on worker Embers
 - `deposit_morsel(body, tags?, task_id?, brother?, card_id?)` — Deposit an observation/note
 - `list_morsels(creator?, tag?, task_id?, card_id?, limit?)` — List morsels with filters
 - `list_trees(limit?)` — List task trees with status summaries
 - `get_tree(root_task_id)` — Get full task tree hierarchy
-- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)
+- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board
 
 ### Worker tools (clade-worker)
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
-- `list_tasks`, `get_task`, `update_task`, `kill_task` — Task visibility, status updates, and kill
+- `list_tasks`, `get_task`, `update_task`, `kill_task`, `retry_task` — Task visibility, status updates, kill, and retry
+- `initiate_ember_task(brother, prompt, subject?, parent_task_id?, working_dir?, max_turns?, card_id?, on_complete?, blocked_by_task_id?)` — Delegate tasks to sibling brothers via their Embers
 - `deposit_morsel(body, tags?, task_id?, brother?, card_id?)` — Deposit an observation/note
 - `list_morsels(creator?, tag?, task_id?, card_id?, limit?)` — List morsels with filters
 - `list_trees(limit?)` — List task trees with status summaries
 - `get_tree(root_task_id)` — Get full task tree hierarchy
-- `check_ember_health(url?)` — Check local Ember server health
-- `list_ember_tasks()` — List active tasks on local Ember
-- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)
+- `check_ember_health(brother?, url?)` — Check Ember health (local or by brother name)
+- `list_ember_tasks(brother?)` — List active tasks on Ember(s)
+- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board
 
 ## Task Delegation System
 
-The coordinator can delegate tasks to brothers via SSH. The flow:
+Two delegation paths exist. **Ember (HTTP) is the primary path**; SSH is legacy.
 
-1. Coordinator calls `initiate_ssh_task(brother, prompt, parent_task_id?)`
-2. Task is created in the Hearth database (status: `pending`). If `parent_task_id` is set, the task is linked as a child and inherits `root_task_id` from its parent, forming a task tree.
-3. Coordinator SSHes to the brother's host, launches a detached tmux session
-4. The tmux session runs `claude -p "<prompt>"` with `--dangerously-skip-permissions`
-5. The brother reads the prompt, does the work, reports back via mailbox, and updates task status
+### Ember Delegation (primary)
 
-**Shell escaping strategy** (avoids all quoting nightmares):
-- Prompt is base64-encoded before sending
-- Bash script is piped to `ssh host bash -s` via stdin
-- A runner script is written to a temp file (avoids tmux quoting)
-- The heredoc uses an **unquoted** delimiter so `$PROMPT_FILE` and `$RUNNER` expand at write time
-- `$(cat ...)` is escaped as `\$(cat ...)` so it runs at runner execution time
+1. Coordinator/worker calls `initiate_ember_task(brother, prompt, ...)`
+2. Task is created in the Hearth database (status: `pending`). If `parent_task_id` is set, the task is linked as a child.
+3. If `blocked_by_task_id` is set and the blocker hasn't completed, the task stays `pending` — auto-delegated server-side when the blocker completes (see Deferred Dependencies below).
+4. Otherwise, the task is sent to the brother's Ember server via HTTP, which launches a tmux session running `claude -p "<prompt>" --dangerously-skip-permissions`.
 
-**Task lifecycle:** `pending` -> `launched` -> `in_progress` -> `completed` / `failed` / `killed`
+### SSH Delegation (legacy)
 
-**Kill flow:** Frontend/MCP -> Hearth `POST /tasks/{id}/kill` -> Ember `POST /tasks/{task_id}/kill` -> `tmux kill-session` -> task status set to `killed`. The Hearth proxies to the Ember (Ember URLs are Tailscale IPs, unreachable from browsers). If the Ember is unreachable, the task is still marked `killed` in DB. Killed tasks do NOT trigger conductor ticks.
+`initiate_ssh_task()` SSHes to the brother's host and launches a detached tmux session directly. Same lifecycle, but requires SSH access.
 
-**Runner logging:** Runner scripts log to `/tmp/claude_runner_<session_name>.log` (timestamp start, launch, exit code). Logs auto-delete on success, preserved on failure for debugging.
+### Runner Script Templates (Jinja2)
 
-Key file: `src/clade/tasks/ssh_task.py` — contains `build_remote_script()`, `wrap_prompt()`, `initiate_task()`
+Runner scripts use **Jinja2 two-phase rendering** (replaced the old heredoc string-building):
+
+- `local_runner.sh.j2` — Ember runner: env setup → git worktree isolation → claude launch → cleanup
+- `remote_wrapper.sh.j2` — SSH wrapper: base64 prompt decode → write inner runner to temp → tmux launch
+- `remote_inner_runner.sh.j2` — Inner runner (nested in wrapper's heredoc): env exports → cd → claude launch
+- `_failure_trap.sh.j2` — Shared trap: on non-zero exit, auto-PATCHes task status to `failed` via Hearth API with last 5 log lines. Distinguishes pre-Claude failures from post-Claude failures via `_CLAUDE_STARTED` flag.
+
+Templates live in `src/clade/templates/`.
+
+### Git Worktree Isolation
+
+The Ember runner (local_runner.sh.j2) creates a git worktree for each task:
+- **Path:** `~/.clade-worktrees/<session_name>`
+- **Branch:** `clade/<session_name>` (falls back to detached HEAD)
+- **Cleanup:** On exit, if the worktree has no staged/unstaged changes, it's automatically removed along with the branch. Dirty worktrees are preserved.
+
+### Task Fields
+
+- **`on_complete`**: Follow-up instructions the conductor reads as a "primary directive" when the task completes. Copied on `retry_task`. Used by the `implement-card` skill to chain implementation → review.
+- **`card_id`**: Links the task to a kanban card. Creates a formal link so the card tracks which tasks work on it.
+
+### Deferred Dependencies (`blocked_by_task_id`)
+
+Tasks can declare a dependency on another task. The Hearth handles this server-side:
+- On task creation, if `blocked_by_task_id` is set and the blocker is still active, the task stays `pending`.
+- If the blocker has already completed, `blocked_by_task_id` is auto-cleared at insert time.
+- When a task **completes**, `_unblock_and_delegate()` finds blocked tasks and auto-delegates them to their assignee's Ember.
+- When a task **fails**, `_cascade_failure()` recursively fails all downstream blocked tasks.
+- `parent_task_id` is auto-defaulted to `blocked_by_task_id` for tree linking.
+
+### Retry
+
+`POST /api/v1/tasks/{task_id}/retry` — creates a child task with the same prompt, delegates to the assignee's Ember, copies `on_complete`. MCP tool: `retry_task(task_id)` (available on all servers). Does NOT trigger conductor ticks.
+
+### Task Lifecycle
+
+`pending` → `launched` → `in_progress` → `completed` / `failed` / `killed`
+
+**Kill flow:** Frontend/MCP → Hearth `POST /tasks/{id}/kill` → Ember `POST /tasks/{task_id}/kill` → `tmux kill-session` → status set to `killed`. Killed tasks do NOT trigger conductor ticks.
+
+**Card auto-sync:** When a task moves to `in_progress`, linked kanban cards in `backlog`/`todo` are auto-moved to `in_progress` and their assignee is updated.
+
+**Runner logging:** Runner scripts log to `/tmp/claude_runner_<session_name>.log`. Logs auto-delete on success, preserved on failure.
+
+**Key files:** `src/clade/tasks/ssh_task.py`, `src/clade/worker/runner.py`, `src/clade/mcp/tools/delegation_tools.py`
 
 ## Task Trees
 
@@ -212,7 +262,7 @@ Tasks form parent-child hierarchies that grow organically. When any task complet
 
 **Frontend:** TreeListPage shows all trees with status breakdown pills. TreeDetailPage renders an interactive React Flow graph (dagre layout) with status-colored nodes, click-to-inspect side panel, animated edges for in-progress tasks. Dependencies: `@xyflow/react`, `dagre`.
 
-**Auto-parent linking:** The conductor's `delegate_task()` reads `TRIGGER_TASK_ID` from env and automatically sets `parent_task_id`. Trees form without the conductor explicitly thinking about linking.
+**Auto-parent linking:** The tick prompt instructs the conductor to always pass `parent_task_id=TRIGGER_TASK_ID` explicitly when delegating follow-up tasks. The `delegate_task()` tool also reads `TRIGGER_TASK_ID` from env as a safety net when `parent_task_id` is not provided.
 
 ## Morsels
 
@@ -263,7 +313,7 @@ An **Ember** is a lightweight HTTP server running on a worker brother's machine 
 
 **Key files:**
 - `src/clade/worker/ember.py` — FastAPI app with endpoints
-- `src/clade/worker/runner.py` — Local tmux launcher (reuses `generate_session_name()` and `wrap_prompt()` from `ssh_task.py`)
+- `src/clade/worker/runner.py` — Local tmux launcher (renders `local_runner.sh.j2`, git worktree isolation)
 - `src/clade/worker/auth.py` — Bearer token auth
 - `src/clade/worker/client.py` — `EmberClient` for calling Ember APIs
 
@@ -301,13 +351,13 @@ An **Ember** is a lightweight HTTP server running on a worker brother's machine 
 The **Conductor** is a periodic process that orchestrates multi-step workflows by delegating tasks to worker brothers via their Ember servers. It builds **task trees** organically — when a task completes, the conductor reviews the result and delegates follow-up tasks as children. It runs on the same host as the Hearth.
 
 **Architecture:** Ticks are triggered three ways: (1) a systemd timer (configurable interval), (2) **task-driven** — the Hearth fires a tick when **any** task reaches a terminal state (`completed`/`failed`), passing the task ID to the tick command, and (3) **message-driven** — the Hearth fires a tick when a message is sent to the conductor (not from itself), passing `--message <id>` to the tick command. Each tick spawns a Claude Code session with the `clade-conductor` MCP server. The tick prompt (`conductor-tick.md`) has three paths:
-- **Event-driven** (`TRIGGER_TASK_ID` set): Fetch the triggering task, assess follow-up needs, delegate child tasks (auto-linked via env), deposit morsel, check mailbox
+- **Event-driven** (`TRIGGER_TASK_ID` set): Fetch the triggering task, assess follow-up needs. For failures, prefer `retry_task()`. For completions needing follow-up, delegate children with explicit `parent_task_id=TRIGGER_TASK_ID`. Deposit morsel, check mailbox.
 - **Message-driven** (`TRIGGER_MESSAGE_ID` set): Read the triggering message, respond if appropriate, act on requests (delegate task), deposit morsel, check other unread messages
 - **Periodic** (timer, no trigger): Check mailbox, scan for stuck tasks (launched >10 min — re-delegate as child, mark original failed), check worker health, deposit morsel
 
-**Auto-parent linking:** When `TRIGGER_TASK_ID` is set in the env, `delegate_task()` automatically sets `parent_task_id` on any new tasks, building task trees without the conductor needing to pass the parameter explicitly. Explicit `parent_task_id` overrides the env var.
+**Auto-parent linking:** The tick prompt instructs the conductor to always pass `parent_task_id=TRIGGER_TASK_ID` explicitly. The `delegate_task()` tool also reads `TRIGGER_TASK_ID` from env as a safety net. Explicit `parent_task_id` overrides the env var.
 
-**Guardrails:** Max tree depth 5, max 2 retries for failed tasks, check worker aspen load before delegating. The conductor deposits a morsel at the end of every tick summarizing observations and actions.
+**Guardrails:** Max tree depth 5, max 2 retries (prefer `retry_task()` for failed tasks), check worker aspen load before delegating. The conductor deposits a morsel at the end of every tick summarizing observations and actions.
 
 **Key files:**
 - `src/clade/mcp/server_conductor.py` — MCP server (mailbox + trees + delegation tools)
@@ -316,6 +366,8 @@ The **Conductor** is a periodic process that orchestrates multi-step workflows b
 - `src/clade/cli/setup_conductor_cmd.py` — `clade setup-conductor` CLI command
 - `deploy/conductor-tick.sh` — Tick runner script
 - `deploy/conductor-tick.md` — Tick prompt
+
+**MCP config:** Uses console_scripts entry point path (e.g., `/home/ubuntu/.local/venv/bin/clade-conductor`) instead of `python -m`. All MCP registrations (local + remote) use absolute binary paths.
 
 **Deployment flow:**
 ```
@@ -353,7 +405,8 @@ ssh <server-ssh> sudo systemctl start conductor-tick.service  # manual trigger
 
 - **API server:** FastAPI + SQLite on EC2 (`44.195.96.130`, HTTPS on 443)
 - **Web UI:** React SPA at `https://44.195.96.130` (source in `frontend/`)
-  - **Pages:** Inbox, Feed, Tasks, Task Detail, Trees, Tree Detail (React Flow graph), Morsels, Status, Compose, Settings
+  - **Pages:** Inbox, Feed, Tasks, Task Detail, Trees, Tree Detail (React Flow graph), Morsels, Morsel Detail, Board (kanban with project filter), Status, Compose, Settings
+  - **Components:** `Linkify` (auto-detects URLs in text), `PeekDrawer` (side panel for quick object inspection on kanban board — supports morsel/task/tree/card/message types)
 - **Members:** Each brother, the coordinator, the conductor, and the human each get their own API key
 - **Admins:** The human and coordinator can edit/delete any message; others only their own
 - **Env vars:** `HEARTH_URL`, `HEARTH_API_KEY`, `HEARTH_NAME` (with `MAILBOX_*` fallback for transition)
@@ -366,6 +419,9 @@ ssh <server-ssh> sudo systemctl start conductor-tick.service  # manual trigger
 - **Ember registry (DB-backed):** Ember URLs stored in `embers` table instead of env var. API: `PUT /api/v1/embers/{name}` (register/update), `GET /api/v1/embers` (list), `DELETE /api/v1/embers/{name}` (admin). `GET /api/v1/embers/status` merges DB entries with `EMBER_URLS` env var (DB wins on conflict). `clade setup-ember` auto-registers after deployment.
 - **Task events:** `POST /api/v1/tasks/{task_id}/log` — log events (tool calls, progress updates) against a task. Events stored in `task_events` table and returned with task detail.
 - **Kill endpoint:** `POST /api/v1/tasks/{id}/kill` — proxies to the assignee's Ember to terminate the tmux session, then marks the task `killed` in DB. Only creator or admins can kill. Returns 409 for non-active tasks. Does NOT trigger conductor ticks.
+- **Retry endpoint:** `POST /api/v1/tasks/{id}/retry` — creates a child task with same prompt, delegates to Ember, copies `on_complete`. Only failed tasks can be retried. Does NOT trigger conductor ticks.
+- **Deferred dependencies:** Tasks accept `blocked_by_task_id`. When the blocker completes, `_unblock_and_delegate()` auto-delegates. When the blocker fails, `_cascade_failure()` recursively fails downstream tasks.
+- **Card auto-sync:** When a task moves to `in_progress`, linked kanban cards in `backlog`/`todo` auto-move to `in_progress` with updated assignee.
 - **Event-driven conductor ticks:** `CONDUCTOR_TICK_CMD` env var. When set, the Hearth fires the conductor tick (fire-and-forget) on: **any** task completion/failure (not kills), messages sent to the conductor (not from itself), Task ID is passed as a positional arg; message ID is passed as `--message <id>`.
 
 ## Testing
@@ -447,10 +503,21 @@ Brothers on SLURM clusters are **intermittently available** — online only whil
 
 **Tailscale + Ember:** `clade setup-ember` auto-detects the brother's Tailscale IP and uses it as the `ember_host` in config. This means Ember health checks and future Conductor calls route through the Tailscale mesh, bypassing firewalls. If Tailscale isn't available, it falls back to the SSH hostname.
 
+## Brothers Registry (Runtime)
+
+Coordinator and workers build the brothers registry at runtime from `clade.yaml` + `keys.json` via `load_brothers_registry()` in `clade_config.py`. Each tool invocation re-reads the files — no caching, so edits take effect immediately without restarting Claude Code. Only brothers with `ember_host` set are included. Legacy fallback via `BROTHERS_CONFIG` env var.
+
+## Skills System
+
+Bundled skills live in `src/clade/skills/`. Each skill is a directory containing `SKILL.md` with YAML frontmatter (`name`, `description`, `argument-hint`, `disable-model-invocation`) and markdown instructions.
+
+**Current skills:**
+- `implement-card` — Reads a kanban card, delegates an implementation task to a brother via `initiate_ember_task`, then creates a blocked review task that auto-runs when implementation completes. Arguments: card_id (required), brother (default "oppy"), working_dir (optional).
+
 ## Key Gotchas
 
 - **MCP server is a subprocess** — code changes require Claude Code restart to take effect
-- **Heredoc quoting:** Unquoted delimiter = variable expansion ON. The runner script heredoc must be unquoted so temp file paths expand, but `$(...)` must be escaped
+- **MCP config uses console_scripts binary paths** (e.g., `/path/to/clade-personal`), not `python -m`
 - **Default terminal:** Terminal.app (iTerm2 is NOT installed on this machine)
 
 ---
