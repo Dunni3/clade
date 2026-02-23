@@ -571,6 +571,19 @@ async def insert_task(
             if blocker["status"] == "completed":
                 blocked_by_task_id = None
 
+        # Auto-default parent_task_id to blocker when not explicitly set.
+        # The simple sequential case ("do A then B") just works without
+        # needing to set both. Explicit parent_task_id overrides this.
+        if blocked_by_task_id is not None and parent_task_id is None:
+            parent_task_id = blocked_by_task_id
+            cursor = await db.execute(
+                "SELECT id, root_task_id FROM tasks WHERE id = ?",
+                (parent_task_id,),
+            )
+            parent = await cursor.fetchone()
+            # parent is guaranteed to exist (we already validated blocked_by_task_id above)
+            root_task_id = parent["root_task_id"] if parent["root_task_id"] is not None else parent["id"]
+
         cursor = await db.execute(
             """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, on_complete, blocked_by_task_id, max_turns)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",

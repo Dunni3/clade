@@ -2332,6 +2332,42 @@ class TestDatabaseBlockedBy:
         task = await mailbox_db.get_task(blocked_id)
         assert task["blocked_by_task_id"] == blocker_id
         assert task["status"] == "pending"
+        # Auto-defaults parent_task_id to blocker when not explicitly set
+        assert task["parent_task_id"] == blocker_id
+
+    @pytest.mark.asyncio
+    async def test_blocked_by_auto_parents_to_blocker(self):
+        """blocked_by_task_id auto-sets parent_task_id when not explicitly provided."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Step 1"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Step 2",
+            blocked_by_task_id=blocker_id,
+        )
+        task = await mailbox_db.get_task(blocked_id)
+        assert task["parent_task_id"] == blocker_id
+        assert task["root_task_id"] == blocker_id
+
+    @pytest.mark.asyncio
+    async def test_blocked_by_explicit_parent_overrides(self):
+        """Explicit parent_task_id is not overridden by blocked_by_task_id."""
+        grandparent_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root task"
+        )
+        sibling_a_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Sibling A",
+            parent_task_id=grandparent_id,
+        )
+        sibling_b_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Sibling B",
+            parent_task_id=grandparent_id,
+            blocked_by_task_id=sibling_a_id,
+        )
+        task = await mailbox_db.get_task(sibling_b_id)
+        assert task["parent_task_id"] == grandparent_id  # explicit parent wins
+        assert task["blocked_by_task_id"] == sibling_a_id
+        assert task["root_task_id"] == grandparent_id
 
     @pytest.mark.asyncio
     async def test_blocked_by_nonexistent_task_raises(self):
