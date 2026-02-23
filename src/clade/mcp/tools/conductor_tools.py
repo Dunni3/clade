@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 from mcp.server.fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 
 from ...communication.mailbox_client import MailboxClient
 from ...worker.client import EmberClient
@@ -83,13 +86,27 @@ def create_conductor_tools(
             return f"Worker '{brother}' has no Ember configured."
 
         # Auto-link parent from env if not explicitly provided
-        if parent_task_id is None:
+        if parent_task_id is not None:
+            logger.info(
+                "delegate_task: explicit parent_task_id=%d provided, skipping env auto-link",
+                parent_task_id,
+            )
+        else:
             trigger_id = os.environ.get("TRIGGER_TASK_ID", "")
             if trigger_id:
                 try:
                     parent_task_id = int(trigger_id)
+                    logger.info(
+                        "delegate_task: auto-linked parent_task_id=%d from TRIGGER_TASK_ID env",
+                        parent_task_id,
+                    )
                 except (ValueError, TypeError):
-                    pass  # Invalid env value, ignore
+                    logger.warning(
+                        "delegate_task: TRIGGER_TASK_ID env has invalid value '%s', skipping auto-link",
+                        trigger_id,
+                    )
+            else:
+                logger.info("delegate_task: no parent_task_id provided and TRIGGER_TASK_ID not set, creating root task")
 
         # Create task in Hearth
         try:
