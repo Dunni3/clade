@@ -64,7 +64,6 @@ env ${TRIGGER_TASK_ID:+TRIGGER_TASK_ID=$TRIGGER_TASK_ID} \
     ${TRIGGER_MESSAGE_ID:+TRIGGER_MESSAGE_ID=$TRIGGER_MESSAGE_ID} \
     claude -p "$(cat "$TICK_PROMPT")" \
     --dangerously-skip-permissions \
-    --max-turns 20 \
     --mcp-config "${HOME}/.config/clade/conductor-mcp.json" \
     2>&1 | tee -a "$LOG_FILE"
 
