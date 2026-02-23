@@ -106,6 +106,12 @@ def add_brother(
 
         if prereqs.errors and not yes:
             click.echo(f"Missing: {', '.join(prereqs.errors)}")
+            click.echo(
+                click.style(
+                    f"  Tip: run 'clade bootstrap {ssh_host}' to auto-setup conda + clade",
+                    fg="yellow",
+                )
+            )
             if not click.confirm("Continue anyway?", default=False):
                 raise SystemExit(1)
 
