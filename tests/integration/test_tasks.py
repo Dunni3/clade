@@ -1957,3 +1957,299 @@ class TestUpdateTaskParentTool:
         mock_client.update_task.assert_called_once_with(
             2, status=None, output=None, parent_task_id=1
         )
+
+
+# ---------------------------------------------------------------------------
+# Deferred tasks / blocked_by_task_id
+# ---------------------------------------------------------------------------
+
+
+class TestDatabaseBlockedBy:
+    @pytest.mark.asyncio
+    async def test_insert_task_with_blocked_by(self):
+        """A task can be created with blocked_by_task_id."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocking task"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Deferred task",
+            blocked_by_task_id=blocker_id,
+        )
+        task = await mailbox_db.get_task(blocked_id)
+        assert task["blocked_by_task_id"] == blocker_id
+        assert task["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_blocked_by_nonexistent_task_raises(self):
+        """blocked_by_task_id must reference an existing task."""
+        with pytest.raises(ValueError, match="does not exist"):
+            await mailbox_db.insert_task(
+                creator="doot", assignee="oppy", prompt="Bad",
+                blocked_by_task_id=9999,
+            )
+
+    @pytest.mark.asyncio
+    async def test_blocked_by_completed_task_clears(self):
+        """If the blocking task is already completed, blocked_by is cleared."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Already done"
+        )
+        await mailbox_db.update_task(blocker_id, status="completed")
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Should not be blocked",
+            blocked_by_task_id=blocker_id,
+        )
+        task = await mailbox_db.get_task(blocked_id)
+        assert task["blocked_by_task_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_tasks_blocked_by(self):
+        """get_tasks_blocked_by returns pending tasks blocked by a given task."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocking task"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Deferred task",
+            blocked_by_task_id=blocker_id,
+        )
+        # Also add a non-blocked task — should not appear
+        await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Normal task"
+        )
+
+        blocked = await mailbox_db.get_tasks_blocked_by(blocker_id)
+        assert len(blocked) == 1
+        assert blocked[0]["id"] == blocked_id
+
+    @pytest.mark.asyncio
+    async def test_clear_blocked_by(self):
+        """clear_blocked_by removes the blocked_by reference."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked",
+            blocked_by_task_id=blocker_id,
+        )
+        await mailbox_db.clear_blocked_by(blocked_id)
+        task = await mailbox_db.get_task(blocked_id)
+        assert task["blocked_by_task_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_task_includes_blocked_tasks(self):
+        """get_task detail includes blocked_tasks list."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked",
+            blocked_by_task_id=blocker_id,
+        )
+        task = await mailbox_db.get_task(blocker_id)
+        assert len(task["blocked_tasks"]) == 1
+        assert task["blocked_tasks"][0]["id"] == blocked_id
+
+    @pytest.mark.asyncio
+    async def test_get_tasks_includes_blocked_by_field(self):
+        """get_tasks list includes blocked_by_task_id."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked",
+            blocked_by_task_id=blocker_id,
+        )
+        tasks = await mailbox_db.get_tasks()
+        blocked_tasks = [t for t in tasks if t.get("blocked_by_task_id")]
+        assert len(blocked_tasks) == 1
+        assert blocked_tasks[0]["blocked_by_task_id"] == blocker_id
+
+
+class TestAPIBlockedBy:
+    @pytest.mark.asyncio
+    async def test_create_task_with_blocked_by(self, client):
+        """POST /tasks with blocked_by_task_id creates a deferred task."""
+        # Create blocker
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Blocker", "subject": "Blocker"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        blocker_id = resp.json()["id"]
+
+        # Create blocked task
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Deferred work",
+                "subject": "Deferred",
+                "blocked_by_task_id": blocker_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        blocked_id = resp.json()["id"]
+
+        # Verify via GET
+        resp = await client.get(f"/api/v1/tasks/{blocked_id}", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["blocked_by_task_id"] == blocker_id
+        assert data["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_create_task_blocked_by_nonexistent_returns_422(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Bad",
+                "blocked_by_task_id": 9999,
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_task_detail_shows_blocked_tasks(self, client):
+        """GET /tasks/{id} includes blocked_tasks when tasks are waiting."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Blocker"},
+            headers=DOOT_HEADERS,
+        )
+        blocker_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Blocked",
+                "blocked_by_task_id": blocker_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+        blocked_id = resp.json()["id"]
+
+        resp = await client.get(f"/api/v1/tasks/{blocker_id}", headers=DOOT_HEADERS)
+        data = resp.json()
+        assert len(data["blocked_tasks"]) == 1
+        assert data["blocked_tasks"][0]["id"] == blocked_id
+
+    @pytest.mark.asyncio
+    async def test_task_list_shows_blocked_by(self, client):
+        """GET /tasks includes blocked_by_task_id in summary."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Blocker"},
+            headers=DOOT_HEADERS,
+        )
+        blocker_id = resp.json()["id"]
+
+        await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Blocked",
+                "blocked_by_task_id": blocker_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get("/api/v1/tasks", headers=DOOT_HEADERS)
+        tasks = resp.json()
+        blocked = [t for t in tasks if t.get("blocked_by_task_id")]
+        assert len(blocked) == 1
+        assert blocked[0]["blocked_by_task_id"] == blocker_id
+
+    @pytest.mark.asyncio
+    async def test_tree_summary_includes_blocked_count(self, client):
+        """GET /trees includes blocked count for deferred tasks."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Root", "subject": "Root"},
+            headers=DOOT_HEADERS,
+        )
+        root_id = resp.json()["id"]
+
+        # Create a child that's blocked by the root
+        await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Blocked child",
+                "parent_task_id": root_id,
+                "blocked_by_task_id": root_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get("/api/v1/trees", headers=DOOT_HEADERS)
+        trees = resp.json()
+        tree = next(t for t in trees if t["root_task_id"] == root_id)
+        assert tree["blocked"] == 1
+        # The root itself is pending but not blocked
+        assert tree["pending"] == 1
+
+
+class TestUnblockOnCompletion:
+    @pytest.mark.asyncio
+    @patch("hearth.app._maybe_trigger_conductor_tick")
+    async def test_completing_blocker_clears_blocked_by(self, mock_tick, client):
+        """When a blocking task completes, blocked tasks get unblocked and delegated."""
+        # Create blocker
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Blocker", "subject": "Blocker"},
+            headers=DOOT_HEADERS,
+        )
+        blocker_id = resp.json()["id"]
+
+        # Create blocked task
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Deferred work",
+                "subject": "Deferred",
+                "blocked_by_task_id": blocker_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+        blocked_id = resp.json()["id"]
+
+        # Complete the blocker (mock Ember so delegation doesn't fail on missing URL)
+        with patch("hearth.app._unblock_and_delegate") as mock_unblock:
+            mock_unblock.return_value = None  # Skip actual Ember delegation
+            resp = await client.patch(
+                f"/api/v1/tasks/{blocker_id}",
+                json={"status": "completed"},
+                headers=DOOT_HEADERS,
+            )
+            assert resp.status_code == 200
+            mock_unblock.assert_called_once_with(blocker_id)
+
+    @pytest.mark.asyncio
+    @patch("hearth.app._maybe_trigger_conductor_tick")
+    async def test_unblock_and_delegate_clears_blocked_by(self, mock_tick, client):
+        """_unblock_and_delegate clears blocked_by_task_id."""
+        from hearth.app import _unblock_and_delegate
+
+        # Create blocker
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        # Create blocked task
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked",
+            blocked_by_task_id=blocker_id,
+        )
+
+        # Call _unblock_and_delegate — Ember not configured, so delegation will fail
+        # but blocked_by should still be cleared
+        await _unblock_and_delegate(blocker_id)
+
+        task = await mailbox_db.get_task(blocked_id)
+        assert task["blocked_by_task_id"] is None

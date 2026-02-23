@@ -132,6 +132,7 @@ class MailboxClient:
         host: str | None = None,
         working_dir: str | None = None,
         parent_task_id: int | None = None,
+        blocked_by_task_id: int | None = None,
     ) -> dict:
         payload: dict = {"assignee": assignee, "prompt": prompt, "subject": subject}
         if session_name is not None:
@@ -142,6 +143,8 @@ class MailboxClient:
             payload["working_dir"] = working_dir
         if parent_task_id is not None:
             payload["parent_task_id"] = parent_task_id
+        if blocked_by_task_id is not None:
+            payload["blocked_by_task_id"] = blocked_by_task_id
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.post(
                 self._url("/tasks"),

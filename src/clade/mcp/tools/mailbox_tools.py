@@ -180,8 +180,11 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
                 return "No tasks found."
             lines = []
             for t in tasks:
+                status_str = t['status']
+                if t.get('blocked_by_task_id') and t['status'] == 'pending':
+                    status_str = f"blocked by #{t['blocked_by_task_id']}"
                 line = (
-                    f"#{t['id']} [{t['status']}] {t['subject'] or '(no subject)'}\n"
+                    f"#{t['id']} [{status_str}] {t['subject'] or '(no subject)'}\n"
                     f"  Assignee: {t['assignee']} | Creator: {t['creator']}\n"
                     f"  Created: {format_timestamp(t['created_at'])}"
                 )
@@ -217,6 +220,8 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
                 lines.append(f"Parent task: #{t['parent_task_id']}")
             if t.get("root_task_id"):
                 lines.append(f"Root task: #{t['root_task_id']}")
+            if t.get("blocked_by_task_id"):
+                lines.append(f"Blocked by: #{t['blocked_by_task_id']}")
             if t.get("host"):
                 lines.append(f"Host: {t['host']}")
             if t.get("session_name"):
@@ -234,9 +239,18 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             if children:
                 lines.append(f"\nChildren ({len(children)}):")
                 for c in children:
+                    blocked_suffix = f" (blocked by #{c['blocked_by_task_id']})" if c.get("blocked_by_task_id") else ""
                     lines.append(
                         f"  #{c['id']} [{c['status']}] {c.get('subject') or '(no subject)'}"
-                        f" — {c['assignee']}"
+                        f" — {c['assignee']}{blocked_suffix}"
+                    )
+            blocked_tasks = t.get("blocked_tasks", [])
+            if blocked_tasks:
+                lines.append(f"\nBlocked by this task ({len(blocked_tasks)}):")
+                for bt in blocked_tasks:
+                    lines.append(
+                        f"  #{bt['id']} [{bt['status']}] {bt.get('subject') or '(no subject)'}"
+                        f" — {bt['assignee']}"
                     )
             if t.get("output"):
                 lines.append(f"\nOutput: {t['output']}")

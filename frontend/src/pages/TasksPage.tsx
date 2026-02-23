@@ -107,8 +107,8 @@ export default function TasksPage() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-xs font-mono text-gray-500">#{task.id}</span>
-                  <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${statusColors[task.status] || 'bg-gray-700 text-gray-300'}`}>
-                    {task.status}
+                  <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${task.blocked_by_task_id && task.status === 'pending' ? 'bg-yellow-500/20 text-yellow-300' : statusColors[task.status] || 'bg-gray-700 text-gray-300'}`}>
+                    {task.blocked_by_task_id && task.status === 'pending' ? `blocked by #${task.blocked_by_task_id}` : task.status}
                   </span>
                   <span className="text-xs text-gray-500">
                     {task.creator} &rarr; {task.assignee}

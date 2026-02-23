@@ -96,6 +96,82 @@ def _maybe_trigger_conductor_tick(
         logger.warning("Failed to trigger conductor tick", exc_info=True)
 
 
+async def _unblock_and_delegate(completed_task_id: int) -> None:
+    """When a task completes, find tasks blocked by it and delegate them via Ember."""
+    blocked_tasks = await db.get_tasks_blocked_by(completed_task_id)
+    if not blocked_tasks:
+        return
+
+    for task in blocked_tasks:
+        assignee = task["assignee"]
+        task_id = task["id"]
+
+        # Clear the blocked_by reference
+        await db.clear_blocked_by(task_id)
+
+        # Look up Ember URL: DB first, env fallback
+        ember_url = None
+        db_embers = await db.get_embers()
+        for entry in db_embers:
+            if entry["name"] == assignee:
+                ember_url = entry["ember_url"]
+                break
+        if ember_url is None:
+            ember_url = EMBER_URLS.get(assignee)
+
+        if not ember_url:
+            logger.warning(
+                "No Ember URL for assignee %s — cannot auto-delegate unblocked task #%d",
+                assignee, task_id,
+            )
+            continue
+
+        # Look up assignee's API key
+        assignee_key = await db.get_api_key_for_name(assignee)
+        if assignee_key is None:
+            for key, name in API_KEYS.items():
+                if name == assignee:
+                    assignee_key = key
+                    break
+
+        if not assignee_key:
+            logger.warning(
+                "No API key for assignee %s — cannot auto-delegate unblocked task #%d",
+                assignee, task_id,
+            )
+            continue
+
+        # Send to Ember
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=30.0) as http_client:
+                resp = await http_client.post(
+                    f"{ember_url}/tasks/execute",
+                    json={
+                        "prompt": task["prompt"],
+                        "task_id": task_id,
+                        "subject": task["subject"] or "",
+                        "sender_name": task["creator"],
+                        "working_dir": task.get("working_dir"),
+                    },
+                    headers={"Authorization": f"Bearer {assignee_key}"},
+                )
+                resp.raise_for_status()
+            await db.update_task(task_id, status="launched")
+            logger.info(
+                "Auto-delegated unblocked task #%d to %s (was blocked by #%d)",
+                task_id, assignee, completed_task_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to auto-delegate unblocked task #%d: %s", task_id, e
+            )
+            await db.update_task(
+                task_id, status="failed",
+                output=f"Auto-delegation failed after unblock: {e}",
+                completed_at=_now_utc(),
+            )
+
+
 @app.get("/api/v1/health")
 async def health():
     return {"status": "ok"}
@@ -287,6 +363,7 @@ async def create_task(
             host=req.host,
             working_dir=req.working_dir,
             parent_task_id=req.parent_task_id,
+            blocked_by_task_id=req.blocked_by_task_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -392,6 +469,10 @@ async def update_task(
     else:
         # Re-fetch to pick up parent_task_id changes
         updated = await db.get_task(task_id)
+
+    # When a task completes, unblock any tasks waiting on it and trigger delegation
+    if req.status == "completed":
+        await _unblock_and_delegate(task_id)
 
     # Trigger conductor tick when any task reaches a terminal state
     # Note: "killed" is intentionally excluded — killed tasks must not trigger Kamaji
