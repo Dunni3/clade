@@ -2607,3 +2607,200 @@ class TestUnblockOnCompletion:
 
         task = await mailbox_db.get_task(blocked_id)
         assert task["blocked_by_task_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# Cascade failure tests
+# ---------------------------------------------------------------------------
+
+
+class TestCascadeFailure:
+    """Tests for cascading failure to downstream blocked tasks."""
+
+    @pytest.mark.asyncio
+    async def test_cascade_failure_single_level(self):
+        """Failing a task cascades failure to pending tasks blocked by it."""
+        from hearth.app import _cascade_failure
+
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked",
+            blocked_by_task_id=blocker_id,
+        )
+
+        await _cascade_failure(blocker_id)
+
+        task = await mailbox_db.get_task(blocked_id)
+        assert task["status"] == "failed"
+        assert task["blocked_by_task_id"] is None
+        assert f"Upstream task #{blocker_id} failed" in task["output"]
+        assert task["completed_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_cascade_failure_recursive(self):
+        """Cascade propagates through multiple levels: A -> B -> C."""
+        from hearth.app import _cascade_failure
+
+        a = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Task A"
+        )
+        b = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Task B",
+            blocked_by_task_id=a,
+        )
+        c = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Task C",
+            blocked_by_task_id=b,
+        )
+
+        await _cascade_failure(a)
+
+        task_b = await mailbox_db.get_task(b)
+        assert task_b["status"] == "failed"
+        assert f"Upstream task #{a} failed" in task_b["output"]
+
+        task_c = await mailbox_db.get_task(c)
+        assert task_c["status"] == "failed"
+        assert f"Upstream task #{b} failed" in task_c["output"]
+
+    @pytest.mark.asyncio
+    async def test_cascade_failure_multiple_blocked(self):
+        """Multiple tasks blocked by the same task all get failed."""
+        from hearth.app import _cascade_failure
+
+        blocker = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        b1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked 1",
+            blocked_by_task_id=blocker,
+        )
+        b2 = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="Blocked 2",
+            blocked_by_task_id=blocker,
+        )
+
+        await _cascade_failure(blocker)
+
+        for tid in (b1, b2):
+            task = await mailbox_db.get_task(tid)
+            assert task["status"] == "failed"
+            assert task["blocked_by_task_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_cascade_failure_skips_non_pending(self):
+        """Only pending tasks are cascade-failed; in_progress tasks are untouched."""
+        from hearth.app import _cascade_failure
+
+        blocker = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked",
+            blocked_by_task_id=blocker,
+        )
+        # Manually move to in_progress (simulating it was already picked up)
+        await mailbox_db.update_task(blocked_id, status="in_progress")
+
+        await _cascade_failure(blocker)
+
+        task = await mailbox_db.get_task(blocked_id)
+        # Should still be in_progress, not failed
+        assert task["status"] == "in_progress"
+
+    @pytest.mark.asyncio
+    async def test_cascade_failure_no_blocked_tasks(self):
+        """Cascade on a task with no blocked dependents is a no-op."""
+        from hearth.app import _cascade_failure
+
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Standalone"
+        )
+        # Should not raise
+        await _cascade_failure(task_id)
+
+    @pytest.mark.asyncio
+    @patch("hearth.app._maybe_trigger_conductor_tick")
+    async def test_cascade_failure_via_api(self, mock_tick, client):
+        """Failing a task via the API cascades failure to blocked tasks."""
+        # Create blocker
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Blocker", "subject": "Blocker"},
+            headers=DOOT_HEADERS,
+        )
+        blocker_id = resp.json()["id"]
+
+        # Create blocked task
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Blocked",
+                "subject": "Blocked",
+                "blocked_by_task_id": blocker_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+        blocked_id = resp.json()["id"]
+
+        # Fail the blocker via API
+        resp = await client.patch(
+            f"/api/v1/tasks/{blocker_id}",
+            json={"status": "failed", "output": "Something went wrong"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+
+        # Verify downstream task was cascade-failed
+        resp = await client.get(
+            f"/api/v1/tasks/{blocked_id}", headers=DOOT_HEADERS
+        )
+        data = resp.json()
+        assert data["status"] == "failed"
+        assert f"Upstream task #{blocker_id} failed" in data["output"]
+
+    @pytest.mark.asyncio
+    @patch("hearth.app._maybe_trigger_conductor_tick")
+    async def test_cascade_failure_recursive_via_api(self, mock_tick, client):
+        """Recursive cascade works through the API: A -> B -> C all fail."""
+        # A
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "A", "subject": "A"},
+            headers=DOOT_HEADERS,
+        )
+        a_id = resp.json()["id"]
+
+        # B blocked by A
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "B", "subject": "B", "blocked_by_task_id": a_id},
+            headers=DOOT_HEADERS,
+        )
+        b_id = resp.json()["id"]
+
+        # C blocked by B
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "C", "subject": "C", "blocked_by_task_id": b_id},
+            headers=DOOT_HEADERS,
+        )
+        c_id = resp.json()["id"]
+
+        # Fail A
+        resp = await client.patch(
+            f"/api/v1/tasks/{a_id}",
+            json={"status": "failed"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+
+        # B and C should both be failed
+        for tid, upstream in [(b_id, a_id), (c_id, b_id)]:
+            resp = await client.get(f"/api/v1/tasks/{tid}", headers=DOOT_HEADERS)
+            data = resp.json()
+            assert data["status"] == "failed"
+            assert f"Upstream task #{upstream} failed" in data["output"]

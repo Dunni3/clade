@@ -119,6 +119,29 @@ def _maybe_trigger_conductor_tick(
         logger.warning("Failed to trigger conductor tick", exc_info=True)
 
 
+async def _cascade_failure(failed_task_id: int) -> None:
+    """When a task fails, cascade failure to any pending tasks blocked by it.
+
+    Recursively fails downstream tasks so that if A blocks B blocks C,
+    failing A will also fail B and C.
+    """
+    blocked_tasks = await db.get_tasks_blocked_by(failed_task_id)
+    if not blocked_tasks:
+        return
+
+    for task in blocked_tasks:
+        task_id = task["id"]
+        await db.clear_blocked_by(task_id)
+        await db.update_task(
+            task_id,
+            status="failed",
+            output=f"Upstream task #{failed_task_id} failed",
+            completed_at=_now_utc(),
+        )
+        # Recurse: cascade to anything blocked by this newly-failed task
+        await _cascade_failure(task_id)
+
+
 async def _unblock_and_delegate(completed_task_id: int) -> None:
     """When a task completes, find tasks blocked by it and delegate them via Ember."""
     blocked_tasks = await db.get_tasks_blocked_by(completed_task_id)
@@ -511,6 +534,10 @@ async def update_task(
     # When a task completes, unblock any tasks waiting on it and trigger delegation
     if req.status == "completed":
         await _unblock_and_delegate(task_id)
+
+    # When a task fails, cascade failure to any pending tasks blocked by it
+    if req.status == "failed":
+        await _cascade_failure(task_id)
 
     # Trigger conductor tick when any task reaches a terminal state
     # Note: "killed" is intentionally excluded — killed tasks must not trigger Kamaji
