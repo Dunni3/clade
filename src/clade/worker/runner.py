@@ -79,6 +79,12 @@ def build_runner_script(
         lines.append("        else")
         lines.append('            msg="Session exited with code $rc"')
         lines.append("        fi")
+        lines.append("        # Append log tail for context")
+        lines.append('        if [ -f "$LOGFILE" ]; then')
+        lines.append("            local logtail")
+        lines.append(r"""            logtail=$(tail -5 "$LOGFILE" | tr '\n' '|' | tr -d '"\\' | head -c 500)""")
+        lines.append('            msg="$msg — log: $logtail"')
+        lines.append("        fi")
         lines.append('        curl -skf -X PATCH "$HEARTH_URL/api/v1/tasks/$CLAUDE_TASK_ID" \\')
         lines.append('            -H "Authorization: Bearer $HEARTH_API_KEY" \\')
         lines.append('            -H "Content-Type: application/json" \\')
@@ -91,6 +97,7 @@ def build_runner_script(
     # Change to working directory
     if working_dir:
         lines.append(f"cd {working_dir} || exit 1")
+        lines.append(f'echo "$(date -Iseconds) cd to {working_dir} ok (pwd=$(pwd))" >> "$LOGFILE"')
 
         # Git worktree isolation: if inside a git repo, create an isolated worktree
         # so concurrent tasks don't step on each other.

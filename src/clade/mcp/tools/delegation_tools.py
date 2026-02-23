@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from mcp.server.fastmcp import FastMCP
 
 from ...communication.mailbox_client import MailboxClient
@@ -14,7 +16,8 @@ _NOT_CONFIGURED = "Delegation not configured. Ensure HEARTH_URL and HEARTH_API_K
 def create_delegation_tools(
     mcp: FastMCP,
     mailbox: MailboxClient | None,
-    brothers_registry: dict[str, dict],
+    brothers_registry: dict[str, dict] | None = None,
+    registry_loader: Callable[[], dict[str, dict]] | None = None,
     mailbox_name: str | None = None,
     hearth_url: str | None = None,
 ) -> dict:
@@ -23,8 +26,8 @@ def create_delegation_tools(
     Args:
         mcp: FastMCP server instance to register tools with.
         mailbox: MailboxClient instance, or None if not configured.
-        brothers_registry: Dict of brother names to config dicts with keys:
-            ember_url, ember_api_key, working_dir (optional).
+        brothers_registry: Static dict of brother configs (deprecated, use registry_loader).
+        registry_loader: Callable that returns fresh registry on each call.
         mailbox_name: The caller's own name (used as sender_name when delegating).
         hearth_url: Hearth URL to pass to spawned worker sessions. If not set,
             the Ember's own HEARTH_URL env var is used (which may have SSL issues).
@@ -33,8 +36,14 @@ def create_delegation_tools(
         Dict mapping tool names to their callable functions (for testing).
     """
 
+    def _get_registry() -> dict[str, dict]:
+        if registry_loader is not None:
+            return registry_loader()
+        return brothers_registry or {}
+
     def _get_ember_client(brother: str) -> EmberClient | None:
-        config = brothers_registry.get(brother)
+        registry = _get_registry()
+        config = registry.get(brother)
         if not config:
             return None
         url = config.get("ember_url")
@@ -70,11 +79,12 @@ def create_delegation_tools(
         if mailbox is None:
             return _NOT_CONFIGURED
 
-        if brother not in brothers_registry:
-            available = ", ".join(brothers_registry.keys()) or "(none)"
+        registry = _get_registry()
+        if brother not in registry:
+            available = ", ".join(registry.keys()) or "(none)"
             return f"Unknown brother '{brother}'. Available brothers: {available}"
 
-        config = brothers_registry[brother]
+        config = registry[brother]
         ember = _get_ember_client(brother)
         if ember is None:
             return f"Brother '{brother}' has no Ember configured."
