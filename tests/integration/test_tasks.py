@@ -1957,3 +1957,886 @@ class TestUpdateTaskParentTool:
         mock_client.update_task.assert_called_once_with(
             2, status=None, output=None, parent_task_id=1
         )
+
+
+# ---------------------------------------------------------------------------
+# on_complete field
+# ---------------------------------------------------------------------------
+
+
+class TestOnCompleteDB:
+    @pytest.mark.asyncio
+    async def test_insert_task_with_on_complete(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot",
+            assignee="oppy",
+            prompt="Do work",
+            subject="Test task",
+            on_complete="Deploy to production after completion",
+        )
+        task = await mailbox_db.get_task(task_id)
+        assert task["on_complete"] == "Deploy to production after completion"
+
+    @pytest.mark.asyncio
+    async def test_insert_task_without_on_complete(self):
+        task_id = await mailbox_db.insert_task(
+            creator="doot",
+            assignee="oppy",
+            prompt="Do work",
+        )
+        task = await mailbox_db.get_task(task_id)
+        assert task["on_complete"] is None
+
+    @pytest.mark.asyncio
+    async def test_on_complete_in_tree(self):
+        root_id = await mailbox_db.insert_task(
+            creator="doot",
+            assignee="oppy",
+            prompt="Root task",
+            on_complete="Run tests when done",
+        )
+        tree = await mailbox_db.get_tree(root_id)
+        assert tree["on_complete"] == "Run tests when done"
+
+
+class TestOnCompleteAPI:
+    @pytest.mark.asyncio
+    async def test_create_task_with_on_complete(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Do the thing",
+                "subject": "Test",
+                "on_complete": "Notify Ian when done",
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        task_id = resp.json()["id"]
+
+        detail = await client.get(f"/api/v1/tasks/{task_id}", headers=DOOT_HEADERS)
+        assert detail.status_code == 200
+        assert detail.json()["on_complete"] == "Notify Ian when done"
+
+    @pytest.mark.asyncio
+    async def test_create_task_without_on_complete(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do work"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+        detail = await client.get(f"/api/v1/tasks/{task_id}", headers=DOOT_HEADERS)
+        assert detail.json()["on_complete"] is None
+
+    @pytest.mark.asyncio
+    async def test_on_complete_in_tree_api(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Root",
+                "on_complete": "Follow up instructions",
+            },
+            headers=DOOT_HEADERS,
+        )
+        root_id = resp.json()["id"]
+        tree_resp = await client.get(f"/api/v1/trees/{root_id}", headers=DOOT_HEADERS)
+        assert tree_resp.status_code == 200
+        assert tree_resp.json()["on_complete"] == "Follow up instructions"
+
+
+# ---------------------------------------------------------------------------
+# Auto-sync card status from linked tasks
+# ---------------------------------------------------------------------------
+
+
+class TestAutoSyncCardStatus:
+    @pytest.mark.asyncio
+    async def test_task_in_progress_syncs_linked_card(self, client):
+        """When a task moves to in_progress, linked cards in backlog/todo move to in_progress."""
+        # Create a task
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff", "subject": "Test"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        # Create a card linked to the task
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Feature card",
+                "col": "todo",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        card_id = resp.json()["id"]
+        assert resp.json()["col"] == "todo"
+
+        # Move task to in_progress
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+        assert resp.status_code == 200
+
+        # Card should now be in_progress with assignee set
+        resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "in_progress"
+        assert resp.json()["assignee"] == "oppy"
+
+    @pytest.mark.asyncio
+    async def test_task_in_progress_syncs_backlog_card(self, client):
+        """Cards in backlog also sync forward to in_progress."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "jerry", "prompt": "GPU job"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Backlog card",
+                "col": "backlog",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        card_id = resp.json()["id"]
+
+        # Move task to in_progress
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=JERRY_HEADERS,
+        )
+
+        resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "in_progress"
+        assert resp.json()["assignee"] == "jerry"
+
+    @pytest.mark.asyncio
+    async def test_no_sync_when_card_already_done(self, client):
+        """Cards in done/archived should NOT be moved back to in_progress."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Done card",
+                "col": "done",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        card_id = resp.json()["id"]
+
+        # Move task to in_progress
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Card should still be done
+        resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_no_sync_when_card_archived(self, client):
+        """Cards in archived column should NOT be moved when a linked task moves to in_progress."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Archived card",
+                "col": "archived",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        card_id = resp.json()["id"]
+
+        # Move task to in_progress
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Card should still be archived
+        resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "archived"
+
+    @pytest.mark.asyncio
+    async def test_no_sync_when_card_already_in_progress(self, client):
+        """Cards already in_progress should not be touched (preserves existing assignee)."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Active card",
+                "col": "in_progress",
+                "assignee": "jerry",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        card_id = resp.json()["id"]
+
+        # Move task to in_progress
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Card should still have jerry as assignee
+        resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "in_progress"
+        assert resp.json()["assignee"] == "jerry"
+
+    @pytest.mark.asyncio
+    async def test_no_sync_on_other_status_changes(self, client):
+        """Moving a task to completed should NOT trigger card sync."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Todo card",
+                "col": "todo",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        card_id = resp.json()["id"]
+
+        # Move task directly to completed (skip in_progress)
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "completed"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Card should still be in todo
+        resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "todo"
+
+    @pytest.mark.asyncio
+    async def test_no_linked_cards_no_error(self, client):
+        """Task with no linked cards should update fine without errors."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "in_progress"
+
+    @pytest.mark.asyncio
+    async def test_multiple_linked_cards(self, client):
+        """Multiple cards linked to the same task all get synced."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        card_ids = []
+        for title, col in [("Card A", "backlog"), ("Card B", "todo"), ("Card C", "done")]:
+            resp = await client.post(
+                "/api/v1/kanban/cards",
+                json={
+                    "title": title,
+                    "col": col,
+                    "links": [{"object_type": "task", "object_id": str(task_id)}],
+                },
+                headers=DOOT_HEADERS,
+            )
+            card_ids.append(resp.json()["id"])
+
+        # Move task to in_progress
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Card A (was backlog) -> in_progress
+        resp = await client.get(f"/api/v1/kanban/cards/{card_ids[0]}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "in_progress"
+
+        # Card B (was todo) -> in_progress
+        resp = await client.get(f"/api/v1/kanban/cards/{card_ids[1]}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "in_progress"
+
+        # Card C (was done) -> still done
+        resp = await client.get(f"/api/v1/kanban/cards/{card_ids[2]}", headers=DOOT_HEADERS)
+        assert resp.json()["col"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# Deferred tasks / blocked_by_task_id
+# ---------------------------------------------------------------------------
+
+
+class TestDatabaseBlockedBy:
+    @pytest.mark.asyncio
+    async def test_insert_task_with_blocked_by(self):
+        """A task can be created with blocked_by_task_id."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocking task"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Deferred task",
+            blocked_by_task_id=blocker_id,
+        )
+        task = await mailbox_db.get_task(blocked_id)
+        assert task["blocked_by_task_id"] == blocker_id
+        assert task["status"] == "pending"
+        # Auto-defaults parent_task_id to blocker when not explicitly set
+        assert task["parent_task_id"] == blocker_id
+
+    @pytest.mark.asyncio
+    async def test_blocked_by_auto_parents_to_blocker(self):
+        """blocked_by_task_id auto-sets parent_task_id when not explicitly provided."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Step 1"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Step 2",
+            blocked_by_task_id=blocker_id,
+        )
+        task = await mailbox_db.get_task(blocked_id)
+        assert task["parent_task_id"] == blocker_id
+        assert task["root_task_id"] == blocker_id
+
+    @pytest.mark.asyncio
+    async def test_blocked_by_explicit_parent_overrides(self):
+        """Explicit parent_task_id is not overridden by blocked_by_task_id."""
+        grandparent_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root task"
+        )
+        sibling_a_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Sibling A",
+            parent_task_id=grandparent_id,
+        )
+        sibling_b_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Sibling B",
+            parent_task_id=grandparent_id,
+            blocked_by_task_id=sibling_a_id,
+        )
+        task = await mailbox_db.get_task(sibling_b_id)
+        assert task["parent_task_id"] == grandparent_id  # explicit parent wins
+        assert task["blocked_by_task_id"] == sibling_a_id
+        assert task["root_task_id"] == grandparent_id
+
+    @pytest.mark.asyncio
+    async def test_blocked_by_nonexistent_task_raises(self):
+        """blocked_by_task_id must reference an existing task."""
+        with pytest.raises(ValueError, match="does not exist"):
+            await mailbox_db.insert_task(
+                creator="doot", assignee="oppy", prompt="Bad",
+                blocked_by_task_id=9999,
+            )
+
+    @pytest.mark.asyncio
+    async def test_blocked_by_completed_task_clears(self):
+        """If the blocking task is already completed, blocked_by is cleared."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Already done"
+        )
+        await mailbox_db.update_task(blocker_id, status="completed")
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Should not be blocked",
+            blocked_by_task_id=blocker_id,
+        )
+        task = await mailbox_db.get_task(blocked_id)
+        assert task["blocked_by_task_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_tasks_blocked_by(self):
+        """get_tasks_blocked_by returns pending tasks blocked by a given task."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocking task"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Deferred task",
+            blocked_by_task_id=blocker_id,
+        )
+        # Also add a non-blocked task — should not appear
+        await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Normal task"
+        )
+
+        blocked = await mailbox_db.get_tasks_blocked_by(blocker_id)
+        assert len(blocked) == 1
+        assert blocked[0]["id"] == blocked_id
+
+    @pytest.mark.asyncio
+    async def test_clear_blocked_by(self):
+        """clear_blocked_by removes the blocked_by reference."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked",
+            blocked_by_task_id=blocker_id,
+        )
+        await mailbox_db.clear_blocked_by(blocked_id)
+        task = await mailbox_db.get_task(blocked_id)
+        assert task["blocked_by_task_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_task_includes_blocked_tasks(self):
+        """get_task detail includes blocked_tasks list."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked",
+            blocked_by_task_id=blocker_id,
+        )
+        task = await mailbox_db.get_task(blocker_id)
+        assert len(task["blocked_tasks"]) == 1
+        assert task["blocked_tasks"][0]["id"] == blocked_id
+
+    @pytest.mark.asyncio
+    async def test_get_tasks_includes_blocked_by_field(self):
+        """get_tasks list includes blocked_by_task_id."""
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked",
+            blocked_by_task_id=blocker_id,
+        )
+        tasks = await mailbox_db.get_tasks()
+        blocked_tasks = [t for t in tasks if t.get("blocked_by_task_id")]
+        assert len(blocked_tasks) == 1
+        assert blocked_tasks[0]["blocked_by_task_id"] == blocker_id
+
+
+class TestAPIBlockedBy:
+    @pytest.mark.asyncio
+    async def test_create_task_with_blocked_by(self, client):
+        """POST /tasks with blocked_by_task_id creates a deferred task."""
+        # Create blocker
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Blocker", "subject": "Blocker"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        blocker_id = resp.json()["id"]
+
+        # Create blocked task
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Deferred work",
+                "subject": "Deferred",
+                "blocked_by_task_id": blocker_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        blocked_id = resp.json()["id"]
+
+        # Verify via GET
+        resp = await client.get(f"/api/v1/tasks/{blocked_id}", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["blocked_by_task_id"] == blocker_id
+        assert data["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_create_task_blocked_by_nonexistent_returns_422(self, client):
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Bad",
+                "blocked_by_task_id": 9999,
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_task_detail_shows_blocked_tasks(self, client):
+        """GET /tasks/{id} includes blocked_tasks when tasks are waiting."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Blocker"},
+            headers=DOOT_HEADERS,
+        )
+        blocker_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Blocked",
+                "blocked_by_task_id": blocker_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+        blocked_id = resp.json()["id"]
+
+        resp = await client.get(f"/api/v1/tasks/{blocker_id}", headers=DOOT_HEADERS)
+        data = resp.json()
+        assert len(data["blocked_tasks"]) == 1
+        assert data["blocked_tasks"][0]["id"] == blocked_id
+
+    @pytest.mark.asyncio
+    async def test_task_list_shows_blocked_by(self, client):
+        """GET /tasks includes blocked_by_task_id in summary."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Blocker"},
+            headers=DOOT_HEADERS,
+        )
+        blocker_id = resp.json()["id"]
+
+        await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Blocked",
+                "blocked_by_task_id": blocker_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get("/api/v1/tasks", headers=DOOT_HEADERS)
+        tasks = resp.json()
+        blocked = [t for t in tasks if t.get("blocked_by_task_id")]
+        assert len(blocked) == 1
+        assert blocked[0]["blocked_by_task_id"] == blocker_id
+
+    @pytest.mark.asyncio
+    async def test_tree_summary_includes_blocked_count(self, client):
+        """GET /trees includes blocked count for deferred tasks."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Root", "subject": "Root"},
+            headers=DOOT_HEADERS,
+        )
+        root_id = resp.json()["id"]
+
+        # Create a child that's blocked by the root
+        await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Blocked child",
+                "parent_task_id": root_id,
+                "blocked_by_task_id": root_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+
+        resp = await client.get("/api/v1/trees", headers=DOOT_HEADERS)
+        trees = resp.json()
+        tree = next(t for t in trees if t["root_task_id"] == root_id)
+        assert tree["blocked"] == 1
+        # The root itself is pending but not blocked
+        assert tree["pending"] == 1
+
+
+class TestUnblockOnCompletion:
+    @pytest.mark.asyncio
+    @patch("hearth.app._maybe_trigger_conductor_tick")
+    async def test_completing_blocker_clears_blocked_by(self, mock_tick, client):
+        """When a blocking task completes, blocked tasks get unblocked and delegated."""
+        # Create blocker
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Blocker", "subject": "Blocker"},
+            headers=DOOT_HEADERS,
+        )
+        blocker_id = resp.json()["id"]
+
+        # Create blocked task
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Deferred work",
+                "subject": "Deferred",
+                "blocked_by_task_id": blocker_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+        blocked_id = resp.json()["id"]
+
+        # Complete the blocker (mock Ember so delegation doesn't fail on missing URL)
+        with patch("hearth.app._unblock_and_delegate") as mock_unblock:
+            mock_unblock.return_value = None  # Skip actual Ember delegation
+            resp = await client.patch(
+                f"/api/v1/tasks/{blocker_id}",
+                json={"status": "completed"},
+                headers=DOOT_HEADERS,
+            )
+            assert resp.status_code == 200
+            mock_unblock.assert_called_once_with(blocker_id)
+
+    @pytest.mark.asyncio
+    @patch("hearth.app._maybe_trigger_conductor_tick")
+    async def test_unblock_and_delegate_clears_blocked_by(self, mock_tick, client):
+        """_unblock_and_delegate clears blocked_by_task_id."""
+        from hearth.app import _unblock_and_delegate
+
+        # Create blocker
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        # Create blocked task
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked",
+            blocked_by_task_id=blocker_id,
+        )
+
+        # Call _unblock_and_delegate — Ember not configured, so delegation will fail
+        # but blocked_by should still be cleared
+        await _unblock_and_delegate(blocker_id)
+
+        task = await mailbox_db.get_task(blocked_id)
+        assert task["blocked_by_task_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# Cascade failure tests
+# ---------------------------------------------------------------------------
+
+
+class TestCascadeFailure:
+    """Tests for cascading failure to downstream blocked tasks."""
+
+    @pytest.mark.asyncio
+    async def test_cascade_failure_single_level(self):
+        """Failing a task cascades failure to pending tasks blocked by it."""
+        from hearth.app import _cascade_failure
+
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked",
+            blocked_by_task_id=blocker_id,
+        )
+
+        await _cascade_failure(blocker_id)
+
+        task = await mailbox_db.get_task(blocked_id)
+        assert task["status"] == "failed"
+        assert task["blocked_by_task_id"] is None
+        assert f"Upstream task #{blocker_id} failed" in task["output"]
+        assert task["completed_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_cascade_failure_recursive(self):
+        """Cascade propagates through multiple levels: A -> B -> C."""
+        from hearth.app import _cascade_failure
+
+        a = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Task A"
+        )
+        b = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Task B",
+            blocked_by_task_id=a,
+        )
+        c = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Task C",
+            blocked_by_task_id=b,
+        )
+
+        await _cascade_failure(a)
+
+        task_b = await mailbox_db.get_task(b)
+        assert task_b["status"] == "failed"
+        assert f"Upstream task #{a} failed" in task_b["output"]
+
+        task_c = await mailbox_db.get_task(c)
+        assert task_c["status"] == "failed"
+        assert f"Upstream task #{b} failed" in task_c["output"]
+
+    @pytest.mark.asyncio
+    async def test_cascade_failure_multiple_blocked(self):
+        """Multiple tasks blocked by the same task all get failed."""
+        from hearth.app import _cascade_failure
+
+        blocker = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        b1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked 1",
+            blocked_by_task_id=blocker,
+        )
+        b2 = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="Blocked 2",
+            blocked_by_task_id=blocker,
+        )
+
+        await _cascade_failure(blocker)
+
+        for tid in (b1, b2):
+            task = await mailbox_db.get_task(tid)
+            assert task["status"] == "failed"
+            assert task["blocked_by_task_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_cascade_failure_skips_non_pending(self):
+        """Only pending tasks are cascade-failed; in_progress tasks are untouched."""
+        from hearth.app import _cascade_failure
+
+        blocker = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker"
+        )
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked",
+            blocked_by_task_id=blocker,
+        )
+        # Manually move to in_progress (simulating it was already picked up)
+        await mailbox_db.update_task(blocked_id, status="in_progress")
+
+        await _cascade_failure(blocker)
+
+        task = await mailbox_db.get_task(blocked_id)
+        # Should still be in_progress, not failed
+        assert task["status"] == "in_progress"
+
+    @pytest.mark.asyncio
+    async def test_cascade_failure_no_blocked_tasks(self):
+        """Cascade on a task with no blocked dependents is a no-op."""
+        from hearth.app import _cascade_failure
+
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Standalone"
+        )
+        # Should not raise
+        await _cascade_failure(task_id)
+
+    @pytest.mark.asyncio
+    @patch("hearth.app._maybe_trigger_conductor_tick")
+    async def test_cascade_failure_via_api(self, mock_tick, client):
+        """Failing a task via the API cascades failure to blocked tasks."""
+        # Create blocker
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Blocker", "subject": "Blocker"},
+            headers=DOOT_HEADERS,
+        )
+        blocker_id = resp.json()["id"]
+
+        # Create blocked task
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Blocked",
+                "subject": "Blocked",
+                "blocked_by_task_id": blocker_id,
+            },
+            headers=DOOT_HEADERS,
+        )
+        blocked_id = resp.json()["id"]
+
+        # Fail the blocker via API
+        resp = await client.patch(
+            f"/api/v1/tasks/{blocker_id}",
+            json={"status": "failed", "output": "Something went wrong"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+
+        # Verify downstream task was cascade-failed
+        resp = await client.get(
+            f"/api/v1/tasks/{blocked_id}", headers=DOOT_HEADERS
+        )
+        data = resp.json()
+        assert data["status"] == "failed"
+        assert f"Upstream task #{blocker_id} failed" in data["output"]
+
+    @pytest.mark.asyncio
+    @patch("hearth.app._maybe_trigger_conductor_tick")
+    async def test_cascade_failure_recursive_via_api(self, mock_tick, client):
+        """Recursive cascade works through the API: A -> B -> C all fail."""
+        # A
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "A", "subject": "A"},
+            headers=DOOT_HEADERS,
+        )
+        a_id = resp.json()["id"]
+
+        # B blocked by A
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "B", "subject": "B", "blocked_by_task_id": a_id},
+            headers=DOOT_HEADERS,
+        )
+        b_id = resp.json()["id"]
+
+        # C blocked by B
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "C", "subject": "C", "blocked_by_task_id": b_id},
+            headers=DOOT_HEADERS,
+        )
+        c_id = resp.json()["id"]
+
+        # Fail A
+        resp = await client.patch(
+            f"/api/v1/tasks/{a_id}",
+            json={"status": "failed"},
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+
+        # B and C should both be failed
+        for tid, upstream in [(b_id, a_id), (c_id, b_id)]:
+            resp = await client.get(f"/api/v1/tasks/{tid}", headers=DOOT_HEADERS)
+            data = resp.json()
+            assert data["status"] == "failed"
+            assert f"Upstream task #{upstream} failed" in data["output"]

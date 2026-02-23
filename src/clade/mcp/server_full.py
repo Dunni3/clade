@@ -4,6 +4,7 @@ import os
 import yaml
 from mcp.server.fastmcp import FastMCP
 
+from ..cli.clade_config import load_brothers_registry
 from ..communication.mailbox_client import MailboxClient
 from ..core.config import load_config
 from ..worker.client import EmberClient
@@ -14,14 +15,29 @@ from .tools.mailbox_tools import create_mailbox_tools
 from .tools.brother_tools import create_brother_tools
 from .tools.task_tools import create_task_tools
 
-# Load configuration
-config = load_config()
+
+# Lazy loaders — re-read config on every tool call so clade.yaml edits
+# take effect without restarting Claude Code.
+def _load_config():
+    return load_config()
+
+
+def _load_brothers_registry():
+    registry = load_brothers_registry()
+    if not registry:
+        config_path = os.environ.get("BROTHERS_CONFIG")
+        if config_path and os.path.exists(config_path):
+            with open(config_path) as f:
+                data = yaml.safe_load(f) or {}
+            registry = data.get("brothers", {})
+    return registry
+
 
 # Initialize MCP server
 mcp = FastMCP("clade-personal")
 
 # Register brother listing tools
-create_brother_tools(mcp, config)
+create_brother_tools(mcp, config_loader=_load_config)
 
 # Setup Hearth client if configured (HEARTH_* with MAILBOX_* fallback)
 _hearth_url = os.environ.get("HEARTH_URL") or os.environ.get("MAILBOX_URL")
@@ -40,7 +56,7 @@ create_mailbox_tools(mcp, _mailbox)
 create_kanban_tools(mcp, _mailbox)
 
 # Register task delegation tools (pass URL/key for hook-based task logging)
-create_task_tools(mcp, _mailbox, config, mailbox_url=_hearth_url, mailbox_api_key=_hearth_api_key)
+create_task_tools(mcp, _mailbox, config_loader=_load_config, mailbox_url=_hearth_url, mailbox_api_key=_hearth_api_key)
 
 # Setup Ember client if configured
 # Doot uses EMBER_API_KEY (set to the brother's Hearth key) to authenticate to remote Embers
@@ -48,16 +64,8 @@ _ember_url = os.environ.get("EMBER_URL")
 _ember_api_key = os.environ.get("EMBER_API_KEY")
 _ember = EmberClient(_ember_url, _ember_api_key, verify_ssl=False) if _ember_url and _ember_api_key else None
 
-# Load brothers registry for Ember delegation
-_brothers_config_path = os.environ.get("BROTHERS_CONFIG")
-_brothers_registry: dict[str, dict] = {}
-if _brothers_config_path and os.path.exists(_brothers_config_path):
-    with open(_brothers_config_path) as f:
-        _brothers_data = yaml.safe_load(f) or {}
-    _brothers_registry = _brothers_data.get("brothers", {})
-
-create_ember_tools(mcp, _ember, brothers_registry=_brothers_registry)
-create_delegation_tools(mcp, _mailbox, _brothers_registry, mailbox_name=_hearth_name)
+create_ember_tools(mcp, _ember, registry_loader=_load_brothers_registry)
+create_delegation_tools(mcp, _mailbox, registry_loader=_load_brothers_registry, mailbox_name=_hearth_name)
 
 
 def main():

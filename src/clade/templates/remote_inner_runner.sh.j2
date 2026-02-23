@@ -1,0 +1,20 @@
+#!/bin/bash
+{% if env_lines %}
+{{ env_lines }}
+{% endif %}
+{% if has_trap %}
+
+{% include '_failure_trap.sh.j2' %}
+{% endif %}
+{{ cd_cmd }}
+{% if claude_started_flag %}
+_CLAUDE_STARTED=1
+{% endif %}
+claude -p "$(cat $PROMPT_FILE)" --dangerously-skip-permissions{{ ' --max-turns ' ~ max_turns if max_turns is not none else '' }}
+{% if capture_exit %}
+EXIT_CODE=$?
+{% endif %}
+rm -f "$PROMPT_FILE" "$RUNNER"
+{% if capture_exit %}
+exit $EXIT_CODE
+{% endif %}

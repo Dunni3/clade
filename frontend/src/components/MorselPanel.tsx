@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { getMorsels } from '../api/mailbox';
+import Linkify from './Linkify';
 import type { MorselSummary, MorselLink } from '../types/mailbox';
 
 const senderColors: Record<string, string> = {
@@ -41,11 +42,10 @@ function renderLink(link: MorselLink, index: number) {
 }
 
 function MorselCard({ morsel }: { morsel: MorselSummary }) {
-  const navigate = useNavigate();
   return (
-    <div
-      className="rounded-lg border border-gray-800 p-3 cursor-pointer hover:bg-gray-800/50 transition-colors"
-      onClick={() => navigate(`/morsels/${morsel.id}`)}
+    <Link
+      to={`/morsels/${morsel.id}`}
+      className="block rounded-lg border border-gray-800 p-3 hover:bg-gray-800/50 transition-colors"
     >
       <div className="flex items-center gap-2 mb-1.5">
         <span className="text-xs font-mono text-gray-500">#{morsel.id}</span>
@@ -59,13 +59,13 @@ function MorselCard({ morsel }: { morsel: MorselSummary }) {
         ))}
         <span className="text-xs text-gray-600 ml-auto">{formatRelativeDate(morsel.created_at)}</span>
       </div>
-      <p className="text-sm text-gray-300 whitespace-pre-wrap">{morsel.body}</p>
+      <p className="text-sm text-gray-300 whitespace-pre-wrap"><Linkify>{morsel.body}</Linkify></p>
       {morsel.links.length > 0 && (
         <div className="flex items-center gap-2 mt-2">
           {morsel.links.map((link, i) => renderLink(link, i))}
         </div>
       )}
-    </div>
+    </Link>
   );
 }
 

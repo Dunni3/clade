@@ -9,4 +9,4 @@ ExecStart=/home/ubuntu/.config/clade/conductor-tick.sh
 EnvironmentFile=/home/ubuntu/.config/clade/conductor.env
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=300
+TimeoutStartSec=600

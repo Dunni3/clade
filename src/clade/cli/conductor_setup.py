@@ -13,11 +13,13 @@ from pathlib import Path
 import click
 import yaml
 
-from .clade_config import CladeConfig
+from .clade_config import CladeConfig, build_brothers_registry
 from .ember_setup import detect_clade_entry_point, detect_remote_user
 from .identity import generate_conductor_identity, write_identity_remote
-from .keys import add_key, keys_path, load_keys
+from .keys import add_key, keys_path, load_keys, save_keys
 from .ssh_utils import SSHResult, deploy_clade_remote, run_remote, test_ssh
+
+REMOTE_KEYS_FILE = "~/.config/clade/keys.json"
 
 SERVICE_NAME = "conductor-tick"
 
@@ -61,15 +63,14 @@ REMOTE_MCP_CONFIG = "~/.config/clade/conductor-mcp.json"
 
 def build_workers_config(
     brothers: dict,
-    keys: dict[str, str],
 ) -> str:
     """Build the conductor-workers.yaml content from clade config.
 
     Only includes brothers that have ember_host set.
+    API keys are NOT included — they are loaded at runtime from keys.json.
 
     Args:
         brothers: Dict of brother names to BrotherEntry objects.
-        keys: Dict of brother names to API keys.
 
     Returns:
         YAML string for conductor-workers.yaml.
@@ -80,12 +81,9 @@ def build_workers_config(
         if not bro.ember_host:
             continue
 
-        api_key = keys.get(name, "")
         port = bro.ember_port or 8100
         workers[name] = {
             "ember_url": f"http://{bro.ember_host}:{port}",
-            "ember_api_key": api_key,
-            "hearth_api_key": api_key,
         }
         if bro.working_dir:
             workers[name]["working_dir"] = bro.working_dir
@@ -100,7 +98,8 @@ def build_brothers_config(
 ) -> str:
     """Build brothers-ember.yaml for Ember delegation from personal/worker servers.
 
-    Only includes brothers that have ember_host set.
+    Only includes brothers that have ember_host set. Used when deploying
+    config to remote workers that don't have clade.yaml locally.
 
     Args:
         brothers: Dict of brother names to BrotherEntry objects.
@@ -109,24 +108,9 @@ def build_brothers_config(
     Returns:
         YAML string for brothers-ember.yaml.
     """
-    result: dict[str, dict] = {}
-
-    for name, bro in brothers.items():
-        if not bro.ember_host:
-            continue
-
-        api_key = keys.get(name, "")
-        port = bro.ember_port or 8100
-        entry: dict[str, str] = {
-            "ember_url": f"http://{bro.ember_host}:{port}",
-            "ember_api_key": api_key,
-            "hearth_api_key": api_key,
-        }
-        if bro.working_dir:
-            entry["working_dir"] = bro.working_dir
-        result[name] = entry
-
-    data = {"brothers": result}
+    config = CladeConfig(brothers=brothers)
+    registry = build_brothers_registry(config, keys)
+    data = {"brothers": registry}
     return yaml.dump(data, default_flow_style=False, sort_keys=False)
 
 
@@ -158,6 +142,7 @@ def build_conductor_mcp_config(
     kamaji_key: str,
     server_url: str,
     workers_config_path: str = REMOTE_WORKERS_CONFIG,
+    keys_file_path: str = REMOTE_KEYS_FILE,
     conductor_cmd: str = "clade-conductor",
 ) -> str:
     """Build the conductor-mcp.json for claude --mcp-config.
@@ -166,6 +151,7 @@ def build_conductor_mcp_config(
         kamaji_key: Kamaji's Hearth API key.
         server_url: Hearth server URL.
         workers_config_path: Path to workers config on remote.
+        keys_file_path: Path to keys.json on remote.
         conductor_cmd: Absolute path to the clade-conductor entry point.
 
     Returns:
@@ -181,11 +167,42 @@ def build_conductor_mcp_config(
                     "HEARTH_API_KEY": kamaji_key,
                     "HEARTH_NAME": "kamaji",
                     "CONDUCTOR_WORKERS_CONFIG": workers_config_path,
+                    "KEYS_FILE": keys_file_path,
                 },
             }
         }
     }
     return json.dumps(config, indent=2) + "\n"
+
+
+def _deploy_keys_file(
+    ssh_host: str,
+    keys: dict[str, str],
+    ssh_key: str | None = None,
+) -> SSHResult:
+    """Copy keys.json to the remote host (chmod 600).
+
+    Args:
+        ssh_host: SSH host string.
+        keys: Dict of names to API keys.
+        ssh_key: Optional SSH private key path.
+
+    Returns:
+        SSHResult from the operation.
+    """
+    keys_json = json.dumps(keys, indent=2)
+    keys_b64 = base64.b64encode(keys_json.encode()).decode()
+
+    script = f"""\
+#!/bin/bash
+set -e
+CONFIG_DIR="$HOME/.config/clade"
+mkdir -p "$CONFIG_DIR"
+echo "{keys_b64}" | base64 -d > "$CONFIG_DIR/keys.json"
+chmod 600 "$CONFIG_DIR/keys.json"
+echo "KEYS_FILE_OK"
+"""
+    return run_remote(ssh_host, script, ssh_key=ssh_key, timeout=15)
 
 
 def _deploy_config_files(
@@ -353,7 +370,7 @@ def deploy_conductor(
         click.echo(f"Kamaji API key generated and saved to {kp}")
 
     # Step 5: Register key with Hearth
-    _register_kamaji_key(server_url, config.personal_name, kamaji_key, kp)
+    _register_kamaji_key(server_url, config.personal_name, kamaji_key, kp, config.verify_ssl)
 
     # Step 6: Detect clade-conductor entry point on remote
     click.echo("Detecting clade-conductor entry point...")
@@ -364,18 +381,30 @@ def deploy_conductor(
         conductor_cmd = "clade-conductor"
         click.echo(click.style(f"  Could not detect — falling back to bare '{conductor_cmd}'", fg="yellow"))
 
+    # Step 6b: Deploy keys.json to remote
+    click.echo("Deploying keys.json to remote...")
+    keys_result = _deploy_keys_file(ssh_host, keys, ssh_key=ssh_key)
+    if keys_result.success and "KEYS_FILE_OK" in keys_result.stdout:
+        click.echo(click.style("  keys.json deployed", fg="green"))
+    else:
+        click.echo(click.style(f"  Failed to deploy keys.json: {keys_result.message}", fg="red"))
+        return False
+
     # Step 7: Build config files
     click.echo("Building config files...")
-    workers_yaml = build_workers_config(config.brothers, keys)
+    workers_yaml = build_workers_config(config.brothers)
     env_content = build_conductor_env(kamaji_key, server_url)
 
     # Expand ~ for the MCP config (it runs via claude, which expands ~)
-    mcp_workers_path = f"/home/{remote_user}/.config/clade/conductor-workers.yaml"
+    home = f"/home/{remote_user}"
+    mcp_workers_path = f"{home}/.config/clade/conductor-workers.yaml"
+    mcp_keys_path = f"{home}/.config/clade/keys.json"
     mcp_json = build_conductor_mcp_config(
-        kamaji_key, server_url, mcp_workers_path, conductor_cmd=conductor_cmd
+        kamaji_key, server_url, mcp_workers_path,
+        keys_file_path=mcp_keys_path, conductor_cmd=conductor_cmd
     )
 
-    # Step 7: Deploy config files
+    # Step 8: Deploy config files
     click.echo("Writing config files to remote...")
     result = _deploy_config_files(ssh_host, workers_yaml, env_content, mcp_json, ssh_key=ssh_key)
     if result.success and "CONFIG_FILES_OK" in result.stdout:
@@ -445,6 +474,7 @@ def _register_kamaji_key(
     personal_name: str,
     kamaji_key: str,
     kp: Path,
+    verify_ssl: bool = True,
 ) -> None:
     """Register Kamaji's API key with the Hearth."""
     from ..communication.mailbox_client import MailboxClient
@@ -460,7 +490,6 @@ def _register_kamaji_key(
         )
         return
 
-    verify_ssl = server_url.startswith("https")
     client = MailboxClient(server_url, personal_key, verify_ssl=verify_ssl)
     try:
         ok = client.register_key_sync("kamaji", kamaji_key)

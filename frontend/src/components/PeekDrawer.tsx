@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getMorsel, getTask, getTree, getCard, getMessage } from '../api/mailbox';
+import Linkify from './Linkify';
 import type { MorselSummary, TaskDetail, TreeNode, CardSummary, FeedMessage } from '../types/mailbox';
 
 interface PeekDrawerProps {
@@ -83,7 +84,7 @@ function MorselPeek({ id }: { id: number }) {
           ))}
         </div>
       )}
-      <p className="text-sm text-gray-300 whitespace-pre-wrap">{morsel.body}</p>
+      <p className="text-sm text-gray-300 whitespace-pre-wrap"><Linkify>{morsel.body}</Linkify></p>
       {morsel.links.length > 0 && (
         <div className="border-t border-gray-800 pt-2">
           <div className="text-xs text-gray-500 mb-1">Linked objects</div>
@@ -131,7 +132,7 @@ function TaskPeek({ id }: { id: number }) {
       {task.output && (
         <div>
           <div className="text-xs text-gray-500 mb-1">Output</div>
-          <pre className="text-xs text-gray-400 whitespace-pre-wrap bg-gray-800 rounded p-2 max-h-48 overflow-y-auto">{task.output}</pre>
+          <pre className="text-xs text-gray-400 whitespace-pre-wrap bg-gray-800 rounded p-2 max-h-48 overflow-y-auto"><Linkify>{task.output}</Linkify></pre>
         </div>
       )}
       {task.parent_task_id && (
@@ -212,7 +213,7 @@ function TreePeek({ id }: { id: number }) {
       {tree.output && (
         <div>
           <div className="text-xs text-gray-500 mb-1">Root output</div>
-          <pre className="text-xs text-gray-400 whitespace-pre-wrap bg-gray-800 rounded p-2 max-h-32 overflow-y-auto">{tree.output}</pre>
+          <pre className="text-xs text-gray-400 whitespace-pre-wrap bg-gray-800 rounded p-2 max-h-32 overflow-y-auto"><Linkify>{tree.output}</Linkify></pre>
         </div>
       )}
       <div className="pt-2">
@@ -256,7 +257,7 @@ function CardPeek({ id }: { id: number }) {
         </div>
       )}
       {card.description && (
-        <p className="text-sm text-gray-400 whitespace-pre-wrap">{card.description}</p>
+        <p className="text-sm text-gray-400 whitespace-pre-wrap"><Linkify>{card.description}</Linkify></p>
       )}
       <div className="pt-2">
         <Link to={`/board?card=${card.id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
@@ -288,7 +289,7 @@ function MessagePeek({ id }: { id: number }) {
         <span className="text-xs text-gray-500 ml-auto">{formatDate(msg.created_at)}</span>
       </div>
       {msg.subject && <div className="text-sm font-medium text-gray-200">{msg.subject}</div>}
-      <p className="text-sm text-gray-300 whitespace-pre-wrap">{msg.body}</p>
+      <p className="text-sm text-gray-300 whitespace-pre-wrap"><Linkify>{msg.body}</Linkify></p>
       <div className="pt-2">
         <Link to={`/messages/${msg.id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
           Open full page &rarr;

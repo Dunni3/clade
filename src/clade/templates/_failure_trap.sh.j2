@@ -1,0 +1,27 @@
+# Auto-report failure on unexpected exit
+_CLAUDE_STARTED=0
+_report_failure() {
+    local rc=$1
+    if [ "$rc" -ne 0 ] && [ -n "$CLAUDE_TASK_ID" ] && [ -n "$HEARTH_URL" ] && [ -n "$HEARTH_API_KEY" ]; then
+        local msg
+        if [ "$_CLAUDE_STARTED" -eq 0 ]; then
+            msg="Runner script failed before Claude started (exit code $rc)"
+        else
+            msg="Session exited with code $rc"
+        fi
+{% if log_path is defined and log_path %}
+        # Append log tail for context
+        if [ -f "$LOGFILE" ]; then
+            local logtail
+            logtail=$(tail -5 "$LOGFILE" | tr '\n' '|' | tr -d '"\\' | head -c 500)
+            msg="$msg — log: $logtail"
+        fi
+{% endif %}
+        curl -skf -X PATCH "$HEARTH_URL/api/v1/tasks/$CLAUDE_TASK_ID" \
+            -H "Authorization: Bearer $HEARTH_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"failed\",\"output\":\"$msg\"}" \
+            >/dev/null 2>&1 || true
+    fi
+}
+trap '_report_failure $?' EXIT

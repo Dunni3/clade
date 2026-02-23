@@ -1,0 +1,73 @@
+#!/bin/bash
+LOGFILE="{{ log_path }}"
+echo "$(date -Iseconds) runner started (pid $$)" > "$LOGFILE"
+{% if task_id is not none %}
+export CLAUDE_TASK_ID={{ task_id }}
+{% endif %}
+{% if hearth_url %}
+export HEARTH_URL='{{ hearth_url }}'
+{% endif %}
+{% if hearth_api_key %}
+export HEARTH_API_KEY='{{ hearth_api_key }}'
+{% endif %}
+{% if hearth_name %}
+export HEARTH_NAME='{{ hearth_name }}'
+{% endif %}
+{% if env_exports_log %}
+echo "$(date -Iseconds) exported env: {{ env_exports_log }}" >> "$LOGFILE"
+{% endif %}
+{% if task_id is not none %}
+
+{% include '_failure_trap.sh.j2' %}
+{% endif %}
+{% if working_dir %}
+echo "$(date -Iseconds) cd {{ working_dir }}" >> "$LOGFILE"
+cd {{ working_dir }} || { echo "$(date -Iseconds) FATAL: cd failed — directory does not exist or is not accessible: {{ working_dir }}" >> "$LOGFILE"; exit 1; }
+echo "$(date -Iseconds) cd to {{ working_dir }} ok (pwd=$(pwd))" >> "$LOGFILE"
+
+# Worktree isolation
+echo "$(date -Iseconds) checking git worktree eligibility" >> "$LOGFILE"
+if git rev-parse --git-dir > /dev/null 2>&1; then
+    _WT_BASE="$HOME/.clade-worktrees"
+    mkdir -p "$_WT_BASE"
+    _WT_DIR="$_WT_BASE/{{ session_name }}"
+    _GIT_ROOT="$(git rev-parse --show-toplevel)"
+    echo "$(date -Iseconds) inside git repo (root: $_GIT_ROOT), creating worktree at $_WT_DIR" >> "$LOGFILE"
+
+    git worktree add "$_WT_DIR" -b "clade/{{ session_name }}" 2>/dev/null || \
+        git worktree add "$_WT_DIR" HEAD --detach 2>/dev/null
+
+    if [ -d "$_WT_DIR" ]; then
+        echo "$(date -Iseconds) worktree created, cd to $_WT_DIR" >> "$LOGFILE"
+        cd "$_WT_DIR"
+        _cleanup_worktree() {
+            cd "$_GIT_ROOT" 2>/dev/null || cd /tmp
+            if git -C "$_WT_DIR" diff --quiet 2>/dev/null && \
+               git -C "$_WT_DIR" diff --cached --quiet 2>/dev/null; then
+                git worktree remove "$_WT_DIR" 2>/dev/null || true
+                git branch -d "clade/{{ session_name }}" 2>/dev/null || true
+            fi
+        }
+{% if task_id is not none %}
+        trap '_rc=$?; _cleanup_worktree; _report_failure $_rc' EXIT HUP TERM
+{% else %}
+        trap _cleanup_worktree EXIT HUP TERM
+{% endif %}
+    else
+        echo "$(date -Iseconds) WARNING: worktree creation failed, continuing in original dir" >> "$LOGFILE"
+    fi
+else
+    echo "$(date -Iseconds) not a git repo, skipping worktree isolation" >> "$LOGFILE"
+fi
+
+{% endif %}
+echo "$(date -Iseconds) launching claude (pwd: $(pwd))" >> "$LOGFILE"
+{% if task_id is not none %}
+_CLAUDE_STARTED=1
+{% endif %}
+claude -p "$(cat {{ prompt_path }})" --dangerously-skip-permissions{{ ' --max-turns ' ~ max_turns if max_turns is not none else '' }}
+EXIT_CODE=$?
+echo "$(date -Iseconds) claude exited with code $EXIT_CODE" >> "$LOGFILE"
+rm -f "{{ prompt_path }}" "$0"
+[ "$EXIT_CODE" -eq 0 ] && rm -f "$LOGFILE"
+exit $EXIT_CODE
