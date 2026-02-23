@@ -182,6 +182,23 @@ class TestBuildRunnerScript:
             os.unlink(prompt_path)
             os.unlink(runner_path)
 
+    def test_cd_logging(self):
+        """Runner logs before cd and logs FATAL on failure."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", "~/projects/test", "hello"
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            # Log before cd
+            assert 'cd ~/projects/test" >> "$LOGFILE"' in content
+            # FATAL log on cd failure
+            assert "FATAL: cd failed" in content
+            assert "~/projects/test" in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
     def test_failure_trap_before_cd(self):
         """Trap is set before cd so pre-Claude failures are caught."""
         prompt_path, runner_path = build_runner_script(
@@ -196,6 +213,47 @@ class TestBuildRunnerScript:
             trap_pos = content.index("trap '_report_failure $?' EXIT")
             cd_pos = content.index("cd ~/projects/test")
             assert trap_pos < cd_pos, "trap must be set before cd"
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_worktree_logging(self):
+        """Runner logs worktree eligibility check and creation steps."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", "~/projects/test", "hello"
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "checking git worktree eligibility" in content
+            assert "inside git repo" in content
+            assert "creating worktree" in content
+            assert "worktree created, cd to" in content
+            assert "worktree creation failed" in content
+            assert "not a git repo" in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_env_export_logging(self):
+        """Runner logs exported env vars with redacted API key."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello",
+            task_id=42,
+            hearth_url="https://example.com",
+            hearth_api_key="secret",
+            hearth_name="oppy",
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "exported env:" in content
+            assert "CLAUDE_TASK_ID=42" in content
+            assert "HEARTH_URL=https://example.com" in content
+            assert "HEARTH_API_KEY=<redacted>" in content
+            assert "HEARTH_NAME=oppy" in content
+            # Actual key value should NOT appear in the log line
+            assert 'HEARTH_API_KEY=secret' not in content.split("exported env:")[1].split("\n")[0]
         finally:
             os.unlink(prompt_path)
             os.unlink(runner_path)
@@ -215,6 +273,19 @@ class TestBuildRunnerScript:
             assert "_CLAUDE_STARTED=0" in content
             assert "before Claude started" in content
             assert "Session exited with code" in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_no_env_export_logging_without_env(self):
+        """No exported env log line when no env vars are set."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello"
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "exported env:" not in content
         finally:
             os.unlink(prompt_path)
             os.unlink(runner_path)
@@ -248,6 +319,19 @@ class TestBuildRunnerScript:
             assert "_report_failure" not in content
             assert "_CLAUDE_STARTED" not in content
             assert "trap " not in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_launch_log_includes_pwd(self):
+        """The launching claude log line includes pwd."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello"
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "launching claude (pwd:" in content
         finally:
             os.unlink(prompt_path)
             os.unlink(runner_path)
