@@ -264,9 +264,9 @@ export default function TaskDetailPage() {
                     Parent: #{task.parent_task_id}
                   </Link>
                 )}
-                {task.root_task_id && task.root_task_id !== task.id && (
-                  <Link to={`/trees/${task.root_task_id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
-                    Tree: #{task.root_task_id}
+                {task.root_task_id && (
+                  <Link to={`/trees/${task.root_task_id}`} className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-colors">
+                    View Tree &rarr;
                   </Link>
                 )}
                 {task.children && task.children.length > 0 && (
