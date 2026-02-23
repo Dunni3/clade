@@ -103,6 +103,7 @@ def create_conductor_tools(
                 subject=subject,
                 parent_task_id=parent_task_id,
                 blocked_by_task_id=blocked_by_task_id,
+                max_turns=max_turns,
             )
             task_id = task_result["id"]
         except Exception as e:
@@ -115,14 +116,16 @@ def create_conductor_tools(
             except Exception:
                 pass  # Non-fatal: task still created, link just not established
 
-        # If task is blocked, don't delegate to Ember — it will be auto-delegated
-        # when the blocking task completes
-        if blocked_by_task_id is not None:
+        # Check the *actual DB state* of blocked_by_task_id (not the input param).
+        # insert_task auto-clears blocked_by when the blocker is already completed,
+        # so the input param may say "blocked" while the DB says "ready to go".
+        actual_blocked_by = task_result.get("blocked_by_task_id")
+        if actual_blocked_by is not None:
             result_lines = [
-                f"Task #{task_id} created (deferred — blocked by #{blocked_by_task_id}).",
+                f"Task #{task_id} created (deferred — blocked by #{actual_blocked_by}).",
                 f"  Subject: {subject or '(none)'}",
                 f"  Assignee: {brother}",
-                f"  Status: pending (waiting for #{blocked_by_task_id} to complete)",
+                f"  Status: pending (waiting for #{actual_blocked_by} to complete)",
             ]
             if card_id is not None:
                 result_lines.append(f"  Linked to card: #{card_id}")

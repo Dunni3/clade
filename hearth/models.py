@@ -85,6 +85,7 @@ class CreateTaskRequest(BaseModel):
     working_dir: str | None = None
     parent_task_id: int | None = None
     blocked_by_task_id: int | None = None
+    max_turns: int | None = None
 
 
 class UpdateTaskRequest(BaseModel):
@@ -130,6 +131,7 @@ class TaskDetail(TaskSummary):
 class CreateTaskResponse(BaseModel):
     id: int
     message: str = "Task created"
+    blocked_by_task_id: int | None = None
 
 
 # -- Task Events --

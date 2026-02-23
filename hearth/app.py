@@ -102,6 +102,10 @@ async def _unblock_and_delegate(completed_task_id: int) -> None:
     if not blocked_tasks:
         return
 
+    # Fetch Ember registry once, outside the loop
+    db_embers = await db.get_embers()
+    ember_url_map: dict[str, str] = {e["name"]: e["ember_url"] for e in db_embers}
+
     for task in blocked_tasks:
         assignee = task["assignee"]
         task_id = task["id"]
@@ -110,14 +114,7 @@ async def _unblock_and_delegate(completed_task_id: int) -> None:
         await db.clear_blocked_by(task_id)
 
         # Look up Ember URL: DB first, env fallback
-        ember_url = None
-        db_embers = await db.get_embers()
-        for entry in db_embers:
-            if entry["name"] == assignee:
-                ember_url = entry["ember_url"]
-                break
-        if ember_url is None:
-            ember_url = EMBER_URLS.get(assignee)
+        ember_url = ember_url_map.get(assignee) or EMBER_URLS.get(assignee)
 
         if not ember_url:
             logger.warning(
@@ -143,16 +140,19 @@ async def _unblock_and_delegate(completed_task_id: int) -> None:
 
         # Send to Ember
         try:
+            payload: dict = {
+                "prompt": task["prompt"],
+                "task_id": task_id,
+                "subject": task["subject"] or "",
+                "sender_name": task["creator"],
+                "working_dir": task.get("working_dir"),
+            }
+            if task.get("max_turns") is not None:
+                payload["max_turns"] = task["max_turns"]
             async with httpx.AsyncClient(verify=False, timeout=30.0) as http_client:
                 resp = await http_client.post(
                     f"{ember_url}/tasks/execute",
-                    json={
-                        "prompt": task["prompt"],
-                        "task_id": task_id,
-                        "subject": task["subject"] or "",
-                        "sender_name": task["creator"],
-                        "working_dir": task.get("working_dir"),
-                    },
+                    json=payload,
                     headers={"Authorization": f"Bearer {assignee_key}"},
                 )
                 resp.raise_for_status()
@@ -364,10 +364,17 @@ async def create_task(
             working_dir=req.working_dir,
             parent_task_id=req.parent_task_id,
             blocked_by_task_id=req.blocked_by_task_id,
+            max_turns=req.max_turns,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    return CreateTaskResponse(id=task_id)
+    # Return actual blocked_by_task_id from DB (may differ from input if blocker
+    # was already completed — insert_task auto-clears in that case)
+    task = await db.get_task(task_id)
+    return CreateTaskResponse(
+        id=task_id,
+        blocked_by_task_id=task["blocked_by_task_id"] if task else None,
+    )
 
 
 @app.get("/api/v1/tasks", response_model=list[TaskSummary])

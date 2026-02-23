@@ -157,6 +157,13 @@ async def init_db() -> None:
             )
         except Exception:
             pass
+        # Migration: add max_turns to tasks (persisted for deferred task delegation)
+        try:
+            await db.execute(
+                "ALTER TABLE tasks ADD COLUMN max_turns INTEGER"
+            )
+        except Exception:
+            pass
         # Migration: add project column to kanban_cards
         try:
             await db.execute(
@@ -523,6 +530,7 @@ async def insert_task(
     working_dir: str | None = None,
     parent_task_id: int | None = None,
     blocked_by_task_id: int | None = None,
+    max_turns: int | None = None,
 ) -> int:
     db = await get_db()
     try:
@@ -539,7 +547,10 @@ async def insert_task(
             # If parent has a root, inherit it; otherwise parent IS the root
             root_task_id = parent["root_task_id"] if parent["root_task_id"] is not None else parent["id"]
 
-        # Validate blocking task exists (if specified)
+        # Validate blocking task exists (if specified).
+        # Note: circular dependencies are structurally impossible because
+        # blocked_by_task_id is only set at creation time and is immutable —
+        # a new task cannot be the blocker of an already-existing task.
         if blocked_by_task_id is not None:
             cursor = await db.execute(
                 "SELECT id, status FROM tasks WHERE id = ?",
@@ -553,9 +564,9 @@ async def insert_task(
                 blocked_by_task_id = None
 
         cursor = await db.execute(
-            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, blocked_by_task_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, blocked_by_task_id),
+            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, blocked_by_task_id, max_turns)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, blocked_by_task_id, max_turns),
         )
         task_id = cursor.lastrowid
         # Every task is a root of its own tree when it has no parent
@@ -740,7 +751,7 @@ async def get_tasks_blocked_by(task_id: int) -> list[dict]:
     try:
         cursor = await db.execute(
             """SELECT id, creator, assignee, subject, prompt, status, session_name, host,
-                      working_dir, parent_task_id, root_task_id, blocked_by_task_id, created_at
+                      working_dir, parent_task_id, root_task_id, blocked_by_task_id, max_turns, created_at
                FROM tasks
                WHERE blocked_by_task_id = ? AND status = 'pending'
                ORDER BY created_at ASC""",
