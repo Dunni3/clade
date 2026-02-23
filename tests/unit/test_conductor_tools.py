@@ -105,6 +105,35 @@ class TestDelegateTask:
         mock_mailbox.update_task.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_ember_error_and_status_update_fails_warns_orphaned(self):
+        mock_mailbox = AsyncMock()
+        mock_mailbox.create_task.return_value = {"id": 9}
+
+        async def update_task_raises(*args, **kwargs):
+            raise Exception("Hearth unreachable")
+
+        mock_mailbox.update_task = update_task_raises
+
+        with pytest.MonkeyPatch.context() as mp:
+            from clade.mcp.tools import conductor_tools
+
+            class MockEmberClient:
+                def __init__(self, url, key, verify_ssl=True):
+                    self.base_url = url
+
+                async def execute_task(self, **kwargs):
+                    raise Exception("Connection refused")
+
+            mp.setattr(conductor_tools, "EmberClient", MockEmberClient)
+
+            tools = _make_conductor_tools(mock_mailbox)
+            result = await tools["delegate_task"]("oppy", "Do stuff")
+
+        assert "Task #9" in result
+        assert "orphaned" in result.lower()
+        assert "WARNING" in result
+
+    @pytest.mark.asyncio
     async def test_task_creation_error(self):
         mock_mailbox = AsyncMock()
         mock_mailbox.create_task.side_effect = Exception("API unreachable")
