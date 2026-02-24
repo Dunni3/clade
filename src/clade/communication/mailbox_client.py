@@ -132,6 +132,7 @@ class MailboxClient:
         host: str | None = None,
         working_dir: str | None = None,
         parent_task_id: int | None = None,
+        metadata: dict | None = None,
         on_complete: str | None = None,
         blocked_by_task_id: int | None = None,
         max_turns: int | None = None,
@@ -145,6 +146,8 @@ class MailboxClient:
             payload["working_dir"] = working_dir
         if parent_task_id is not None:
             payload["parent_task_id"] = parent_task_id
+        if metadata is not None:
+            payload["metadata"] = metadata
         if on_complete is not None:
             payload["on_complete"] = on_complete
         if blocked_by_task_id is not None:

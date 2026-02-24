@@ -48,7 +48,7 @@ Check the environment variables `TRIGGER_TASK_ID` and `TRIGGER_MESSAGE_ID`.
 ## Rules
 
 - Workers can run multiple concurrent tasks (aspens). Check `check_worker_health` for current load before delegating.
-- **Task tree depth:** Keep trees shallow (max depth 5). Be conservative about spawning deeply nested children.
+- **Task tree depth:** Each task has a `depth` field (root = 0, children = parent + 1). The root task's `metadata` may contain `max_depth` (default: 15). Before delegating a child task, check the triggering task's depth against the root task's `metadata.max_depth`. If the current depth would exceed the limit, do not delegate further — note the depth limit in a morsel and move on.
 - **Retry limits:** Failed tasks may be retried at most 2 times. After 2 failures, note the failure and move on.
 - **Retry method:** Prefer `retry_task(task_id)` when retrying failed tasks — it automatically creates a child task with the same prompt and sends it to the worker's Ember server-side, bypassing your local config.
 - **Worker load:** Check active aspens via `check_worker_health` before delegating. If a worker is overloaded, prefer idle workers or wait.

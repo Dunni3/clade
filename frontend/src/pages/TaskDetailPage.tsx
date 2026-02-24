@@ -298,6 +298,7 @@ export default function TaskDetailPage() {
           <span>Created: {formatDate(task.created_at)}</span>
           {task.started_at && <span>Started: {formatDate(task.started_at)}</span>}
           {task.completed_at && <span>Completed: {formatDate(task.completed_at)}</span>}
+          {task.depth > 0 && <span>Depth: {task.depth}</span>}
         </div>
       </div>
 
@@ -353,6 +354,21 @@ export default function TaskDetailPage() {
                 </div>
                 <p className="text-sm text-gray-300 truncate mt-1">{bt.subject || '(no subject)'}</p>
               </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Metadata */}
+      {task.metadata && Object.keys(task.metadata).length > 0 && (
+        <div className="rounded-xl border border-gray-700 bg-gray-900 p-4 mb-4">
+          <p className="text-sm font-medium text-gray-300 mb-2">Metadata</p>
+          <div className="flex flex-wrap gap-3">
+            {Object.entries(task.metadata).map(([key, value]) => (
+              <span key={key} className="inline-flex items-center gap-1.5 rounded-md bg-gray-800 px-2 py-1 text-xs">
+                <span className="text-gray-500">{key}:</span>
+                <span className="text-gray-300">{String(value)}</span>
+              </span>
             ))}
           </div>
         </div>

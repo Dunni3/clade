@@ -61,6 +61,7 @@ def create_delegation_tools(
         working_dir: str | None = None,
         max_turns: int | None = None,
         card_id: int | None = None,
+        metadata: dict | None = None,
         on_complete: str | None = None,
         blocked_by_task_id: int | None = None,
         target_branch: str | None = None,
@@ -80,6 +81,7 @@ def create_delegation_tools(
             working_dir: Override the brother's default working directory.
             max_turns: Optional maximum Claude turns. If not set, no turn limit is applied.
             card_id: Optional kanban card ID to link this task to.
+            metadata: Optional dict stored on root tasks. Supports keys like "max_depth" to configure tree behavior.
             on_complete: Optional follow-up instructions for the Conductor when this task completes or fails.
             blocked_by_task_id: Optional task ID that must complete before this task runs. The task will stay in 'pending' until the blocking task completes, then auto-delegate.
             target_branch: Optional git branch to check out in the worktree. When set, the runner creates the worktree from this branch instead of HEAD.
@@ -104,6 +106,7 @@ def create_delegation_tools(
                 prompt=prompt,
                 subject=subject,
                 parent_task_id=parent_task_id,
+                metadata=metadata,
                 on_complete=on_complete,
                 blocked_by_task_id=blocked_by_task_id,
                 max_turns=max_turns,

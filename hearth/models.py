@@ -84,6 +84,7 @@ class CreateTaskRequest(BaseModel):
     host: str | None = None
     working_dir: str | None = None
     parent_task_id: int | None = None
+    metadata: dict | None = None
     on_complete: str | None = None
     blocked_by_task_id: int | None = None
     max_turns: int | None = None
@@ -106,6 +107,7 @@ class TaskSummary(BaseModel):
     completed_at: str | None = None
     parent_task_id: int | None = None
     root_task_id: int | None = None
+    depth: int = 0
     blocked_by_task_id: int | None = None
 
 
@@ -122,6 +124,7 @@ class TaskDetail(TaskSummary):
     host: str | None = None
     working_dir: str | None = None
     output: str | None = None
+    metadata: dict | None = None
     on_complete: str | None = None
     messages: list[FeedMessage] = []
     events: list["TaskEvent"] = []
@@ -223,6 +226,8 @@ class TreeNode(BaseModel):
     host: str | None = None
     working_dir: str | None = None
     output: str | None = None
+    metadata: dict | None = None
+    depth: int = 0
     on_complete: str | None = None
     children: list["TreeNode"] = []
     linked_cards: list[LinkedCardInfo] = []

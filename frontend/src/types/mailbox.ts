@@ -64,6 +64,7 @@ export interface TaskSummary {
   completed_at: string | null;
   parent_task_id: number | null;
   root_task_id: number | null;
+  depth: number;
   blocked_by_task_id: number | null;
 }
 
@@ -89,6 +90,7 @@ export interface TaskDetail extends TaskSummary {
   host: string | null;
   working_dir: string | null;
   output: string | null;
+  metadata: Record<string, unknown> | null;
   on_complete: string | null;
   children: TaskSummary[];
   blocked_tasks: TaskSummary[];
@@ -152,6 +154,8 @@ export interface TreeNode {
   host: string | null;
   working_dir: string | null;
   output: string | null;
+  metadata: Record<string, unknown> | null;
+  depth: number;
   children: TreeNode[];
   linked_cards?: LinkedCardInfo[];
 }
