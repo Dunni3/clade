@@ -49,6 +49,7 @@ def create_delegation_tools(
         working_dir: str | None = None,
         max_turns: int | None = None,
         card_id: int | None = None,
+        target_branch: str | None = None,
     ) -> str:
         """Delegate a task to a brother via their Ember server.
 
@@ -63,6 +64,7 @@ def create_delegation_tools(
             working_dir: Override the brother's default working directory.
             max_turns: Optional maximum Claude turns. If not set, no turn limit is applied.
             card_id: Optional kanban card ID to link this task to.
+            target_branch: Optional git branch to check out in the worktree. When set, the runner creates the worktree from this branch instead of HEAD.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -108,6 +110,7 @@ def create_delegation_tools(
                 hearth_api_key=config.get("hearth_api_key") or config.get("ember_api_key") or config.get("api_key"),
                 hearth_name=brother,
                 sender_name=mailbox_name,
+                target_branch=target_branch,
             )
         except Exception as e:
             # Mark task as failed

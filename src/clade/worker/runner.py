@@ -32,6 +32,7 @@ def build_runner_script(
     hearth_url: str | None = None,
     hearth_api_key: str | None = None,
     hearth_name: str | None = None,
+    target_branch: str | None = None,
 ) -> tuple[str, str]:
     """Write prompt and runner script to temp files.
 
@@ -79,8 +80,14 @@ def build_runner_script(
         lines.append(f'    _WT_DIR="$_WT_BASE/{session_name}"')
         lines.append('    _GIT_ROOT="$(git rev-parse --show-toplevel)"')
         lines.append("")
-        lines.append(f'    git worktree add "$_WT_DIR" -b "clade/{session_name}" 2>/dev/null || \\')
-        lines.append('        git worktree add "$_WT_DIR" HEAD --detach 2>/dev/null')
+        if target_branch:
+            lines.append(f'    git fetch origin "{target_branch}" 2>/dev/null || true')
+            lines.append(f'    git worktree add "$_WT_DIR" "origin/{target_branch}" 2>/dev/null || \\')
+            lines.append(f'        git worktree add "$_WT_DIR" "{target_branch}" 2>/dev/null || \\')
+            lines.append('        git worktree add "$_WT_DIR" HEAD --detach 2>/dev/null')
+        else:
+            lines.append(f'    git worktree add "$_WT_DIR" -b "clade/{session_name}" 2>/dev/null || \\')
+            lines.append('        git worktree add "$_WT_DIR" HEAD --detach 2>/dev/null')
         lines.append("")
         lines.append('    if [ -d "$_WT_DIR" ]; then')
         lines.append('        cd "$_WT_DIR"')
@@ -141,6 +148,7 @@ def launch_local_task(
     hearth_url: str | None = None,
     hearth_api_key: str | None = None,
     hearth_name: str | None = None,
+    target_branch: str | None = None,
 ) -> LocalTaskResult:
     """Launch a Claude Code session in a detached tmux session.
 
@@ -155,6 +163,7 @@ def launch_local_task(
         hearth_url=hearth_url,
         hearth_api_key=hearth_api_key,
         hearth_name=hearth_name,
+        target_branch=target_branch,
     )
 
     try:
