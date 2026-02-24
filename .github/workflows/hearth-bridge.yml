@@ -10,8 +10,9 @@ jobs:
     steps:
       - name: Extract card ID from branch name
         id: extract
+        env:
+          BRANCH: ${{ github.head_ref }}
         run: |
-          BRANCH="${{ github.head_ref }}"
           if [[ "$BRANCH" =~ ^card-([0-9]+) ]]; then
             echo "card_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
             echo "Found card ID: ${BASH_REMATCH[1]}"
@@ -87,7 +88,7 @@ jobs:
             TASK_ASSIGNEE=$(echo "$TASK_JSON" | jq -r '.assignee // "—"')
             TASK_ROWS="${TASK_ROWS}| #${task_id} | ${SUBJECT} | ${STATUS} | ${TASK_ASSIGNEE} |
           "
-          done < <(echo "$CARD_JSON" | jq -r '.links[] | select(.object_type == "task") | .object_id')
+          done < <(echo "$CARD_JSON" | jq -r '(.links // [])[] | select(.object_type == "task") | .object_id')
 
           # Collect linked tree details
           TREE_ROWS=""
@@ -109,7 +110,7 @@ jobs:
             PENDING=$(echo "$TREE_JSON" | jq '[.. | .status? // empty | select(. == "pending")] | length')
             TREE_ROWS="${TREE_ROWS}- **Tree #${tree_id}**: ${TREE_SUBJECT} (${COMPLETED} completed, ${IN_PROGRESS} in progress, ${FAILED} failed, ${PENDING} pending)
           "
-          done < <(echo "$CARD_JSON" | jq -r '.links[] | select(.object_type == "tree") | .object_id')
+          done < <(echo "$CARD_JSON" | jq -r '(.links // [])[] | select(.object_type == "tree") | .object_id')
 
           # Write to files for the next step (avoid GITHUB_OUTPUT multiline issues)
           echo "$TASK_ROWS" > /tmp/task_rows.txt
@@ -119,6 +120,7 @@ jobs:
         if: steps.card.outputs.found == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           CARD_ID: ${{ steps.extract.outputs.card_id }}
           CARD_TITLE: ${{ steps.card.outputs.title }}
           CARD_COL: ${{ steps.card.outputs.col }}
@@ -169,14 +171,14 @@ jobs:
           fi
 
           # Get current PR body and append
-          CURRENT_BODY=$(gh pr view "${{ github.event.pull_request.number }}" --json body -q '.body')
+          CURRENT_BODY=$(gh pr view "$PR_NUMBER" --json body -q '.body')
           {
             echo "$CURRENT_BODY"
             echo ""
             cat /tmp/hearth_context.md
           } > /tmp/new_body.md
 
-          gh pr edit "${{ github.event.pull_request.number }}" --body-file /tmp/new_body.md
+          gh pr edit "$PR_NUMBER" --body-file /tmp/new_body.md
 
       - name: Link PR back to card
         if: steps.card.outputs.found == 'true'
@@ -192,7 +194,7 @@ jobs:
           # Check if link already exists
           EXISTS=$(echo "$CARD_JSON" | jq -r \
             --arg oid "$PR_LINK" \
-            '.links[] | select(.object_type == "github_pr" and .object_id == $oid) | "yes"')
+            '(.links // [])[] | select(.object_type == "github_pr" and .object_id == $oid) | "yes"')
 
           if [ "$EXISTS" = "yes" ]; then
             echo "PR link already exists on card. Skipping."
