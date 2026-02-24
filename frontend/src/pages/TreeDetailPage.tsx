@@ -15,6 +15,7 @@ import dagre from 'dagre';
 import { getTree, killTask } from '../api/mailbox';
 import KillConfirmModal from '../components/KillConfirmModal';
 import MorselPanel from '../components/MorselPanel';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { TreeNode } from '../types/mailbox';
 
 const statusColors: Record<string, string> = {
@@ -141,6 +142,8 @@ export default function TreeDetailPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
   const [showKillModal, setShowKillModal] = useState(false);
   const [killLoading, setKillLoading] = useState(false);
+
+  useDocumentTitle(tree ? `Tree #${tree.id} \u2013 ${tree.subject || '(no subject)'}` : undefined);
 
   const fetchTree = useCallback(async () => {
     if (!rootId) return;

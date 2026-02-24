@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getMorsel } from '../api/mailbox';
 import Linkify from '../components/Linkify';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { MorselSummary } from '../types/mailbox';
 import { parseGitHubPrLink } from '../utils/links';
 
@@ -36,6 +37,8 @@ export default function MorselDetailPage() {
   const [morsel, setMorsel] = useState<MorselSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  useDocumentTitle(morsel ? `Morsel #${morsel.id}` : undefined);
 
   useEffect(() => {
     if (!id) return;

@@ -4,6 +4,7 @@ import { viewMessage, editMessage, deleteMessage, markUnread } from '../api/mail
 import Linkify from '../components/Linkify';
 import { useAuthStore } from '../store/authStore';
 import DeleteModal from '../components/DeleteModal';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { FeedMessage, EditMessageRequest } from '../types/mailbox';
 
 const senderColors: Record<string, string> = {
@@ -30,6 +31,8 @@ export default function MessageDetailPage() {
   const [showDelete, setShowDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const brotherName = useAuthStore((s) => s.brotherName);
+
+  useDocumentTitle(message ? (message.subject || `Message #${message.id}`) : undefined);
 
   const canEdit = message && (message.sender === brotherName || brotherName === 'doot' || brotherName === 'ian');
 

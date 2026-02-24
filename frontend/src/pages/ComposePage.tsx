@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { sendMessage } from '../api/mailbox';
 import { useAuthStore } from '../store/authStore';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const ALL_BROTHERS = ['doot', 'oppy', 'jerry'];
 
 export default function ComposePage() {
+  useDocumentTitle('Compose');
   const navigate = useNavigate();
   const brotherName = useAuthStore((s) => s.brotherName);
   const [recipients, setRecipients] = useState<string[]>([]);

@@ -4,6 +4,7 @@ import { getTask, killTask } from '../api/mailbox';
 import KillConfirmModal from '../components/KillConfirmModal';
 import Linkify from '../components/Linkify';
 import MorselPanel from '../components/MorselPanel';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { TaskDetail, FeedMessage, TaskEvent } from '../types/mailbox';
 
 const POLL_INTERVAL_MS = 5000;
@@ -148,6 +149,8 @@ export default function TaskDetailPage() {
   const [showKillModal, setShowKillModal] = useState(false);
   const [killLoading, setKillLoading] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useDocumentTitle(task ? `Task #${task.id} \u2013 ${task.subject || '(no subject)'}` : undefined);
 
   const fetchTask = useCallback(async () => {
     if (!id) return;
