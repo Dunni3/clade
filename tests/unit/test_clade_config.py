@@ -242,6 +242,64 @@ class TestEmberFields:
         assert loaded.brothers["oppy"].ember_host is None
 
 
+class TestSudoersField:
+    def test_default_false(self):
+        bro = BrotherEntry(ssh="ian@masuda")
+        assert bro.sudoers_configured is False
+
+    def test_custom_true(self):
+        bro = BrotherEntry(ssh="ian@masuda", sudoers_configured=True)
+        assert bro.sudoers_configured is True
+
+    def test_round_trip(self, tmp_path: Path):
+        config_file = tmp_path / "clade.yaml"
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_host="100.71.57.52",
+                    ember_port=8100,
+                    sudoers_configured=True,
+                ),
+            },
+        )
+        save_clade_config(cfg, config_file)
+        loaded = load_clade_config(config_file)
+
+        assert loaded is not None
+        assert loaded.brothers["oppy"].sudoers_configured is True
+
+    def test_not_saved_when_false(self, tmp_path: Path):
+        config_file = tmp_path / "clade.yaml"
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(ssh="ian@masuda"),
+            },
+        )
+        save_clade_config(cfg, config_file)
+
+        with open(config_file) as f:
+            data = yaml.safe_load(f)
+        assert "sudoers_configured" not in data["brothers"]["oppy"]
+
+    def test_load_without_sudoers_field(self, tmp_path: Path):
+        """Configs written before sudoers was added should load with False default."""
+        config_file = tmp_path / "clade.yaml"
+        data = {
+            "clade": {"name": "Old Clade", "created": "2026-02-01"},
+            "personal": {"name": "doot", "description": "Coordinator"},
+            "brothers": {
+                "oppy": {"ssh": "ian@masuda", "role": "worker"},
+            },
+        }
+        with open(config_file, "w") as f:
+            yaml.dump(data, f)
+
+        loaded = load_clade_config(config_file)
+        assert loaded is not None
+        assert loaded.brothers["oppy"].sudoers_configured is False
+
+
 class TestVerifySsl:
     def test_default_true(self):
         cfg = CladeConfig()

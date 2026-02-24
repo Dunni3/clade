@@ -314,6 +314,15 @@ def ember(ctx: click.Context, name: str) -> None:
         click.echo(click.style("  Restart failed", fg="red"))
         if result.stderr:
             click.echo(f"  {result.stderr[:200]}")
+        if not brother.sudoers_configured:
+            click.echo()
+            click.echo(
+                click.style("  Hint:", bold=True)
+                + " sudo may require a password on this host."
+            )
+            click.echo(
+                "  Run 'clade setup-ember --sudoers " + name + "' to configure passwordless sudo."
+            )
         raise SystemExit(1)
     click.echo(click.style("  Service restarted", fg="green"))
 

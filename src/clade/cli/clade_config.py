@@ -22,6 +22,7 @@ class BrotherEntry:
     personality: str = ""
     ember_port: int | None = None
     ember_host: str | None = None
+    sudoers_configured: bool = False
 
 
 @dataclass
@@ -172,6 +173,7 @@ def load_clade_config(path: Path | None = None) -> CladeConfig | None:
             personality=bro_data.get("personality", ""),
             ember_port=bro_data.get("ember_port"),
             ember_host=bro_data.get("ember_host"),
+            sudoers_configured=bro_data.get("sudoers_configured", False),
         )
 
     return CladeConfig(
@@ -243,6 +245,8 @@ def save_clade_config(config: CladeConfig, path: Path | None = None) -> Path:
                 entry["ember_port"] = bro.ember_port
             if bro.ember_host is not None:
                 entry["ember_host"] = bro.ember_host
+            if bro.sudoers_configured:
+                entry["sudoers_configured"] = True
             brothers_data[name] = entry
         data["brothers"] = brothers_data
 
