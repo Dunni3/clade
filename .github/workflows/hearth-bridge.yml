@@ -5,10 +5,17 @@ on:
   pull_request:
     types: [opened]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   hearth-bridge:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Extract card ID from branch name
         id: extract
         env:
