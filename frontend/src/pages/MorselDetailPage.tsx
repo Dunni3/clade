@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getMorsel } from '../api/mailbox';
 import Linkify from '../components/Linkify';
 import type { MorselSummary } from '../types/mailbox';
+import { parseGitHubPrLink } from '../utils/links';
 
 const senderColors: Record<string, string> = {
   ian: 'bg-purple-500/20 text-purple-300',
@@ -18,6 +19,7 @@ const linkColorMap: Record<string, string> = {
   tree: 'bg-cyan-900/50 text-cyan-300 hover:bg-cyan-900',
   message: 'bg-purple-900/50 text-purple-300 hover:bg-purple-900',
   card: 'bg-emerald-900/50 text-emerald-300 hover:bg-emerald-900',
+  github_pr: 'bg-gray-800 text-gray-100 hover:bg-gray-700 border border-gray-600',
 };
 
 const linkHrefMap: Record<string, (id: string) => string> = {
@@ -94,6 +96,15 @@ export default function MorselDetailPage() {
             <div className="flex flex-wrap gap-1.5">
               {morsel.links.map((link, i) => {
                 const colors = linkColorMap[link.object_type] || 'bg-gray-700 text-gray-300';
+                if (link.object_type === 'github_pr') {
+                  const parsed = parseGitHubPrLink(link.object_id);
+                  if (!parsed) return null;
+                  return (
+                    <a key={i} href={parsed.url} target="_blank" rel="noopener noreferrer" className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${colors}`}>
+                      {parsed.label} ↗
+                    </a>
+                  );
+                }
                 const hrefFn = linkHrefMap[link.object_type];
                 const label = `${link.object_type} #${link.object_id}`;
                 if (hrefFn) {

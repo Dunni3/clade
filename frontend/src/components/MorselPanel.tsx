@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { getMorsels } from '../api/mailbox';
 import Linkify from './Linkify';
 import type { MorselSummary, MorselLink } from '../types/mailbox';
+import { parseGitHubPrLink } from '../utils/links';
 
 const senderColors: Record<string, string> = {
   ian: 'bg-purple-500/20 text-purple-300',
@@ -32,6 +33,15 @@ function renderLink(link: MorselLink, index: number) {
       <Link key={index} to={`/tasks/${link.object_id}`} className="text-xs text-indigo-400 hover:text-indigo-300" onClick={(e) => e.stopPropagation()}>
         task #{link.object_id}
       </Link>
+    );
+  }
+  if (link.object_type === 'github_pr') {
+    const parsed = parseGitHubPrLink(link.object_id);
+    if (!parsed) return null;
+    return (
+      <a key={index} href={parsed.url} target="_blank" rel="noopener noreferrer" className="text-xs text-gray-100 bg-gray-800 hover:bg-gray-700 border border-gray-600 px-1.5 py-0.5 rounded font-medium transition-colors" onClick={(e) => e.stopPropagation()}>
+        {parsed.label} ↗
+      </a>
     );
   }
   return (

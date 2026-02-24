@@ -4,6 +4,7 @@ import { getCards, createCard, updateCard, deleteCard, getTask } from '../api/ma
 import type { CardSummary, CreateCardRequest, TaskSummary } from '../types/mailbox';
 import Linkify from '../components/Linkify';
 import PeekDrawer from '../components/PeekDrawer';
+import { parseGitHubPrLink } from '../utils/links';
 
 const COLUMNS = ['backlog', 'todo', 'in_progress', 'done'] as const;
 const ALL_COLUMNS = ['backlog', 'todo', 'in_progress', 'done', 'archived'] as const;
@@ -499,7 +500,8 @@ export default function KanbanPage() {
                 )}
                 {selectedCard.links && selectedCard.links.length > 0 && (() => {
                   const taskLinks = selectedCard.links.filter(l => l.object_type === 'task');
-                  const otherLinks = selectedCard.links.filter(l => l.object_type !== 'task');
+                  const ghPrLinks = selectedCard.links.filter(l => l.object_type === 'github_pr');
+                  const otherLinks = selectedCard.links.filter(l => l.object_type !== 'task' && l.object_type !== 'github_pr');
                   return (
                     <div className="mb-4">
                       {/* Task links with status */}
@@ -526,6 +528,27 @@ export default function KanbanPage() {
                                     </>
                                   )}
                                 </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      {/* GitHub PR links */}
+                      {ghPrLinks.length > 0 && (
+                        <div className="mb-3">
+                          <div className="text-xs text-gray-500 mb-1.5">Pull Requests</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {ghPrLinks.map((link, i) => {
+                              const parsed = parseGitHubPrLink(link.object_id);
+                              if (!parsed) return null;
+                              return (
+                                <button
+                                  key={`gh-pr-${link.object_id}-${i}`}
+                                  onClick={() => window.open(parsed.url, '_blank')}
+                                  className="px-2 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer bg-gray-800 text-gray-100 hover:bg-gray-700 border border-gray-600"
+                                >
+                                  {parsed.label} ↗
+                                </button>
                               );
                             })}
                           </div>

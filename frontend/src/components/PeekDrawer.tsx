@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { getMorsel, getTask, getTree, getCard, getMessage } from '../api/mailbox';
 import Linkify from './Linkify';
 import type { MorselSummary, TaskDetail, TreeNode, CardSummary, FeedMessage } from '../types/mailbox';
+import { parseGitHubPrLink } from '../utils/links';
 
 interface PeekDrawerProps {
   open: boolean;
@@ -17,6 +18,7 @@ const TYPE_LABELS: Record<string, string> = {
   tree: 'Tree',
   card: 'Card',
   message: 'Message',
+  github_pr: 'GitHub PR',
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -324,6 +326,22 @@ export default function PeekDrawer({ open, onClose, objectType, objectId }: Peek
       case 'tree': return <TreePeek id={id} />;
       case 'card': return <CardPeek id={id} />;
       case 'message': return <MessagePeek id={id} />;
+      case 'github_pr': {
+        const parsed = parseGitHubPrLink(objectId);
+        if (!parsed) return <div className="text-gray-400 text-sm">Invalid GitHub PR link: {objectId}</div>;
+        return (
+          <div className="space-y-3">
+            <a
+              href={parsed.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-gray-800 text-gray-100 hover:bg-gray-700 border border-gray-600 transition-colors"
+            >
+              Open {parsed.label} on GitHub ↗
+            </a>
+          </div>
+        );
+      }
       default: return <div className="text-gray-400 text-sm">Unknown object type: {objectType}</div>;
     }
   };
@@ -340,7 +358,7 @@ export default function PeekDrawer({ open, onClose, objectType, objectId }: Peek
         {/* Header */}
         <div className="sticky top-0 bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center justify-between">
           <span className="text-sm font-medium text-gray-300">
-            {label} #{objectId}
+            {objectType === 'github_pr' ? `${label}: ${objectId}` : `${label} #${objectId}`}
           </span>
           <button
             onClick={onClose}
