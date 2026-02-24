@@ -1,3 +1,4 @@
+
 name: Hearth-PR Bridge
 
 on:
@@ -189,7 +190,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           CARD_JSON=$(cat /tmp/card.json)
-          PR_LINK="Dunni3/clade#${PR_NUMBER}"
+          PR_LINK="${{ github.repository }}#${PR_NUMBER}"
 
           # Check if link already exists
           EXISTS=$(echo "$CARD_JSON" | jq -r \
