@@ -2,9 +2,11 @@ import { useEffect, useState, useCallback } from 'react';
 import { getMorsels, getMemberActivity } from '../api/mailbox';
 import { useAuthStore } from '../store/authStore';
 import { MorselCard } from '../components/MorselPanel';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { MorselSummary } from '../types/mailbox';
 
 export default function MorselFeedPage() {
+  useDocumentTitle('Morsels');
   const [morsels, setMorsels] = useState<MorselSummary[]>([]);
   const [members, setMembers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);

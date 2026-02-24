@@ -3,11 +3,13 @@ import { getFeed } from '../api/mailbox';
 import { useAuthStore } from '../store/authStore';
 import MessageCard from '../components/MessageCard';
 import SearchBar from '../components/SearchBar';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { FeedMessage } from '../types/mailbox';
 
 const BROTHERS = ['', 'ian', 'doot', 'oppy', 'jerry'];
 
 export default function FeedPage() {
+  useDocumentTitle('Feed');
   const [messages, setMessages] = useState<FeedMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);

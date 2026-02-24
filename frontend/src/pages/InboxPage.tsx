@@ -3,9 +3,11 @@ import { getInbox } from '../api/mailbox';
 import { useAuthStore } from '../store/authStore';
 import MessageCard from '../components/MessageCard';
 import SearchBar from '../components/SearchBar';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { MessageSummary } from '../types/mailbox';
 
 export default function InboxPage() {
+  useDocumentTitle('Inbox');
   const [messages, setMessages] = useState<MessageSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { getTasks, getMemberActivity } from '../api/mailbox';
 import { useAuthStore } from '../store/authStore';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { TaskSummary } from '../types/mailbox';
 
 const STATUSES = ['', 'pending', 'launched', 'in_progress', 'completed', 'failed', 'killed'];
@@ -29,6 +30,7 @@ function formatDate(iso: string) {
 }
 
 export default function TasksPage() {
+  useDocumentTitle('Tasks');
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [members, setMembers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);

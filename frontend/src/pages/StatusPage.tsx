@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getHealthCheck, getMemberActivity, getEmberStatus, getTasks } from '../api/mailbox';
 import { useAuthStore } from '../store/authStore';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { MemberActivity, EmberInfo, TaskSummary } from '../types/mailbox';
 
 const memberColors: Record<string, string> = {
@@ -51,6 +52,7 @@ function lastActivity(member: MemberActivity): string | null {
 }
 
 export default function StatusPage() {
+  useDocumentTitle('Status');
   const [healthy, setHealthy] = useState<boolean | null>(null);
   const [members, setMembers] = useState<MemberActivity[]>([]);
   const [emberStatus, setEmberStatus] = useState<Record<string, EmberInfo>>({});

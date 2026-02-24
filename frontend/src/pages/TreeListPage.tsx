@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getTrees } from '../api/mailbox';
 import { useAuthStore } from '../store/authStore';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { TreeSummary } from '../types/mailbox';
 
 const statusColors: Record<string, string> = {
@@ -27,6 +28,7 @@ function formatDate(iso: string) {
 }
 
 export default function TreeListPage() {
+  useDocumentTitle('Trees');
   const [trees, setTrees] = useState<TreeSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

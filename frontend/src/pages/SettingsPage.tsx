@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuthStore } from '../store/authStore';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const IDENTITIES = [
   { value: 'ian', label: 'Ian' },
@@ -9,6 +10,7 @@ const IDENTITIES = [
 ];
 
 export default function SettingsPage() {
+  useDocumentTitle('Settings');
   const { apiKey, brotherName, setAuth, clearAuth } = useAuthStore();
   const [keyInput, setKeyInput] = useState(apiKey || '');
   const [nameInput, setNameInput] = useState(brotherName || '');

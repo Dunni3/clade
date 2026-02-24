@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getCards, createCard, updateCard, deleteCard, getTask } from '../api/mailbox';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { CardSummary, CreateCardRequest, TaskSummary } from '../types/mailbox';
 import Linkify from '../components/Linkify';
 import PeekDrawer from '../components/PeekDrawer';
@@ -43,6 +44,7 @@ function getAdjacentColumns(col: string): { prev: string | null; next: string | 
 }
 
 export default function KanbanPage() {
+  useDocumentTitle('Board');
   const [searchParams, setSearchParams] = useSearchParams();
   const [cards, setCards] = useState<CardSummary[]>([]);
   const [loading, setLoading] = useState(true);
