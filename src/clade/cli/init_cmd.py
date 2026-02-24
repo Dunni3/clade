@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import click
 
 from .clade_config import CladeConfig, default_config_path, save_clade_config
 from .identity import generate_personal_identity, write_identity_local
 from .keys import add_key, keys_path
-from .clade_config import default_brothers_config_path
 from .mcp_utils import is_mcp_registered, register_mcp_server
 from .naming import format_suggestion, suggest_name
 
@@ -25,6 +25,8 @@ from .naming import format_suggestion, suggest_name
 @click.option("--server-key", default=None, help="Existing API key for bootstrapping registration with the Hearth")
 @click.option("--no-mcp", is_flag=True, help="Skip MCP registration in ~/.claude.json")
 @click.option("--no-identity", is_flag=True, help="Skip writing identity to CLAUDE.md")
+@click.option("--no-skills", is_flag=True, help="Skip installing bundled skills")
+@click.option("--no-verify-ssl", is_flag=True, help="Disable SSL verification for self-signed certs")
 @click.option("--yes", "-y", is_flag=True, help="Accept defaults without prompting")
 @click.pass_context
 def init_cmd(
@@ -39,6 +41,8 @@ def init_cmd(
     server_key: str | None,
     no_mcp: bool,
     no_identity: bool,
+    no_skills: bool,
+    no_verify_ssl: bool,
     yes: bool,
 ) -> None:
     """Initialize a new Clade configuration."""
@@ -117,6 +121,7 @@ def init_cmd(
         server_url=server_url,
         server_ssh=server_ssh,
         server_ssh_key=server_ssh_key,
+        verify_ssl=not no_verify_ssl,
     )
 
     # Save config
@@ -130,11 +135,29 @@ def init_cmd(
 
     # Register API key with the Hearth
     if server_url and server_key:
-        _register_key_with_hearth(server_url, server_key, personal_name, key)
+        _register_key_with_hearth(server_url, server_key, personal_name, key, config.verify_ssl)
 
     # Register MCP server
     if not no_mcp:
         _register_personal_mcp(personal_name, key, server_url)
+
+    # Install bundled skills
+    if not no_skills:
+        from .skills import install_all_skills
+
+        try:
+            skills_dir = (config_dir / "skills") if config_dir else None
+            results = install_all_skills(target_dir=skills_dir)
+            installed = [k for k, v in results.items() if v]
+            if installed:
+                click.echo(f"Installed skills: {', '.join(installed)}")
+            failed = [k for k, v in results.items() if not v]
+            if failed:
+                click.echo(
+                    click.style(f"  Warning: failed to install skills: {', '.join(failed)}", fg="yellow")
+                )
+        except Exception as e:
+            click.echo(click.style(f"  Warning: could not install skills: {e}", fg="yellow"))
 
     # Write identity to CLAUDE.md
     if not no_identity:
@@ -164,25 +187,44 @@ def _register_personal_mcp(
     server_url: str | None,
 ) -> None:
     """Register the personal MCP server in ~/.claude.json."""
+    import shutil
+
     server_name = "clade-personal"
     if is_mcp_registered(server_name):
         click.echo(f"MCP server '{server_name}' already registered in ~/.claude.json")
         return
 
-    python_path = sys.executable
+    # Find the clade-personal entry point — prefer the one in the same
+    # bin dir as the current Python (correct venv), fall back to PATH.
+    bin_dir = Path(sys.executable).parent
+    entry_point = bin_dir / "clade-personal"
+    fallback_args: list[str] | None = None
+    if not entry_point.exists():
+        found = shutil.which("clade-personal")
+        if found:
+            entry_point = Path(found)
+        else:
+            click.echo(
+                click.style(
+                    "  Warning: clade-personal entry point not found, falling back to python -m",
+                    fg="yellow",
+                )
+            )
+            # Last resort fallback — should not happen if clade is properly installed
+            entry_point = Path(sys.executable)
+            fallback_args = ["-m", "clade.mcp.server_full"]
+
+    command = str(entry_point)
     env: dict[str, str] = {}
     if server_url:
         env["HEARTH_URL"] = server_url
         env["HEARTH_API_KEY"] = api_key
         env["HEARTH_NAME"] = name
 
-    # Point to brothers-ember.yaml for Ember delegation (file may not exist yet)
-    env["BROTHERS_CONFIG"] = str(default_brothers_config_path())
-
     register_mcp_server(
         server_name,
-        python_path,
-        "clade.mcp.server_full",
+        command,
+        args=fallback_args,
         env=env if env else None,
     )
     click.echo(f"Registered '{server_name}' MCP server in ~/.claude.json")
@@ -193,11 +235,11 @@ def _register_key_with_hearth(
     bootstrap_key: str,
     name: str,
     api_key: str,
+    verify_ssl: bool = True,
 ) -> None:
     """Register a newly generated API key with the Hearth server."""
     from ..communication.mailbox_client import MailboxClient
 
-    verify_ssl = server_url.startswith("https")
     client = MailboxClient(server_url, bootstrap_key, verify_ssl=verify_ssl)
     try:
         ok = client.register_key_sync(name, api_key)

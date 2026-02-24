@@ -205,6 +205,7 @@ def deploy_clade_package(
     ssh_host: str,
     ssh_key: str | None = None,
     timeout: int = 120,
+    pip_path: str | None = None,
 ) -> SSHResult:
     """Deploy the clade package to a remote host via tar pipe + pip install.
 
@@ -213,12 +214,14 @@ def deploy_clade_package(
        pipe to ~/.local/share/clade/ on remote via tar | ssh tar.
     2. Run pip install -e . via run_remote.
 
-    Finds the right pip by searching for one that already has clade installed.
+    Finds the right pip by searching for one that already has clade installed,
+    then falls back to pip in a 'clade'-named conda env, then system pip.
 
     Args:
         ssh_host: SSH host string.
         ssh_key: Optional SSH key path.
         timeout: Timeout in seconds.
+        pip_path: Explicit pip path on remote (skips auto-detection).
 
     Returns:
         SSHResult — check for "DEPLOY_OK" in stdout for success.
@@ -280,7 +283,27 @@ def deploy_clade_package(
         return SSHResult(success=False, message=f"File transfer error: {e}")
 
     # Step 2: Find pip and install
-    install_script = """\
+    if pip_path:
+        # Explicit pip path provided (e.g. from bootstrap)
+        # Validate pip_path to prevent shell injection (value comes from remote output)
+        import re
+        if not re.match(r'^[a-zA-Z0-9/_.\-~]+$', pip_path):
+            return SSHResult(
+                success=False,
+                message=f"Invalid pip path (contains unsafe characters): {pip_path}",
+            )
+        install_script = f"""\
+#!/bin/bash
+set -e
+CLADE_DIR="$HOME/.local/share/clade"
+PIP="{pip_path}"
+echo "Using pip: $PIP"
+cd "$CLADE_DIR"
+"$PIP" install -e . 2>&1 | tail -5
+echo "DEPLOY_OK"
+"""
+    else:
+        install_script = """\
 #!/bin/bash
 set -e
 CLADE_DIR="$HOME/.local/share/clade"
@@ -302,6 +325,21 @@ for candidate in \\
         fi
     fi
 done
+
+# Fallback: try pip in a 'clade' conda env (fresh bootstrap, clade not yet installed)
+if [ -z "$PIP" ]; then
+    for candidate in \\
+        ~/miniforge3/envs/clade/bin/pip \\
+        ~/mambaforge/envs/clade/bin/pip \\
+        ~/miniconda3/envs/clade/bin/pip \\
+        ~/anaconda3/envs/clade/bin/pip \\
+        ~/.conda/envs/clade/bin/pip; do
+        if [ -x "$candidate" ]; then
+            PIP="$candidate"
+            break
+        fi
+    done
+fi
 
 # Fallback: try system pip
 if [ -z "$PIP" ]; then
