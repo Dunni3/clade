@@ -13,9 +13,6 @@ jobs:
   hearth-bridge:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Extract card ID from branch name
         id: extract
         env:
@@ -128,6 +125,7 @@ jobs:
         if: steps.card.outputs.found == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           CARD_ID: ${{ steps.extract.outputs.card_id }}
           CARD_TITLE: ${{ steps.card.outputs.title }}
@@ -179,14 +177,16 @@ jobs:
           fi
 
           # Get current PR body and append
-          CURRENT_BODY=$(gh pr view "$PR_NUMBER" --json body -q '.body')
+          CURRENT_BODY=$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" --jq '.body')
           {
             echo "$CURRENT_BODY"
             echo ""
             cat /tmp/hearth_context.md
           } > /tmp/new_body.md
 
-          gh pr edit "$PR_NUMBER" --body-file /tmp/new_body.md
+          gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" \
+            -X PATCH \
+            -F "body=@/tmp/new_body.md"
 
       - name: Link PR back to card
         if: steps.card.outputs.found == 'true'
