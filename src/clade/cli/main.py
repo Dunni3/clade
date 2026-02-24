@@ -9,6 +9,8 @@ from .add_brother import add_brother
 from .deploy_cmd import deploy
 from .setup_ember_cmd import setup_ember_cmd
 from .setup_conductor_cmd import setup_conductor_cmd
+from .setup_gh_auth_cmd import setup_gh_auth_cmd
+from .setup_github_cmd import setup_github_cmd
 from .status_cmd import status_cmd
 from .doctor import doctor
 
@@ -33,5 +35,7 @@ cli.add_command(add_brother, "add-brother")
 cli.add_command(deploy, "deploy")
 cli.add_command(setup_ember_cmd, "setup-ember")
 cli.add_command(setup_conductor_cmd, "setup-conductor")
+cli.add_command(setup_gh_auth_cmd, "setup-gh-auth")
+cli.add_command(setup_github_cmd, "setup-github")
 cli.add_command(status_cmd, "status")
 cli.add_command(doctor, "doctor")
