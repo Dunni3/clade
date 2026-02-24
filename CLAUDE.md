@@ -42,7 +42,7 @@ clade/
 
 **The Hearth** — FastAPI + SQLite communication hub on EC2. Stores messages, tasks, morsels, kanban cards, ember registry. Web UI (React SPA) in `frontend/`. Server code in `hearth/`. Env vars: `HEARTH_URL`, `HEARTH_API_KEY`, `HEARTH_NAME`. See [docs/architecture.md](docs/architecture.md#the-hearth-communication-hub).
 
-**Task Trees** — Parent-child task hierarchies via `parent_task_id` / `root_task_id` columns. The conductor auto-links follow-up tasks using `TRIGGER_TASK_ID` env var. Frontend: React Flow graph with dagre layout. See [docs/architecture.md](docs/architecture.md#task-trees).
+**Task Trees** — Parent-child task hierarchies via `parent_task_id` / `root_task_id` / `depth` columns. Each task tracks its depth (root=0, auto-computed). Root tasks can carry `metadata` (JSON dict) for tree-level config like `max_depth`. The conductor auto-links follow-up tasks using `TRIGGER_TASK_ID` env var. Frontend: React Flow graph with dagre layout. See [docs/architecture.md](docs/architecture.md#task-trees).
 
 **Morsels** — Tagged notes for audit trails and cross-session context, linked to tasks/brothers/cards. Conductor deposits a morsel each tick. See [docs/architecture.md](docs/architecture.md#morsels).
 

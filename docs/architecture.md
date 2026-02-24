@@ -41,6 +41,8 @@ The Ember runner (local_runner.sh.j2) creates a git worktree for each task:
 
 - **`on_complete`**: Follow-up instructions the conductor reads as a "primary directive" when the task completes. Copied on `retry_task`. Used by the `implement-card` skill to chain implementation → review.
 - **`card_id`**: Links the task to a kanban card. Creates a formal link so the card tracks which tasks work on it.
+- **`metadata`**: Arbitrary JSON dict stored on tasks (typically root tasks). Used for tree-level configuration like `max_depth`. Serialized to JSON TEXT in SQLite, deserialized on retrieval.
+- **`depth`**: Integer tracking a task's position in its tree (root = 0, children = 1, etc.). Auto-computed on insert from `parent.depth + 1`. Cascades on reparenting via recursive CTE.
 
 ### Deferred Dependencies (`blocked_by_task_id`)
 
@@ -71,11 +73,18 @@ Tasks can declare a dependency on another task. The Hearth handles this server-s
 
 Tasks form parent-child hierarchies that grow organically. When any task completes or fails, the conductor is triggered, reviews the result, and can delegate follow-up tasks as children. This creates a tree of work without upfront planning.
 
-**DB schema:** `parent_task_id` and `root_task_id` columns on the tasks table. Every standalone task has `root_task_id = self.id` (single-node tree). When a child is created, it inherits `root_task_id` from its parent.
+**DB schema:** `parent_task_id`, `root_task_id`, `depth`, and `metadata` columns on the tasks table. Every standalone task has `root_task_id = self.id` and `depth = 0` (single-node tree). When a child is created, it inherits `root_task_id` from its parent and gets `depth = parent.depth + 1`.
 
-**API:** `GET /api/v1/trees` returns root tasks with per-status child counts. `GET /api/v1/trees/{root_id}` returns the full recursive tree. `POST /api/v1/tasks` accepts optional `parent_task_id`; `root_task_id` is auto-computed.
+**Depth tracking:** Each task stores its depth in the tree (root = 0). Depth is auto-computed on insert and cascaded on reparenting (via recursive CTE that shifts all descendants by the delta). This enables O(1) depth lookups without traversal.
 
-**Frontend:** TreeListPage shows all trees with status breakdown pills. TreeDetailPage renders an interactive React Flow graph (dagre layout) with status-colored nodes, click-to-inspect side panel, animated edges for in-progress tasks. Dependencies: `@xyflow/react`, `dagre`.
+**Task metadata:** Tasks accept an optional `metadata` dict (stored as JSON TEXT). This is the extension mechanism for tree-level configuration. Currently used for:
+- `max_depth` — Maximum tree depth the conductor should respect (default: 15 in conductor prompt). The conductor checks `root_task.metadata.max_depth` before delegating children. This is a **soft guardrail** enforced by the conductor prompt, not a database constraint.
+
+Metadata is typically set on root tasks and read by looking up the tree's root. Future uses could include strategy hints, retry policies, or priority escalation rules.
+
+**API:** `GET /api/v1/trees` returns root tasks with per-status child counts. `GET /api/v1/trees/{root_id}` returns the full recursive tree with depth and metadata on every node. `POST /api/v1/tasks` accepts optional `parent_task_id` and `metadata`; `root_task_id` and `depth` are auto-computed.
+
+**Frontend:** TreeListPage shows all trees with status breakdown pills. TreeDetailPage renders an interactive React Flow graph (dagre layout) with status-colored nodes, click-to-inspect side panel, animated edges for in-progress tasks. Task detail shows depth badge (when > 0) and metadata key-value pills. Dependencies: `@xyflow/react`, `dagre`.
 
 **Auto-parent linking:** The tick prompt instructs the conductor to always pass `parent_task_id=TRIGGER_TASK_ID` explicitly when delegating follow-up tasks. The `delegate_task()` tool also reads `TRIGGER_TASK_ID` from env as a safety net when `parent_task_id` is not provided.
 
@@ -172,7 +181,7 @@ The **Conductor** is a periodic process that orchestrates multi-step workflows b
 
 **Auto-parent linking:** The tick prompt instructs the conductor to always pass `parent_task_id=TRIGGER_TASK_ID` explicitly. The `delegate_task()` tool also reads `TRIGGER_TASK_ID` from env as a safety net. Explicit `parent_task_id` overrides the env var.
 
-**Guardrails:** Max tree depth 5, max 2 retries (prefer `retry_task()` for failed tasks), check worker aspen load before delegating. The conductor deposits a morsel at the end of every tick summarizing observations and actions.
+**Guardrails:** Configurable max tree depth via `metadata.max_depth` on root tasks (default 15, enforced in conductor prompt), max 2 retries (prefer `retry_task()` for failed tasks), check worker aspen load before delegating. The conductor deposits a morsel at the end of every tick summarizing observations and actions.
 
 **Key files:**
 - `src/clade/mcp/server_conductor.py` — MCP server (mailbox + trees + delegation tools)
@@ -229,7 +238,7 @@ ssh <server-ssh> sudo systemctl start conductor-tick.service  # manual trigger
 - **Recipient validation:** `POST /api/v1/messages` validates recipients against registered members (env-var keys + DB keys). Unknown recipients return 422.
 - **Health endpoint:** `GET /api/v1/health` — simple liveness check
 - **Members API:** `GET /api/v1/members/activity` — per-member stats (messages sent, active/completed/failed tasks, last activity timestamps)
-- **Task trees:** Tasks support parent-child relationships via `parent_task_id` and `root_task_id` columns. Trees grow organically as the conductor delegates follow-up tasks. API: `GET /api/v1/trees` (list with status summaries), `GET /api/v1/trees/{root_id}` (full recursive tree). `POST /api/v1/tasks` accepts optional `parent_task_id`; `root_task_id` is auto-computed.
+- **Task trees:** Tasks support parent-child relationships via `parent_task_id`, `root_task_id`, `depth`, and `metadata` columns. Trees grow organically as the conductor delegates follow-up tasks. `depth` is auto-computed (root=0, child=parent+1) and cascaded on reparenting. `metadata` is a JSON dict for tree-level config (e.g. `max_depth`). API: `GET /api/v1/trees` (list with status summaries), `GET /api/v1/trees/{root_id}` (full recursive tree with depth/metadata). `POST /api/v1/tasks` accepts optional `parent_task_id` and `metadata`; `root_task_id` and `depth` are auto-computed.
 - **Morsels:** Structured observation repository. Any brother can deposit a morsel (text note tagged with keywords and linked to tasks/brothers). Tables: `morsels`, `morsel_tags`, `morsel_links`. API: `POST /api/v1/morsels`, `GET /api/v1/morsels` (filtered by creator/tag/linked object), `GET /api/v1/morsels/{id}`.
 - **Ember registry (DB-backed):** Ember URLs stored in `embers` table instead of env var. API: `PUT /api/v1/embers/{name}` (register/update), `GET /api/v1/embers` (list), `DELETE /api/v1/embers/{name}` (admin). `GET /api/v1/embers/status` merges DB entries with `EMBER_URLS` env var (DB wins on conflict). `clade setup-ember` auto-registers after deployment.
 - **Task events:** `POST /api/v1/tasks/{task_id}/log` — log events (tool calls, progress updates) against a task. Events stored in `task_events` table and returned with task detail.

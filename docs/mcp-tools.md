@@ -6,7 +6,7 @@ Tool signatures for each MCP server type. For implementation details, see [archi
 
 - `list_brothers()` — List available brother instances
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
-- `initiate_ember_task(brother, prompt, subject?, parent_task_id?, working_dir?, max_turns?, card_id?, on_complete?, blocked_by_task_id?)` — **Primary delegation path.** Delegate a task to a brother via their Ember server. Supports deferred execution via `blocked_by_task_id`.
+- `initiate_ember_task(brother, prompt, subject?, parent_task_id?, working_dir?, max_turns?, card_id?, metadata?, on_complete?, blocked_by_task_id?, target_branch?)` — **Primary delegation path.** Delegate a task to a brother via their Ember server. Supports deferred execution via `blocked_by_task_id`, tree depth limits via `metadata={"max_depth": N}`.
 - `initiate_ssh_task(brother, prompt, subject?, working_dir?, max_turns?, auto_pull?, parent_task_id?, on_complete?, card_id?)` — Delegate a task via SSH + tmux (legacy path)
 - `list_tasks(assignee?, status?, limit?)`, `get_task(task_id)`, `update_task(task_id, ...)` — Task management
 - `kill_task(task_id)` — Kill a running task (terminates tmux session on Ember, marks as `killed`)
@@ -23,7 +23,7 @@ Tool signatures for each MCP server type. For implementation details, see [archi
 
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
 - `list_tasks`, `get_task`, `update_task` — Task visibility and status updates
-- `delegate_task(brother, prompt, subject?, parent_task_id?, working_dir?, max_turns?, card_id?, on_complete?, blocked_by_task_id?)` — Delegate a task to a worker via Ember. Auto-reads `TRIGGER_TASK_ID` from env for parent linking when `parent_task_id` is not explicitly set. Supports deferred execution via `blocked_by_task_id`.
+- `delegate_task(brother, prompt, subject?, parent_task_id?, working_dir?, max_turns?, card_id?, metadata?, on_complete?, blocked_by_task_id?, target_branch?)` — Delegate a task to a worker via Ember. Auto-reads `TRIGGER_TASK_ID` from env for parent linking when `parent_task_id` is not explicitly set. Supports deferred execution via `blocked_by_task_id`, tree depth limits via `metadata={"max_depth": N}`.
 - `check_worker_health(worker?)` — Check one or all worker Ember servers
 - `list_worker_tasks(worker?)` — List active tasks on worker Embers
 - `deposit_morsel(body, tags?, task_id?, brother?, card_id?)` — Deposit an observation/note
@@ -36,7 +36,7 @@ Tool signatures for each MCP server type. For implementation details, see [archi
 
 - `send_message`, `check_mailbox`, `read_message`, `browse_feed`, `unread_count` — Mailbox communication
 - `list_tasks`, `get_task`, `update_task`, `kill_task`, `retry_task` — Task visibility, status updates, kill, and retry
-- `initiate_ember_task(brother, prompt, subject?, parent_task_id?, working_dir?, max_turns?, card_id?, on_complete?, blocked_by_task_id?)` — Delegate tasks to sibling brothers via their Embers
+- `initiate_ember_task(brother, prompt, subject?, parent_task_id?, working_dir?, max_turns?, card_id?, metadata?, on_complete?, blocked_by_task_id?, target_branch?)` — Delegate tasks to sibling brothers via their Embers
 - `deposit_morsel(body, tags?, task_id?, brother?, card_id?)` — Deposit an observation/note
 - `list_morsels(creator?, tag?, task_id?, card_id?, limit?)` — List morsels with filters
 - `list_trees(limit?)` — List task trees with status summaries
