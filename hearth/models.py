@@ -85,6 +85,9 @@ class CreateTaskRequest(BaseModel):
     working_dir: str | None = None
     parent_task_id: int | None = None
     metadata: dict | None = None
+    on_complete: str | None = None
+    blocked_by_task_id: int | None = None
+    max_turns: int | None = None
 
 
 class UpdateTaskRequest(BaseModel):
@@ -105,6 +108,7 @@ class TaskSummary(BaseModel):
     parent_task_id: int | None = None
     root_task_id: int | None = None
     depth: int = 0
+    blocked_by_task_id: int | None = None
 
 
 class LinkedCardInfo(BaseModel):
@@ -121,15 +125,18 @@ class TaskDetail(TaskSummary):
     working_dir: str | None = None
     output: str | None = None
     metadata: dict | None = None
+    on_complete: str | None = None
     messages: list[FeedMessage] = []
     events: list["TaskEvent"] = []
     children: list[TaskSummary] = []
+    blocked_tasks: list[TaskSummary] = []
     linked_cards: list[LinkedCardInfo] = []
 
 
 class CreateTaskResponse(BaseModel):
     id: int
     message: str = "Task created"
+    blocked_by_task_id: int | None = None
 
 
 # -- Task Events --
@@ -199,6 +206,7 @@ class TreeSummary(BaseModel):
     in_progress: int
     pending: int
     killed: int = 0
+    blocked: int = 0
 
 
 class TreeNode(BaseModel):
@@ -212,6 +220,7 @@ class TreeNode(BaseModel):
     completed_at: str | None = None
     parent_task_id: int | None = None
     root_task_id: int | None = None
+    blocked_by_task_id: int | None = None
     prompt: str | None = None
     session_name: str | None = None
     host: str | None = None
@@ -219,6 +228,7 @@ class TreeNode(BaseModel):
     output: str | None = None
     metadata: dict | None = None
     depth: int = 0
+    on_complete: str | None = None
     children: list["TreeNode"] = []
     linked_cards: list[LinkedCardInfo] = []
 

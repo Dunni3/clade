@@ -166,6 +166,20 @@ async def init_db() -> None:
             )
         except Exception:
             pass
+        # Migration: add blocked_by_task_id to tasks (deferred task dependencies)
+        try:
+            await db.execute(
+                "ALTER TABLE tasks ADD COLUMN blocked_by_task_id INTEGER REFERENCES tasks(id)"
+            )
+        except Exception:
+            pass
+        # Migration: add max_turns to tasks (persisted for deferred task delegation)
+        try:
+            await db.execute(
+                "ALTER TABLE tasks ADD COLUMN max_turns INTEGER"
+            )
+        except Exception:
+            pass
         # Migration: add project column to kanban_cards
         try:
             await db.execute(
@@ -174,6 +188,13 @@ async def init_db() -> None:
             # Backfill: tag all existing cards as project='clade'
             await db.execute(
                 "UPDATE kanban_cards SET project = 'clade' WHERE project IS NULL"
+            )
+        except Exception:
+            pass
+        # Migration: add on_complete column to tasks
+        try:
+            await db.execute(
+                "ALTER TABLE tasks ADD COLUMN on_complete TEXT"
             )
         except Exception:
             pass
@@ -532,6 +553,9 @@ async def insert_task(
     working_dir: str | None = None,
     parent_task_id: int | None = None,
     metadata: dict | None = None,
+    on_complete: str | None = None,
+    blocked_by_task_id: int | None = None,
+    max_turns: int | None = None,
 ) -> int:
     db = await get_db()
     try:
@@ -552,10 +576,40 @@ async def insert_task(
 
         metadata_json = json.dumps(metadata) if metadata is not None else None
 
+        # Validate blocking task exists (if specified).
+        # Note: circular dependencies are structurally impossible because
+        # blocked_by_task_id is only set at creation time and is immutable —
+        # a new task cannot be the blocker of an already-existing task.
+        if blocked_by_task_id is not None:
+            cursor = await db.execute(
+                "SELECT id, status FROM tasks WHERE id = ?",
+                (blocked_by_task_id,),
+            )
+            blocker = await cursor.fetchone()
+            if blocker is None:
+                raise ValueError(f"Blocking task {blocked_by_task_id} does not exist")
+            # If the blocking task is already completed, don't actually block
+            if blocker["status"] == "completed":
+                blocked_by_task_id = None
+
+        # Auto-default parent_task_id to blocker when not explicitly set.
+        # The simple sequential case ("do A then B") just works without
+        # needing to set both. Explicit parent_task_id overrides this.
+        if blocked_by_task_id is not None and parent_task_id is None:
+            parent_task_id = blocked_by_task_id
+            cursor = await db.execute(
+                "SELECT id, root_task_id, depth FROM tasks WHERE id = ?",
+                (parent_task_id,),
+            )
+            parent = await cursor.fetchone()
+            # parent is guaranteed to exist (we already validated blocked_by_task_id above)
+            root_task_id = parent["root_task_id"] if parent["root_task_id"] is not None else parent["id"]
+            depth = (parent["depth"] or 0) + 1
+
         cursor = await db.execute(
-            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, metadata, depth)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, metadata_json, depth),
+            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, metadata, depth, on_complete, blocked_by_task_id, max_turns)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, metadata_json, depth, on_complete, blocked_by_task_id, max_turns),
         )
         task_id = cursor.lastrowid
         # Every task is a root of its own tree when it has no parent
@@ -592,7 +646,7 @@ async def get_tasks(
             params.append(creator)
         where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
         sql = f"""
-            SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, depth
+            SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, depth, blocked_by_task_id
             FROM tasks
             {where_sql}
             ORDER BY created_at DESC
@@ -669,12 +723,21 @@ async def get_task(task_id: int) -> dict | None:
 
         # Get children
         cursor = await db.execute(
-            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, depth
+            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, depth, blocked_by_task_id
                FROM tasks WHERE parent_task_id = ? ORDER BY created_at ASC""",
             (task_id,),
         )
         child_rows = await cursor.fetchall()
         task["children"] = [dict(r) for r in child_rows]
+
+        # Get tasks blocked by this task
+        cursor = await db.execute(
+            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, blocked_by_task_id
+               FROM tasks WHERE blocked_by_task_id = ? ORDER BY created_at ASC""",
+            (task_id,),
+        )
+        blocked_rows = await cursor.fetchall()
+        task["blocked_tasks"] = [dict(r) for r in blocked_rows]
 
         # Get task events
         cursor = await db.execute(
@@ -727,6 +790,37 @@ async def get_task_events(task_id: int) -> list[dict]:
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+async def get_tasks_blocked_by(task_id: int) -> list[dict]:
+    """Get all pending tasks that are blocked by the given task."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT id, creator, assignee, subject, prompt, status, session_name, host,
+                      working_dir, parent_task_id, root_task_id, blocked_by_task_id, max_turns, created_at
+               FROM tasks
+               WHERE blocked_by_task_id = ? AND status = 'pending'
+               ORDER BY created_at ASC""",
+            (task_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+async def clear_blocked_by(task_id: int) -> None:
+    """Clear the blocked_by_task_id for a task (marks it as unblocked)."""
+    db = await get_db()
+    try:
+        await db.execute(
+            "UPDATE tasks SET blocked_by_task_id = NULL WHERE id = ?",
+            (task_id,),
+        )
+        await db.commit()
     finally:
         await db.close()
 
@@ -1037,7 +1131,7 @@ async def get_tree(root_task_id: int) -> dict | None:
     try:
         # Fetch root task
         cursor = await db.execute(
-            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, metadata, depth FROM tasks WHERE id = ?",
+            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, metadata, depth, on_complete, blocked_by_task_id FROM tasks WHERE id = ?",
             (root_task_id,),
         )
         root_row = await cursor.fetchone()
@@ -1053,7 +1147,7 @@ async def get_tree(root_task_id: int) -> dict | None:
 
         # Fetch all descendants (exclude root itself)
         cursor = await db.execute(
-            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, metadata, depth FROM tasks WHERE root_task_id = ? AND id != ? ORDER BY created_at ASC",
+            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, metadata, depth, on_complete, blocked_by_task_id FROM tasks WHERE root_task_id = ? AND id != ? ORDER BY created_at ASC",
             (root_task_id, root_task_id),
         )
         desc_rows = await cursor.fetchall()
@@ -1102,8 +1196,9 @@ async def get_trees(limit: int = 50, offset: int = 0) -> list[dict]:
                  SUM(CASE WHEN d.status = 'completed' THEN 1 ELSE 0 END) as completed,
                  SUM(CASE WHEN d.status = 'failed' THEN 1 ELSE 0 END) as failed,
                  SUM(CASE WHEN d.status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
-                 SUM(CASE WHEN d.status = 'pending' THEN 1 ELSE 0 END) as pending,
-                 SUM(CASE WHEN d.status = 'killed' THEN 1 ELSE 0 END) as killed
+                 SUM(CASE WHEN d.status = 'pending' AND d.blocked_by_task_id IS NULL THEN 1 ELSE 0 END) as pending,
+                 SUM(CASE WHEN d.status = 'killed' THEN 1 ELSE 0 END) as killed,
+                 SUM(CASE WHEN d.status = 'pending' AND d.blocked_by_task_id IS NOT NULL THEN 1 ELSE 0 END) as blocked
                FROM tasks d
                JOIN tasks r ON d.root_task_id = r.id
                WHERE d.root_task_id IS NOT NULL

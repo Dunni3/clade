@@ -10,6 +10,7 @@ from clade.cli.keys import (
     format_api_keys_env,
     generate_api_key,
     load_keys,
+    merge_keys_into_registry,
     save_keys,
 )
 
@@ -73,6 +74,69 @@ class TestAddKey:
         loaded = load_keys(kp)
         assert loaded["doot"] == "existing"
         assert "oppy" in loaded
+
+    def test_idempotent_returns_existing_key(self, tmp_path: Path):
+        """Calling add_key twice for the same name returns the same key."""
+        kp = tmp_path / "keys.json"
+        key1 = add_key("oppy", kp)
+        key2 = add_key("oppy", kp)
+        assert key1 == key2
+
+    def test_force_regenerates_key(self, tmp_path: Path):
+        """force=True generates a new key even if one exists."""
+        kp = tmp_path / "keys.json"
+        key1 = add_key("oppy", kp)
+        key2 = add_key("oppy", kp, force=True)
+        assert key1 != key2
+        # The file should have the new key
+        loaded = load_keys(kp)
+        assert loaded["oppy"] == key2
+
+
+class TestMergeKeysIntoRegistry:
+    def test_merges_matching_keys(self):
+        registry = {
+            "oppy": {"ember_url": "http://localhost:8100"},
+            "jerry": {"ember_url": "http://localhost:8101"},
+        }
+        keys = {"oppy": "key-oppy", "jerry": "key-jerry"}
+        merge_keys_into_registry(registry, keys)
+        assert registry["oppy"]["ember_api_key"] == "key-oppy"
+        assert registry["oppy"]["hearth_api_key"] == "key-oppy"
+        assert registry["jerry"]["ember_api_key"] == "key-jerry"
+        assert registry["jerry"]["hearth_api_key"] == "key-jerry"
+
+    def test_ignores_unmatched_keys(self):
+        registry = {"oppy": {"ember_url": "http://localhost:8100"}}
+        keys = {"oppy": "key-oppy", "unknown": "key-unknown"}
+        merge_keys_into_registry(registry, keys)
+        assert registry["oppy"]["ember_api_key"] == "key-oppy"
+        assert "unknown" not in registry
+
+    def test_ignores_registry_entries_without_keys(self):
+        registry = {
+            "oppy": {"ember_url": "http://localhost:8100"},
+            "jerry": {"ember_url": "http://localhost:8101"},
+        }
+        keys = {"oppy": "key-oppy"}
+        merge_keys_into_registry(registry, keys)
+        assert registry["oppy"]["ember_api_key"] == "key-oppy"
+        assert "ember_api_key" not in registry["jerry"]
+
+    def test_preserves_existing_fields(self):
+        registry = {
+            "oppy": {"ember_url": "http://localhost:8100", "working_dir": "/home/ian"},
+        }
+        keys = {"oppy": "key-oppy"}
+        merge_keys_into_registry(registry, keys)
+        assert registry["oppy"]["working_dir"] == "/home/ian"
+        assert registry["oppy"]["ember_api_key"] == "key-oppy"
+
+    def test_empty_inputs(self):
+        registry: dict[str, dict] = {}
+        keys: dict[str, str] = {}
+        merge_keys_into_registry(registry, keys)
+        assert registry == {}
 
 
 class TestFormatApiKeysEnv:

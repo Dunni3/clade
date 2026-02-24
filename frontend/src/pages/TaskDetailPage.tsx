@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getTask, killTask } from '../api/mailbox';
 import KillConfirmModal from '../components/KillConfirmModal';
+import Linkify from '../components/Linkify';
 import MorselPanel from '../components/MorselPanel';
 import type { TaskDetail, FeedMessage, TaskEvent } from '../types/mailbox';
 
@@ -257,20 +258,28 @@ export default function TaskDetailPage() {
             <h1 className="text-xl font-semibold text-gray-100">
               {task.subject || '(no subject)'}
             </h1>
-            {(task.parent_task_id || task.root_task_id || (task.children && task.children.length > 0) || (task.linked_cards && task.linked_cards.length > 0)) && (
+            {(task.parent_task_id || task.root_task_id || task.blocked_by_task_id || (task.children && task.children.length > 0) || (task.blocked_tasks && task.blocked_tasks.length > 0) || (task.linked_cards && task.linked_cards.length > 0)) && (
               <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                {task.blocked_by_task_id && (
+                  <Link to={`/tasks/${task.blocked_by_task_id}`} className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30 transition-colors">
+                    Blocked by #{task.blocked_by_task_id}
+                  </Link>
+                )}
                 {task.parent_task_id && (
                   <Link to={`/tasks/${task.parent_task_id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
                     Parent: #{task.parent_task_id}
                   </Link>
                 )}
-                {task.root_task_id && task.root_task_id !== task.id && (
-                  <Link to={`/trees/${task.root_task_id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
-                    Tree: #{task.root_task_id}
+                {task.root_task_id && (
+                  <Link to={`/trees/${task.root_task_id}`} className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-colors">
+                    View Tree &rarr;
                   </Link>
                 )}
                 {task.children && task.children.length > 0 && (
                   <span className="text-xs text-gray-500">Children: {task.children.length}</span>
+                )}
+                {task.blocked_tasks && task.blocked_tasks.length > 0 && (
+                  <span className="text-xs text-yellow-400">Blocking: {task.blocked_tasks.length} task{task.blocked_tasks.length !== 1 ? 's' : ''}</span>
                 )}
                 {task.linked_cards && task.linked_cards.map(card => (
                   <Link
@@ -311,7 +320,42 @@ export default function TaskDetailPage() {
       {task.output && (
         <div className="rounded-xl border border-gray-700 bg-gray-900 p-4 mb-4">
           <p className="text-sm font-medium text-gray-300 mb-2">Output</p>
-          <pre className="text-sm text-gray-400 whitespace-pre-wrap overflow-x-auto">{task.output}</pre>
+          <pre className="text-sm text-gray-400 whitespace-pre-wrap overflow-x-auto"><Linkify>{task.output}</Linkify></pre>
+        </div>
+      )}
+
+      {/* On Complete */}
+      {task.on_complete && (
+        <div className="rounded-xl border border-indigo-700/50 bg-indigo-950/20 p-4 mb-4">
+          <p className="text-sm font-medium text-indigo-300 mb-2">On Complete Instructions</p>
+          <pre className="text-sm text-gray-400 whitespace-pre-wrap overflow-x-auto">{task.on_complete}</pre>
+        </div>
+      )}
+
+      {/* Blocked Tasks (waiting for this task) */}
+      {task.blocked_tasks && task.blocked_tasks.length > 0 && (
+        <div className="rounded-xl border border-yellow-700/50 bg-gray-900 p-4 mb-4">
+          <p className="text-sm font-medium text-yellow-300 mb-2">
+            Tasks waiting for this to complete ({task.blocked_tasks.length})
+          </p>
+          <div className="space-y-2">
+            {task.blocked_tasks.map(bt => (
+              <Link
+                key={bt.id}
+                to={`/tasks/${bt.id}`}
+                className="block rounded-lg border border-gray-800 p-3 transition-colors hover:bg-gray-800/50"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono text-gray-500">#{bt.id}</span>
+                  <span className="inline-block rounded px-1.5 py-0.5 text-xs font-medium bg-yellow-500/20 text-yellow-300">
+                    blocked
+                  </span>
+                  <span className="text-xs text-gray-500">{bt.assignee}</span>
+                </div>
+                <p className="text-sm text-gray-300 truncate mt-1">{bt.subject || '(no subject)'}</p>
+              </Link>
+            ))}
+          </div>
         </div>
       )}
 

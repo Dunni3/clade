@@ -48,36 +48,35 @@ class TestRegisterMcpServer:
         p = tmp_path / "claude.json"
         register_mcp_server(
             "clade-worker",
-            "/usr/bin/python3",
-            "clade.mcp.server_lite",
+            "/usr/local/bin/clade-worker",
             env={"HEARTH_URL": "https://example.com"},
             path=p,
         )
         data = read_claude_json(p)
         assert "clade-worker" in data["mcpServers"]
         srv = data["mcpServers"]["clade-worker"]
-        assert srv["command"] == "/usr/bin/python3"
-        assert srv["args"] == ["-m", "clade.mcp.server_lite"]
+        assert srv["command"] == "/usr/local/bin/clade-worker"
+        assert srv["args"] == []
         assert srv["env"]["HEARTH_URL"] == "https://example.com"
 
     def test_preserves_existing_servers(self, tmp_path: Path):
         p = tmp_path / "claude.json"
         write_claude_json({"mcpServers": {"existing": {"command": "keep"}}}, p)
-        register_mcp_server("new-server", "/usr/bin/python3", "some.module", path=p)
+        register_mcp_server("new-server", "/usr/local/bin/clade-worker", path=p)
         data = read_claude_json(p)
         assert "existing" in data["mcpServers"]
         assert "new-server" in data["mcpServers"]
 
     def test_updates_existing_server(self, tmp_path: Path):
         p = tmp_path / "claude.json"
-        register_mcp_server("srv", "/old/python", "old.module", path=p)
-        register_mcp_server("srv", "/new/python", "new.module", path=p)
+        register_mcp_server("srv", "/old/path/clade-worker", path=p)
+        register_mcp_server("srv", "/new/path/clade-worker", path=p)
         data = read_claude_json(p)
-        assert data["mcpServers"]["srv"]["command"] == "/new/python"
+        assert data["mcpServers"]["srv"]["command"] == "/new/path/clade-worker"
 
     def test_no_env(self, tmp_path: Path):
         p = tmp_path / "claude.json"
-        register_mcp_server("srv", "/usr/bin/python3", "mod", path=p)
+        register_mcp_server("srv", "/usr/local/bin/clade-worker", path=p)
         data = read_claude_json(p)
         assert "env" not in data["mcpServers"]["srv"]
 
@@ -85,7 +84,7 @@ class TestRegisterMcpServer:
 class TestIsMcpRegistered:
     def test_registered(self, tmp_path: Path):
         p = tmp_path / "claude.json"
-        register_mcp_server("clade-worker", "/usr/bin/python3", "mod", path=p)
+        register_mcp_server("clade-worker", "/usr/local/bin/clade-worker", path=p)
         assert is_mcp_registered("clade-worker", p)
 
     def test_not_registered(self, tmp_path: Path):

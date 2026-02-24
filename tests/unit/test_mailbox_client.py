@@ -253,6 +253,43 @@ class TestMailboxClient:
             call_url = instance.get.call_args.args[0]
             assert "/trees/1" in call_url
 
+    @pytest.mark.asyncio
+    async def test_create_task_with_on_complete(self):
+        mock_resp = self._make_mock_resp({"id": 12})
+
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(post_resp=mock_resp)
+            MockClient.return_value = instance
+
+            result = await self.client.create_task(
+                assignee="oppy",
+                prompt="Do work",
+                subject="Test",
+                on_complete="Deploy after completion",
+            )
+            assert result["id"] == 12
+            instance.post.assert_called_once()
+            call_kwargs = instance.post.call_args
+            payload = call_kwargs.kwargs["json"]
+            assert payload["on_complete"] == "Deploy after completion"
+
+    @pytest.mark.asyncio
+    async def test_create_task_without_on_complete(self):
+        mock_resp = self._make_mock_resp({"id": 13})
+
+        with patch("clade.communication.mailbox_client.httpx.AsyncClient") as MockClient:
+            instance = self._make_async_client(post_resp=mock_resp)
+            MockClient.return_value = instance
+
+            result = await self.client.create_task(
+                assignee="oppy", prompt="Do work", subject="Test"
+            )
+            assert result["id"] == 13
+            instance.post.assert_called_once()
+            call_kwargs = instance.post.call_args
+            payload = call_kwargs.kwargs["json"]
+            assert "on_complete" not in payload
+
     def test_register_ember_sync_success(self):
         mock_resp = MagicMock()
         mock_resp.status_code = 200

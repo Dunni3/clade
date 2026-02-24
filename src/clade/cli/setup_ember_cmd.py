@@ -57,6 +57,7 @@ def setup_ember_cmd(ctx: click.Context, name: str, port: int, yes: bool) -> None
         server_url=config.server_url,
         yes=yes,
         hearth_api_key=caller_key,
+        verify_ssl=config.verify_ssl,
     )
 
     # Update config

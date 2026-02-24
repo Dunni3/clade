@@ -65,6 +65,7 @@ export interface TaskSummary {
   parent_task_id: number | null;
   root_task_id: number | null;
   depth: number;
+  blocked_by_task_id: number | null;
 }
 
 export interface TaskEvent {
@@ -90,7 +91,9 @@ export interface TaskDetail extends TaskSummary {
   working_dir: string | null;
   output: string | null;
   metadata: Record<string, unknown> | null;
+  on_complete: string | null;
   children: TaskSummary[];
+  blocked_tasks: TaskSummary[];
   messages: FeedMessage[];
   events: TaskEvent[];
   linked_cards: LinkedCardInfo[];
@@ -131,6 +134,7 @@ export interface TreeSummary {
   in_progress: number;
   pending: number;
   killed: number;
+  blocked: number;
 }
 
 export interface TreeNode {
@@ -144,6 +148,7 @@ export interface TreeNode {
   completed_at: string | null;
   parent_task_id: number | null;
   root_task_id: number | null;
+  blocked_by_task_id: number | null;
   prompt: string | null;
   session_name: string | null;
   host: string | null;

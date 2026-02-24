@@ -13,11 +13,13 @@ Check the environment variables `TRIGGER_TASK_ID` and `TRIGGER_MESSAGE_ID`.
 ## Event-Driven Path
 
 1. **Fetch the triggering task** via `get_task(TRIGGER_TASK_ID)`
-2. **Assess the result** — does it warrant follow-up tasks?
-   - If yes, check worker load first (`check_worker_health`), then delegate children. They will auto-link as children via the `TRIGGER_TASK_ID` env var.
+2. **Check for `on_complete` instructions** — if the completed/failed task has a non-null `on_complete` field, read it and follow those instructions as your **primary directive** for this tick. The `on_complete` field contains follow-up instructions attached by the task creator.
+3. **Assess the result** — does it warrant follow-up tasks (beyond any `on_complete` instructions)?
+   - If the task **failed** and retries remain, prefer `retry_task(TRIGGER_TASK_ID)` — it automatically re-delegates with the same prompt as a child task, server-side.
+   - If the task **completed** and needs follow-up, check worker load first (`check_worker_health`), then delegate children. **Always pass `parent_task_id=TRIGGER_TASK_ID` explicitly** when calling `delegate_task()` so the new task is linked as a child of the triggering task. (The env var provides a safety net, but passing it explicitly ensures the tree is built correctly.)
    - If no follow-up needed, note completion
-3. **Deposit a morsel** summarizing what happened (tagged `conductor-tick`, linked to the task)
-4. **Check mailbox** — read and respond to any unread messages
+4. **Deposit a morsel** summarizing what happened (tagged `conductor-tick`, linked to the task)
+5. **Check mailbox** — read and respond to any unread messages
 
 ## Message-Driven Path
 
@@ -32,17 +34,23 @@ Check the environment variables `TRIGGER_TASK_ID` and `TRIGGER_MESSAGE_ID`.
 1. **Check mailbox** — read any unread messages addressed to you. Respond if needed.
 2. **Scan for stuck tasks** — call `list_tasks(status="launched")`. Any task stuck in `launched` for more than 10 minutes likely had its tmux session die silently. For each stuck task:
    - Check if the assigned worker is healthy (`check_worker_health`)
-   - If the worker is healthy, **re-delegate** the task by creating a new child task with the same prompt and marking the stuck one as `failed` with output "tmux session died — re-delegated as task #N"
+   - If the worker is healthy, mark the stuck task as `failed` with output "tmux session died", then retry it using `retry_task(task_id)` — this automatically creates a child task with the same prompt
    - If the worker is unreachable, mark the task as `failed` with output "worker unreachable"
    - Deposit a morsel noting the stuck task and action taken
-3. **Check worker health** — verify all workers are reachable
-4. **Deposit a morsel** if anything noteworthy happened (tagged `conductor-tick`)
+3. **Scan for orphaned pending tasks** — call `list_tasks(status="pending")`. Any task stuck in `pending` for more than 5 minutes was likely created in the Hearth but never reached the Ember (e.g. the delegation call failed and the status update was lost). For each orphaned pending task:
+   - Check if the assigned worker is healthy (`check_worker_health`)
+   - If the worker is healthy, **re-delegate** by creating a new child task with the same prompt and marking the orphaned one as `failed` with output "orphaned in pending — re-delegated as task #N"
+   - If the worker is unreachable, mark the task as `failed` with output "worker unreachable — task never reached Ember"
+   - Deposit a morsel noting the orphaned task and action taken
+4. **Check worker health** — verify all workers are reachable
+5. **Deposit a morsel** if anything noteworthy happened (tagged `conductor-tick`)
 
 ## Rules
 
 - Workers can run multiple concurrent tasks (aspens). Check `check_worker_health` for current load before delegating.
 - **Task tree depth:** Each task has a `depth` field (root = 0, children = parent + 1). The root task's `metadata` may contain `max_depth` (default: 15). Before delegating a child task, check the triggering task's depth against the root task's `metadata.max_depth`. If the current depth would exceed the limit, do not delegate further — note the depth limit in a morsel and move on.
 - **Retry limits:** Failed tasks may be retried at most 2 times. After 2 failures, note the failure and move on.
+- **Retry method:** Prefer `retry_task(task_id)` when retrying failed tasks — it automatically creates a child task with the same prompt and sends it to the worker's Ember server-side, bypassing your local config.
 - **Worker load:** Check active aspens via `check_worker_health` before delegating. If a worker is overloaded, prefer idle workers or wait.
 - **Killed tasks:** Tasks with status `killed` were intentionally stopped by a human or admin. NEVER retry killed tasks. NEVER delegate follow-up children from a killed task. If a tree has a killed branch, leave it dead.
 - **Card linking:** When delegating a task that relates to a kanban card, **always** pass the `card_id` parameter to `delegate_task()`. This creates a formal link so you can track which tasks are working on which cards. Check `list_board()` to see if there's a relevant card before delegating. If you're creating tasks for a new initiative, create a card first, then link the tasks to it.

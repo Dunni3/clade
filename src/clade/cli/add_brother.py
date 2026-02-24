@@ -6,16 +6,15 @@ import click
 
 from .clade_config import (
     BrotherEntry,
-    default_brothers_config_path,
     default_config_path,
     load_clade_config,
     save_clade_config,
 )
 from .conductor_setup import build_brothers_config
-from .ember_setup import setup_ember
+from .ember_setup import detect_clade_entry_point, setup_ember
 from .identity import generate_worker_identity, write_identity_remote
 from .keys import add_key, keys_path, load_keys
-from .mcp_utils import register_mcp_remote, update_mcp_env, update_mcp_env_remote
+from .mcp_utils import register_mcp_remote, update_mcp_env_remote
 from .naming import format_suggestion, suggest_name
 from .ssh_utils import check_remote_prereqs, deploy_clade_remote, run_remote, test_ssh
 
@@ -32,6 +31,7 @@ from .ssh_utils import check_remote_prereqs, deploy_clade_remote, run_remote, te
 @click.option("--no-identity", is_flag=True, help="Skip writing identity to remote CLAUDE.md")
 @click.option("--ember", "setup_ember_flag", is_flag=True, help="Set up an Ember server on the remote")
 @click.option("--ember-port", default=None, type=int, help="Ember server port (default: 8100)")
+@click.option("--no-verify-ssl", is_flag=True, help="Disable SSL verification for self-signed certs")
 @click.option("--yes", "-y", is_flag=True, help="Accept defaults without prompting")
 @click.pass_context
 def add_brother(
@@ -47,6 +47,7 @@ def add_brother(
     no_identity: bool,
     setup_ember_flag: bool,
     ember_port: int | None,
+    no_verify_ssl: bool,
     yes: bool,
 ) -> None:
     """Add a new brother to the Clade."""
@@ -106,6 +107,12 @@ def add_brother(
 
         if prereqs.errors and not yes:
             click.echo(f"Missing: {', '.join(prereqs.errors)}")
+            click.echo(
+                click.style(
+                    f"  Tip: run 'clade bootstrap {ssh_host}' to auto-setup conda + clade",
+                    fg="yellow",
+                )
+            )
             if not click.confirm("Continue anyway?", default=False):
                 raise SystemExit(1)
 
@@ -142,9 +149,12 @@ def add_brother(
     api_key = add_key(name, kp)
     click.echo(f"API key for '{name}' saved to {kp}")
 
+    # Apply --no-verify-ssl flag (overrides config)
+    verify_ssl = config.verify_ssl and not no_verify_ssl
+
     # Register API key with the Hearth
     if config.server_url:
-        _register_key_with_hearth(config.server_url, config.personal_name, name, api_key, kp)
+        _register_key_with_hearth(config.server_url, config.personal_name, name, api_key, kp, verify_ssl)
 
     # Register MCP on remote
     if not no_mcp and ssh_result.success:
@@ -178,6 +188,7 @@ def add_brother(
             server_url=config.server_url,
             yes=yes,
             hearth_api_key=caller_key,
+            verify_ssl=verify_ssl,
         )
 
     # Update config
@@ -194,22 +205,14 @@ def add_brother(
     save_clade_config(config, config_path)
     click.echo(f"Brother '{name}' added to {config_path}")
 
-    # Regenerate brothers-ember.yaml if any brother has Ember
+    # Deploy brothers-ember.yaml to remote workers (they don't have clade.yaml locally).
+    # The coordinator no longer needs a local brothers-ember.yaml — it builds the
+    # registry at runtime from clade.yaml + keys.json.
     all_keys = load_keys(keys_path(config_dir))
     has_ember_brothers = any(b.ember_host for b in config.brothers.values())
     if has_ember_brothers:
         brothers_yaml = build_brothers_config(config.brothers, all_keys)
-        brothers_path = default_brothers_config_path(config_dir)
-        brothers_path.parent.mkdir(parents=True, exist_ok=True)
-        brothers_path.write_text(brothers_yaml)
-        click.echo(f"Brothers config written to {brothers_path}")
 
-        # Update local MCP env to point to brothers config
-        updated = update_mcp_env("clade-personal", {"BROTHERS_CONFIG": str(brothers_path)})
-        if updated:
-            click.echo("  Updated local clade-personal MCP env")
-
-        # Deploy brothers config to each Ember brother and update their remote MCP env
         for bro_name, bro in config.brothers.items():
             if not bro.ember_host:
                 continue
@@ -261,6 +264,15 @@ def _register_remote_mcp(
         click.echo("  Skipping remote MCP registration (no server URL configured)")
         return
 
+    # Detect the clade-worker entry point on the remote
+    click.echo(f"Detecting clade-worker entry point on {ssh_host}...")
+    worker_cmd = detect_clade_entry_point(ssh_host, "clade-worker")
+    if worker_cmd:
+        click.echo(click.style(f"  Found: {worker_cmd}", fg="green"))
+    else:
+        click.echo(click.style("  clade-worker not found — MCP config will use bare 'clade-worker'", fg="yellow"))
+        worker_cmd = "clade-worker"
+
     click.echo(f"Registering MCP on {ssh_host}...")
     env = {
         "HEARTH_URL": server_url,
@@ -270,8 +282,7 @@ def _register_remote_mcp(
     result = register_mcp_remote(
         ssh_host,
         "clade-worker",
-        "python3",
-        "clade.mcp.server_lite",
+        worker_cmd,
         env,
     )
     if result.success and "MCP_REGISTERED" in result.stdout:
@@ -321,6 +332,7 @@ def _register_key_with_hearth(
     brother_name: str,
     brother_key: str,
     kp,
+    verify_ssl: bool = True,
 ) -> None:
     """Register the brother's API key with the Hearth using the personal brother's key."""
     from ..communication.mailbox_client import MailboxClient
@@ -336,7 +348,6 @@ def _register_key_with_hearth(
         )
         return
 
-    verify_ssl = server_url.startswith("https")
     client = MailboxClient(server_url, personal_key, verify_ssl=verify_ssl)
     try:
         ok = client.register_key_sync(brother_name, brother_key)

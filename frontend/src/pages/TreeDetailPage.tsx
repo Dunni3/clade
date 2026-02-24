@@ -47,10 +47,14 @@ type TaskNodeData = {
   subject: string;
   assignee: string;
   status: string;
+  blockedByTaskId: number | null;
 };
 
 function TaskNode({ data }: NodeProps<Node<TaskNodeData>>) {
-  const borderClass = statusColors[data.status] || 'border-gray-600 bg-gray-800/50';
+  const isBlocked = data.blockedByTaskId && data.status === 'pending';
+  const borderClass = isBlocked
+    ? 'border-yellow-500 bg-yellow-500/10'
+    : (statusColors[data.status] || 'border-gray-600 bg-gray-800/50');
   return (
     <div
       className={`rounded-lg border-2 px-3 py-2 ${borderClass}`}
@@ -59,8 +63,8 @@ function TaskNode({ data }: NodeProps<Node<TaskNodeData>>) {
       <Handle type="target" position={Position.Top} className="!bg-gray-500 !w-2 !h-2" />
       <div className="flex items-center gap-1.5 mb-1">
         <span className="text-xs font-mono text-gray-500">#{data.taskId}</span>
-        <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${statusBadgeColors[data.status] || 'bg-gray-700 text-gray-300'}`}>
-          {data.status}
+        <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${isBlocked ? 'bg-yellow-500/20 text-yellow-300' : (statusBadgeColors[data.status] || 'bg-gray-700 text-gray-300')}`}>
+          {isBlocked ? `blocked by #${data.blockedByTaskId}` : data.status}
         </span>
       </div>
       <p className="text-sm text-gray-200 truncate">{data.subject || '(no subject)'}</p>
@@ -87,6 +91,7 @@ function layoutTree(root: TreeNode): { nodes: Node<TaskNodeData>[]; edges: Edge[
       subject: node.subject,
       assignee: node.assignee,
       status: node.status,
+      blockedByTaskId: node.blocked_by_task_id,
     });
     for (const child of node.children) {
       g.setEdge(id, String(child.id));
@@ -229,6 +234,16 @@ export default function TreeDetailPage() {
             </div>
           </div>
           <h2 className="text-sm font-semibold text-gray-200 mb-2">{selectedTask.subject || '(no subject)'}</h2>
+          {selectedTask.blocked_by_task_id && (
+            <div className="mb-2">
+              <Link
+                to={`/tasks/${selectedTask.blocked_by_task_id}`}
+                className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30 transition-colors"
+              >
+                Blocked by #{selectedTask.blocked_by_task_id}
+              </Link>
+            </div>
+          )}
           <div className="flex flex-wrap gap-4 text-xs text-gray-500 mb-3">
             <span>Created: {formatDate(selectedTask.created_at)}</span>
             {selectedTask.started_at && <span>Started: {formatDate(selectedTask.started_at)}</span>}

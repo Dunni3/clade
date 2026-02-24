@@ -25,18 +25,32 @@ class TestBuildWorkersConfig:
                 ember_port=8100,
             ),
         }
-        keys = {"oppy": "key-oppy-123"}
 
-        result = build_workers_config(brothers, keys)
+        result = build_workers_config(brothers)
         data = yaml.safe_load(result)
 
         assert "workers" in data
         assert "oppy" in data["workers"]
         w = data["workers"]["oppy"]
         assert w["ember_url"] == "http://100.71.57.52:8100"
-        assert w["ember_api_key"] == "key-oppy-123"
-        assert w["hearth_api_key"] == "key-oppy-123"
         assert w["working_dir"] == "~/projects/OMTRA"
+
+    def test_no_api_keys_in_yaml(self):
+        """YAML output does not contain API keys (loaded at runtime)."""
+        brothers = {
+            "oppy": BrotherEntry(
+                ssh="ian@masuda",
+                ember_host="100.71.57.52",
+                ember_port=8100,
+            ),
+        }
+
+        result = build_workers_config(brothers)
+        data = yaml.safe_load(result)
+        w = data["workers"]["oppy"]
+
+        assert "ember_api_key" not in w
+        assert "hearth_api_key" not in w
 
     def test_skips_brothers_without_ember(self):
         """Brothers without ember_host are excluded."""
@@ -51,9 +65,8 @@ class TestBuildWorkersConfig:
                 # no ember_host
             ),
         }
-        keys = {"oppy": "key-oppy", "jerry": "key-jerry"}
 
-        result = build_workers_config(brothers, keys)
+        result = build_workers_config(brothers)
         data = yaml.safe_load(result)
 
         assert "oppy" in data["workers"]
@@ -64,9 +77,8 @@ class TestBuildWorkersConfig:
         brothers = {
             "jerry": BrotherEntry(ssh="ian@cluster"),
         }
-        keys = {"jerry": "key-jerry"}
 
-        result = build_workers_config(brothers, keys)
+        result = build_workers_config(brothers)
         data = yaml.safe_load(result)
 
         assert data["workers"] == {}
@@ -80,9 +92,8 @@ class TestBuildWorkersConfig:
                 # ember_port=None (default)
             ),
         }
-        keys = {"oppy": "key-oppy"}
 
-        result = build_workers_config(brothers, keys)
+        result = build_workers_config(brothers)
         data = yaml.safe_load(result)
 
         assert data["workers"]["oppy"]["ember_url"] == "http://10.0.0.1:8100"
@@ -102,9 +113,8 @@ class TestBuildWorkersConfig:
                 ember_port=8200,
             ),
         }
-        keys = {"oppy": "key-oppy", "jerry": "key-jerry"}
 
-        result = build_workers_config(brothers, keys)
+        result = build_workers_config(brothers)
         data = yaml.safe_load(result)
 
         assert len(data["workers"]) == 2
@@ -121,9 +131,8 @@ class TestBuildWorkersConfig:
                 # working_dir=None
             ),
         }
-        keys = {"oppy": "key-oppy"}
 
-        result = build_workers_config(brothers, keys)
+        result = build_workers_config(brothers)
         data = yaml.safe_load(result)
 
         assert "working_dir" not in data["workers"]["oppy"]
@@ -175,6 +184,7 @@ class TestBuildConductorMcpConfig:
             kamaji_key="test-key-456",
             server_url="https://54.84.119.14",
             workers_config_path="/home/ubuntu/.config/clade/conductor-workers.yaml",
+            keys_file_path="/home/ubuntu/.config/clade/keys.json",
         )
 
         data = json.loads(result)
@@ -184,9 +194,10 @@ class TestBuildConductorMcpConfig:
         assert env["HEARTH_API_KEY"] == "test-key-456"
         assert env["HEARTH_NAME"] == "kamaji"
         assert env["CONDUCTOR_WORKERS_CONFIG"] == "/home/ubuntu/.config/clade/conductor-workers.yaml"
+        assert env["KEYS_FILE"] == "/home/ubuntu/.config/clade/keys.json"
 
     def test_command_and_args(self):
-        """MCP config uses python3 -m to launch the conductor server."""
+        """MCP config uses entry point to launch the conductor server."""
         result = build_conductor_mcp_config(
             kamaji_key="key",
             server_url="https://example.com",
@@ -194,5 +205,18 @@ class TestBuildConductorMcpConfig:
 
         data = json.loads(result)
         server = data["mcpServers"]["clade-conductor"]
-        assert server["command"] == "python3"
-        assert server["args"] == ["-m", "clade.mcp.server_conductor"]
+        assert server["command"] == "clade-conductor"
+        assert server["args"] == []
+
+    def test_custom_conductor_cmd(self):
+        """MCP config uses provided entry point path."""
+        result = build_conductor_mcp_config(
+            kamaji_key="key",
+            server_url="https://example.com",
+            conductor_cmd="/home/ubuntu/.local/venv/bin/clade-conductor",
+        )
+
+        data = json.loads(result)
+        server = data["mcpServers"]["clade-conductor"]
+        assert server["command"] == "/home/ubuntu/.local/venv/bin/clade-conductor"
+        assert server["args"] == []

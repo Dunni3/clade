@@ -52,7 +52,11 @@ initiate_ssh_task(
     prompt: str,                  # task instructions
     subject: str = "",            # short description
     working_dir: str | None,      # override brother's default dir
-    max_turns: int = 50,          # Claude turn limit
+    max_turns: int | None,        # Claude turn limit
+    auto_pull: bool = False,      # git pull MCP server repo first
+    parent_task_id: int | None,   # parent task for tree linking
+    on_complete: str | None,      # follow-up instructions for Conductor
+    card_id: int | None,          # kanban card to link this task to
 )
 ```
 

@@ -72,6 +72,29 @@ def _now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# Column ordering for forward-only card sync
+_COLUMN_ORDER = {"backlog": 0, "todo": 1, "in_progress": 2, "done": 3, "archived": 4}
+
+
+async def _sync_linked_cards_to_in_progress(task_id: int, assignee: str) -> None:
+    """When a task moves to in_progress, sync any linked kanban cards forward.
+
+    Only cards in columns before in_progress (backlog, todo) are moved.
+    Cards already in in_progress, done, or archived are left untouched.
+
+    Note: The card's assignee is unconditionally set to the task's assignee,
+    overwriting any existing card assignee. This ensures the card reflects
+    who is actively working on it.
+    """
+    card_map = await db.get_cards_for_objects("task", [str(task_id)])
+    cards = card_map.get(str(task_id), [])
+    for card_info in cards:
+        card_col = card_info.get("col", "")
+        # Only sync forward: don't overwrite cards already in_progress, done, or archived
+        if _COLUMN_ORDER.get(card_col, 0) < _COLUMN_ORDER["in_progress"]:
+            await db.update_card(card_info["id"], col="in_progress", assignee=assignee)
+
+
 def _maybe_trigger_conductor_tick(
     task_id: int | None = None, message_id: int | None = None
 ) -> None:
@@ -94,6 +117,105 @@ def _maybe_trigger_conductor_tick(
         )
     except Exception:
         logger.warning("Failed to trigger conductor tick", exc_info=True)
+
+
+async def _cascade_failure(failed_task_id: int) -> None:
+    """When a task fails, cascade failure to any pending tasks blocked by it.
+
+    Recursively fails downstream tasks so that if A blocks B blocks C,
+    failing A will also fail B and C.
+    """
+    blocked_tasks = await db.get_tasks_blocked_by(failed_task_id)
+    if not blocked_tasks:
+        return
+
+    for task in blocked_tasks:
+        task_id = task["id"]
+        await db.clear_blocked_by(task_id)
+        await db.update_task(
+            task_id,
+            status="failed",
+            output=f"Upstream task #{failed_task_id} failed",
+            completed_at=_now_utc(),
+        )
+        # Recurse: cascade to anything blocked by this newly-failed task
+        await _cascade_failure(task_id)
+
+
+async def _unblock_and_delegate(completed_task_id: int) -> None:
+    """When a task completes, find tasks blocked by it and delegate them via Ember."""
+    blocked_tasks = await db.get_tasks_blocked_by(completed_task_id)
+    if not blocked_tasks:
+        return
+
+    # Fetch Ember registry once, outside the loop
+    db_embers = await db.get_embers()
+    ember_url_map: dict[str, str] = {e["name"]: e["ember_url"] for e in db_embers}
+
+    for task in blocked_tasks:
+        assignee = task["assignee"]
+        task_id = task["id"]
+
+        # Clear the blocked_by reference
+        await db.clear_blocked_by(task_id)
+
+        # Look up Ember URL: DB first, env fallback
+        ember_url = ember_url_map.get(assignee) or EMBER_URLS.get(assignee)
+
+        if not ember_url:
+            logger.warning(
+                "No Ember URL for assignee %s — cannot auto-delegate unblocked task #%d",
+                assignee, task_id,
+            )
+            continue
+
+        # Look up assignee's API key
+        assignee_key = await db.get_api_key_for_name(assignee)
+        if assignee_key is None:
+            for key, name in API_KEYS.items():
+                if name == assignee:
+                    assignee_key = key
+                    break
+
+        if not assignee_key:
+            logger.warning(
+                "No API key for assignee %s — cannot auto-delegate unblocked task #%d",
+                assignee, task_id,
+            )
+            continue
+
+        # Send to Ember
+        try:
+            payload: dict = {
+                "prompt": task["prompt"],
+                "task_id": task_id,
+                "subject": task["subject"] or "",
+                "sender_name": task["creator"],
+                "working_dir": task.get("working_dir"),
+            }
+            if task.get("max_turns") is not None:
+                payload["max_turns"] = task["max_turns"]
+            async with httpx.AsyncClient(verify=False, timeout=30.0) as http_client:
+                resp = await http_client.post(
+                    f"{ember_url}/tasks/execute",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {assignee_key}"},
+                )
+                resp.raise_for_status()
+            await db.update_task(task_id, status="launched")
+            logger.info(
+                "Auto-delegated unblocked task #%d to %s (was blocked by #%d)",
+                task_id, assignee, completed_task_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to auto-delegate unblocked task #%d: %s", task_id, e
+            )
+            await db.update_task(
+                task_id, status="failed",
+                output=f"Auto-delegation failed after unblock: {e}",
+                completed_at=_now_utc(),
+            )
 
 
 @app.get("/api/v1/health")
@@ -288,10 +410,19 @@ async def create_task(
             working_dir=req.working_dir,
             parent_task_id=req.parent_task_id,
             metadata=req.metadata,
+            on_complete=req.on_complete,
+            blocked_by_task_id=req.blocked_by_task_id,
+            max_turns=req.max_turns,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    return CreateTaskResponse(id=task_id)
+    # Return actual blocked_by_task_id from DB (may differ from input if blocker
+    # was already completed — insert_task auto-clears in that case)
+    task = await db.get_task(task_id)
+    return CreateTaskResponse(
+        id=task_id,
+        blocked_by_task_id=task["blocked_by_task_id"] if task else None,
+    )
 
 
 @app.get("/api/v1/tasks", response_model=list[TaskSummary])
@@ -393,6 +524,21 @@ async def update_task(
     else:
         # Re-fetch to pick up parent_task_id changes
         updated = await db.get_task(task_id)
+
+    # Auto-sync linked kanban cards when task moves to in_progress
+    if req.status == "in_progress":
+        try:
+            await _sync_linked_cards_to_in_progress(task_id, updated["assignee"])
+        except Exception:
+            logger.warning("Failed to sync linked cards for task %d", task_id, exc_info=True)
+
+    # When a task completes, unblock any tasks waiting on it and trigger delegation
+    if req.status == "completed":
+        await _unblock_and_delegate(task_id)
+
+    # When a task fails, cascade failure to any pending tasks blocked by it
+    if req.status == "failed":
+        await _cascade_failure(task_id)
 
     # Trigger conductor tick when any task reaches a terminal state
     # Note: "killed" is intentionally excluded — killed tasks must not trigger Kamaji
@@ -515,6 +661,7 @@ async def retry_task(
             host=task.get("host"),
             working_dir=task.get("working_dir"),
             parent_task_id=task_id,
+            on_complete=task.get("on_complete"),
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

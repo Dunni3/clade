@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 from mcp.server.fastmcp import FastMCP
 
+logger = logging.getLogger(__name__)
+
 from ...communication.mailbox_client import MailboxClient
 from ...worker.client import EmberClient
+
+logger = logging.getLogger(__name__)
 
 
 _NOT_CONFIGURED = "Conductor not configured. Ensure HEARTH_URL and HEARTH_API_KEY are set."
@@ -56,11 +61,16 @@ def create_conductor_tools(
         max_turns: int | None = None,
         card_id: int | None = None,
         metadata: dict | None = None,
+        on_complete: str | None = None,
+        blocked_by_task_id: int | None = None,
+        target_branch: str | None = None,
     ) -> str:
         """Delegate a task to a worker brother via their Ember server.
 
         Creates a task in the Hearth, sends it to the worker's Ember, and
-        updates the task status.
+        updates the task status. If blocked_by_task_id is set, the task is
+        created but not delegated — it will be auto-delegated when the
+        blocking task completes.
 
         Args:
             brother: Worker name (e.g. "oppy").
@@ -71,6 +81,9 @@ def create_conductor_tools(
             max_turns: Optional maximum Claude turns. If not set, no turn limit is applied.
             card_id: Optional kanban card ID to link this task to. Creates a formal link so the card tracks which tasks are working on it.
             metadata: Optional dict stored on root tasks. Supports keys like "max_depth" to configure tree behavior.
+            on_complete: Optional follow-up instructions for the Conductor when this task completes or fails.
+            blocked_by_task_id: Optional task ID that must complete before this task runs. The task will stay in 'pending' until the blocking task completes, then auto-delegate.
+            target_branch: Optional git branch to check out in the worktree. When set, the runner creates the worktree from this branch instead of HEAD.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -85,13 +98,27 @@ def create_conductor_tools(
             return f"Worker '{brother}' has no Ember configured."
 
         # Auto-link parent from env if not explicitly provided
-        if parent_task_id is None:
+        if parent_task_id is not None:
+            logger.info(
+                "delegate_task: explicit parent_task_id=%d provided, skipping env auto-link",
+                parent_task_id,
+            )
+        else:
             trigger_id = os.environ.get("TRIGGER_TASK_ID", "")
             if trigger_id:
                 try:
                     parent_task_id = int(trigger_id)
+                    logger.info(
+                        "delegate_task: auto-linked parent_task_id=%d from TRIGGER_TASK_ID env",
+                        parent_task_id,
+                    )
                 except (ValueError, TypeError):
-                    pass  # Invalid env value, ignore
+                    logger.warning(
+                        "delegate_task: TRIGGER_TASK_ID env has invalid value '%s', skipping auto-link",
+                        trigger_id,
+                    )
+            else:
+                logger.info("delegate_task: no parent_task_id provided and TRIGGER_TASK_ID not set, creating root task")
 
         # Create task in Hearth
         try:
@@ -101,6 +128,9 @@ def create_conductor_tools(
                 subject=subject,
                 parent_task_id=parent_task_id,
                 metadata=metadata,
+                on_complete=on_complete,
+                blocked_by_task_id=blocked_by_task_id,
+                max_turns=max_turns,
             )
             task_id = task_result["id"]
         except Exception as e:
@@ -112,6 +142,21 @@ def create_conductor_tools(
                 await mailbox.add_card_link(card_id, "task", str(task_id))
             except Exception:
                 pass  # Non-fatal: task still created, link just not established
+
+        # Check the *actual DB state* of blocked_by_task_id (not the input param).
+        # insert_task auto-clears blocked_by when the blocker is already completed,
+        # so the input param may say "blocked" while the DB says "ready to go".
+        actual_blocked_by = task_result.get("blocked_by_task_id")
+        if actual_blocked_by is not None:
+            result_lines = [
+                f"Task #{task_id} created (deferred — blocked by #{actual_blocked_by}).",
+                f"  Subject: {subject or '(none)'}",
+                f"  Assignee: {brother}",
+                f"  Status: pending (waiting for #{actual_blocked_by} to complete)",
+            ]
+            if card_id is not None:
+                result_lines.append(f"  Linked to card: #{card_id}")
+            return "\n".join(result_lines)
 
         # Send to Ember.
         # Don't pass hearth_url — the Ember process already has the correct
@@ -129,20 +174,28 @@ def create_conductor_tools(
                 hearth_api_key=worker.get("hearth_api_key") or worker.get("api_key"),
                 hearth_name=brother,
                 sender_name=mailbox_name,
+                target_branch=target_branch,
             )
         except Exception as e:
-            # Mark task as failed
+            # Mark task as failed so it doesn't get orphaned in pending
             try:
-                await mailbox.update_task(task_id, status="failed", output=str(e))
-            except Exception:
-                pass
+                await mailbox.update_task(task_id, status="failed", output=f"Ember delegation failed: {e}")
+            except Exception as status_err:
+                logger.error(
+                    "Task #%d orphaned in pending: Ember failed (%s) AND status update failed (%s)",
+                    task_id, e, status_err,
+                )
+                return (
+                    f"Task #{task_id} created but Ember delegation failed: {e}\n"
+                    f"WARNING: Failed to mark task as failed ({status_err}) — task is orphaned in pending status."
+                )
             return f"Task #{task_id} created but Ember delegation failed: {e}"
 
         # Update task status
         try:
             await mailbox.update_task(task_id, status="launched")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("Task #%d may be orphaned: launched on Ember but status update failed: %s", task_id, e)
 
         session = ember_result.get("session_name", "?")
         result_lines = [

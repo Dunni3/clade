@@ -1,6 +1,9 @@
 """SSH task delegation MCP tool definitions."""
 
+from __future__ import annotations
+
 import os
+from collections.abc import Callable
 
 from mcp.server.fastmcp import FastMCP
 
@@ -16,6 +19,7 @@ def create_task_tools(
     mcp: FastMCP,
     mailbox: MailboxClient | None,
     config: dict | None = None,
+    config_loader: Callable[[], dict] | None = None,
     mailbox_url: str | None = None,
     mailbox_api_key: str | None = None,
 ) -> dict:
@@ -24,14 +28,18 @@ def create_task_tools(
     Args:
         mcp: FastMCP server instance to register tools with
         mailbox: MailboxClient instance, or None if not configured
-        config: Terminal spawner config (for brother definitions). If None, loads from default.
+        config: Static terminal spawner config (deprecated, use config_loader)
+        config_loader: Callable that returns fresh config on each call
         mailbox_url: Mailbox API URL (passed to remote task for hook-based logging)
         mailbox_api_key: Mailbox API key (passed to remote task for hook-based logging)
     """
-    if config is None:
-        config = load_config()
 
-    brothers = config.get("brothers", {})
+    def _get_brothers() -> dict:
+        if config_loader is not None:
+            return config_loader().get("brothers", {})
+        if config is not None:
+            return config.get("brothers", {})
+        return load_config().get("brothers", {})
     mailbox_name = os.environ.get("HEARTH_NAME") or os.environ.get("MAILBOX_NAME")
 
     @mcp.tool()
@@ -43,6 +51,8 @@ def create_task_tools(
         max_turns: int | None = None,
         auto_pull: bool = False,
         parent_task_id: int | None = None,
+        on_complete: str | None = None,
+        card_id: int | None = None,
     ) -> str:
         """Send a task to a brother via SSH. Launches Claude Code in a detached tmux session.
 
@@ -62,10 +72,13 @@ def create_task_tools(
             max_turns: Optional maximum Claude turns. If not set, no turn limit is applied.
             auto_pull: If true, git pull the MCP server repo on the remote host before launching. Default true.
             parent_task_id: Optional parent task ID for task tree linking.
+            on_complete: Optional follow-up instructions for the Conductor when this task completes or fails.
+            card_id: Optional kanban card ID to link this task to.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
 
+        brothers = _get_brothers()
         bro = brothers.get(brother)
         if not bro:
             return f"Unknown brother: {brother}. Available: {', '.join(brothers.keys())}"
@@ -84,16 +97,24 @@ def create_task_tools(
                 host=host,
                 working_dir=wd,
                 parent_task_id=parent_task_id,
+                on_complete=on_complete,
             )
             task_id = task_resp["id"]
         except Exception as e:
             return f"Error creating task record: {e}"
 
-        # 2. Wrap prompt with task context
+        # 2. Link task to card if card_id provided
+        if card_id is not None:
+            try:
+                await mailbox.add_card_link(card_id, "task", str(task_id))
+            except Exception:
+                pass  # Non-fatal: task still created, link just not established
+
+        # 3. Wrap prompt with task context
         sender = mailbox_name or "doot"
         full_prompt = wrap_prompt(prompt, brother, subject, task_id, sender)
 
-        # 3. Launch via SSH (pass mailbox credentials for hook-based task logging)
+        # 4. Launch via SSH (pass mailbox credentials for hook-based task logging)
         result: TaskResult = initiate_task(
             host=host,
             working_dir=wd,
@@ -106,7 +127,7 @@ def create_task_tools(
             mailbox_api_key=mailbox_api_key,
         )
 
-        # 4. Update task status based on result
+        # 5. Update task status based on result
         if not result.success:
             try:
                 await mailbox.update_task(task_id, status="failed", output=result.message)
@@ -122,14 +143,17 @@ def create_task_tools(
         except Exception:
             pass
 
-        return (
-            f"Task #{task_id} launched successfully.\n"
-            f"  Brother: {brother}\n"
-            f"  Host: {host}\n"
-            f"  Session: {session_name}\n"
-            f"  Subject: {subject or '(none)'}\n"
-            f"Brother {brother} will report back via the mailbox."
-        )
+        result_lines = [
+            f"Task #{task_id} launched successfully.",
+            f"  Brother: {brother}",
+            f"  Host: {host}",
+            f"  Session: {session_name}",
+            f"  Subject: {subject or '(none)'}",
+        ]
+        if card_id is not None:
+            result_lines.append(f"  Linked to card: #{card_id}")
+        result_lines.append(f"Brother {brother} will report back via the mailbox.")
+        return "\n".join(result_lines)
 
     return {
         "initiate_ssh_task": initiate_ssh_task,

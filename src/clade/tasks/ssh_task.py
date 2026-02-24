@@ -76,28 +76,9 @@ def wrap_prompt(
     return "\n".join(line for line in lines if line is not None)
 
 
-def build_remote_script(
-    session_name: str,
-    working_dir: str | None,
-    prompt_b64: str,
-    max_turns: int | None = None,
-    auto_pull: bool = False,
-    task_id: int | None = None,
-    mailbox_url: str | None = None,
-    mailbox_api_key: str | None = None,
-) -> str:
-    """Build a bash script to run on the remote host via `ssh host bash -s`.
-
-    The script:
-    1. Optionally pulls latest MCP server code (discovered from ~/.claude.json)
-    2. Decodes the base64 prompt into a temp file
-    3. Writes a runner script that cd's and calls claude -p
-    4. Launches the runner in a detached tmux session
-    5. Prints TASK_LAUNCHED on success
-    """
-    cd_cmd = f'cd {working_dir} || exit 1' if working_dir else ":"
-    if auto_pull:
-        pull_block = """\
+def _build_pull_block() -> str:
+    """Return the auto-pull bash block for discovering and updating the clade repo."""
+    return """\
 # Discover clade repo and pull latest
 MCP_REPO=""
 
@@ -131,56 +112,68 @@ if [ -n "$MCP_REPO" ] && [ -d "$MCP_REPO/.git" ]; then
     git -C "$MCP_REPO" checkout main 2>&1 || true
     git -C "$MCP_REPO" pull --ff-only 2>&1 || true
 fi"""
-    else:
-        pull_block = ""
 
-    # Export env vars for hook-based task logging (only if all three are provided)
+
+def build_remote_script(
+    session_name: str,
+    working_dir: str | None,
+    prompt_b64: str,
+    max_turns: int | None = None,
+    auto_pull: bool = False,
+    task_id: int | None = None,
+    mailbox_url: str | None = None,
+    mailbox_api_key: str | None = None,
+) -> str:
+    """Build a bash script to run on the remote host via `ssh host bash -s`.
+
+    The script:
+    1. Optionally pulls latest MCP server code (discovered from ~/.claude.json)
+    2. Decodes the base64 prompt into a temp file
+    3. Writes a runner script that cd's and calls claude -p
+    4. Launches the runner in a detached tmux session
+    5. Prints TASK_LAUNCHED on success
+
+    Uses a two-phase Jinja2 render: the inner runner is rendered as clean bash,
+    then heredoc-escaped and embedded into the outer wrapper.
+    """
+    from ..templates import render_template, heredoc_escape
+
+    cd_cmd = f"cd {working_dir} || exit 1" if working_dir else ":"
+    has_trap = task_id is not None and mailbox_url and mailbox_api_key
+
     env_lines = ""
-    exit_handler = ""
-    if task_id is not None and mailbox_url and mailbox_api_key:
+    if has_trap:
         env_lines = (
             f"export CLAUDE_TASK_ID={task_id}\n"
             f"export HEARTH_URL='{mailbox_url}'\n"
             f"export HEARTH_API_KEY='{mailbox_api_key}'"
         )
-        exit_handler = """\
-EXIT_CODE=\\$?
-# Auto-mark task failed if session exited without completing
-if [ -n "\\$CLAUDE_TASK_ID" ] && [ -n "\\$HEARTH_URL" ] && [ -n "\\$HEARTH_API_KEY" ]; then
-    curl -sf -X PATCH "\\$HEARTH_URL/api/v1/tasks/\\$CLAUDE_TASK_ID" \\
-        -H "Authorization: Bearer \\$HEARTH_API_KEY" \\
-        -H "Content-Type: application/json" \\
-        -d "{{\\"status\\":\\"failed\\",\\"output\\":\\"Session exited with code \\$EXIT_CODE\\"}}" \\
-        >/dev/null 2>&1 || true
-fi"""
 
-    return f"""\
-#!/bin/bash
-set -e
+    # Phase 1: render inner runner as clean bash
+    inner = render_template(
+        "remote_inner_runner.sh.j2",
+        env_lines=env_lines,
+        has_trap=has_trap,
+        cd_cmd=cd_cmd,
+        claude_started_flag=has_trap,
+        max_turns=max_turns,
+        capture_exit=has_trap,
+        # log_path deliberately omitted — remote runner has no LOGFILE
+    )
 
-{pull_block}
+    # Phase 2: heredoc-escape for embedding, preserving write-time vars
+    escaped_inner = heredoc_escape(
+        inner, preserve_vars=["PROMPT_FILE", "RUNNER"]
+    )
 
-# Decode prompt from base64 into temp file
-PROMPT_FILE=$(mktemp /tmp/claude_task_XXXXXX.txt)
-echo '{prompt_b64}' | base64 -d > "$PROMPT_FILE"
-
-# Write a runner script (avoids all tmux quoting issues)
-RUNNER=$(mktemp /tmp/claude_runner_XXXXXX.sh)
-cat > "$RUNNER" << RUNNEREOF
-#!/bin/bash
-{env_lines}
-{cd_cmd}
-claude -p "\\$(cat $PROMPT_FILE)" --dangerously-skip-permissions{f' --max-turns {max_turns}' if max_turns is not None else ''}
-{exit_handler}
-rm -f "$PROMPT_FILE" "$RUNNER"
-RUNNEREOF
-chmod +x "$RUNNER"
-
-# Launch in detached tmux session with login shell
-tmux new-session -d -s {session_name} "bash --login $RUNNER"
-
-echo "TASK_LAUNCHED"
-"""
+    # Phase 3: render outer wrapper
+    return render_template(
+        "remote_wrapper.sh.j2",
+        pull_block=_build_pull_block() if auto_pull else "",
+        prompt_b64=prompt_b64,
+        inner_runner_content=escaped_inner,
+        session_name=session_name,
+    )
 
 
 def initiate_task(
