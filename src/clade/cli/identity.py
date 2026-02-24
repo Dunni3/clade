@@ -11,6 +11,33 @@ MARKER_START = "<!-- CLADE_IDENTITY_START -->"
 MARKER_END = "<!-- CLADE_IDENTITY_END -->"
 
 
+def _shared_concepts() -> list[str]:
+    """Return lines describing shared Clade concepts (task trees, morsels, board cards)."""
+    return [
+        "## Key Concepts",
+        "",
+        "### Task Trees",
+        "Tasks form parent-child hierarchies. When retrying a failed task or creating "
+        "follow-up work, **always** set `parent_task_id` to link the new task to its "
+        "predecessor. This builds a tree of work that can be visualized and tracked. "
+        "Never create orphaned retry tasks — they lose context.",
+        "",
+        "### Morsels",
+        "Morsels are persistent notes/observations that survive across sessions. Use "
+        "`deposit_morsel` to record anything that future sessions need to know: "
+        "post-mortems, queued follow-ups, design decisions, debug findings. Tag them "
+        "for retrieval (e.g. `queued-followup`, `post-mortem`, `debug`). Link them to "
+        "relevant tasks (`task_id`) or board cards (`card_id`) so they appear in context.",
+        "",
+        "### Board Cards",
+        "The shared kanban board tracks development work. Cards move through columns: "
+        "`backlog` → `todo` → `in_progress` → `done` → `archived`. When working on a "
+        "task that relates to a board card, check the card for context and update its "
+        "status as appropriate. Cards can be linked to tasks, morsels, and other objects.",
+        "",
+    ]
+
+
 def generate_personal_identity(
     name: str,
     clade_name: str,
@@ -63,6 +90,22 @@ def generate_personal_identity(
     lines.append("- `list_morsels` — List morsels (filter by creator, tag, task_id, card_id)")
     lines.append("- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)")
     lines.append("")
+
+    # Shared concepts
+    lines.extend(_shared_concepts())
+
+    # Coordinator-specific guidance
+    lines.extend([
+        "### Delegation Best Practices",
+        "When delegating tasks, always link them to relevant context:",
+        "- **Retries:** If retrying a failed task, pass `parent_task_id` to link the "
+        "retry as a child of the original. Use `retry_task` for Ember-based retries.",
+        "- **Board cards:** If the task implements a board card, mention the card ID "
+        "in the prompt and pass `card_id` if the delegation tool supports it.",
+        "- **Follow-ups:** When a completed task needs follow-up work, create the new "
+        "task as a child (`parent_task_id`) to build the task tree.",
+        "",
+    ])
 
     # Brothers
     if brothers:
@@ -133,6 +176,25 @@ def generate_conductor_identity(
     lines.append("- `list_morsels` — List morsels (filter by creator, tag, task_id, card_id)")
     lines.append("- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)")
     lines.append("")
+
+    # Shared concepts
+    lines.extend(_shared_concepts())
+
+    # Conductor-specific guidance
+    lines.extend([
+        "### Conductor Delegation Rules",
+        "When delegating tasks via `delegate_task`:",
+        "- **Auto-parent linking:** If `TRIGGER_TASK_ID` is set in env, child tasks "
+        "are automatically linked. You don't need to pass `parent_task_id` explicitly.",
+        "- **Retries:** When retrying a failed task, delegate a new task with "
+        "`parent_task_id` set to the failed task's ID. Max 2 retries per task.",
+        "- **Board cards:** If the task relates to a board card, pass `card_id` to "
+        "create a formal link. Check the card for implementation context.",
+        "- **Morsels for memory:** Each tick is a fresh session. To remember context "
+        "across ticks, deposit a morsel with descriptive tags. Check `list_morsels` "
+        "at the start of relevant ticks to recover queued follow-ups.",
+        "",
+    ])
 
     # Workers
     if workers:
@@ -217,6 +279,23 @@ def generate_worker_identity(
     lines.append("- `list_morsels` — List morsels (filter by creator, tag, task_id, card_id)")
     lines.append("- `create_card`, `list_board`, `get_card`, `move_card`, `update_card`, `archive_card` — Kanban board (cards support links to tasks, morsels, trees, messages, other cards)")
     lines.append("")
+
+    # Shared concepts
+    lines.extend(_shared_concepts())
+
+    # Worker-specific guidance
+    lines.extend([
+        "### Worker Task Guidelines",
+        "When working on a delegated task:",
+        "- **Board cards:** If your task prompt mentions a board card, check it with "
+        "`get_card` for additional context. Move it to `in_progress` when you start "
+        "and `done` when you finish.",
+        "- **Morsels:** Deposit a morsel when you encounter something noteworthy — "
+        "unexpected findings, design decisions, or blockers. Link it to your task ID.",
+        "- **Task status:** Always update your task status via `update_task` when done. "
+        "Include a summary of what you did in the output field.",
+        "",
+    ])
 
     # Family list
     lines.append("## Family")

@@ -26,16 +26,113 @@ WorkingDirectory={clade_dir}
 ExecStart={clade_ember_path}
 Restart=always
 RestartSec=5
-Environment="EMBER_PORT={port}"
-Environment="EMBER_BROTHER_NAME={brother_name}"
-Environment="EMBER_WORKING_DIR={working_dir}"
-Environment="HEARTH_URL={hearth_url}"
-Environment="HEARTH_API_KEY={api_key}"
-Environment="HEARTH_NAME={brother_name}"
+EnvironmentFile={env_file_path}
 
 [Install]
 WantedBy=multi-user.target
 """
+
+EMBER_ENV_TEMPLATE = """\
+EMBER_PORT={port}
+EMBER_BROTHER_NAME={brother_name}
+EMBER_WORKING_DIR={working_dir}
+HEARTH_URL={hearth_url}
+HEARTH_API_KEY={api_key}
+HEARTH_NAME={brother_name}
+"""
+
+
+def detect_systemctl_path(ssh_host: str, ssh_key: str | None = None) -> str | None:
+    """Detect the path to systemctl on the remote host."""
+    result = run_remote(ssh_host, "which systemctl 2>/dev/null", ssh_key=ssh_key, timeout=10)
+    if result.success and result.stdout.strip():
+        return result.stdout.strip()
+    return None
+
+
+def generate_sudoers_rule(
+    remote_user: str,
+    systemctl_path: str,
+    service_name: str = SERVICE_NAME,
+) -> str:
+    """Generate a scoped sudoers rule for passwordless Ember service management.
+
+    Returns the sudoers rule string (one line).
+    """
+    return (
+        f"{remote_user} ALL=(ALL) NOPASSWD: "
+        f"{systemctl_path} restart {service_name}, "
+        f"{systemctl_path} status {service_name}"
+    )
+
+
+def generate_sudoers_command(
+    ssh_host: str,
+    remote_user: str,
+    systemctl_path: str,
+    service_name: str = SERVICE_NAME,
+) -> str:
+    """Generate the full SSH command to install the sudoers rule."""
+    rule = generate_sudoers_rule(remote_user, systemctl_path, service_name)
+    sudoers_file = f"/etc/sudoers.d/{service_name}"
+    return (
+        f'ssh -t {ssh_host} \'echo "{rule}" '
+        f"| sudo tee {sudoers_file} > /dev/null "
+        f"&& sudo chmod 440 {sudoers_file}'"
+    )
+
+
+def install_sudoers_remote(
+    ssh_host: str,
+    remote_user: str,
+    systemctl_path: str,
+    ssh_key: str | None = None,
+    service_name: str = SERVICE_NAME,
+) -> SSHResult:
+    """Install the sudoers rule on the remote host.
+
+    Returns SSHResult from the installation.
+    """
+    rule = generate_sudoers_rule(remote_user, systemctl_path, service_name)
+    sudoers_file = f"/etc/sudoers.d/{service_name}"
+    script = f"""\
+#!/bin/bash
+set -e
+echo '{rule}' | sudo tee {sudoers_file} > /dev/null
+sudo chmod 440 {sudoers_file}
+echo "SUDOERS_OK"
+"""
+    return run_remote(ssh_host, script, ssh_key=ssh_key, timeout=15)
+
+
+def verify_sudoers_remote(
+    ssh_host: str,
+    systemctl_path: str,
+    ssh_key: str | None = None,
+    service_name: str = SERVICE_NAME,
+) -> bool:
+    """Verify that passwordless sudo works for the Ember service."""
+    result = run_remote(
+        ssh_host,
+        f"sudo -n {systemctl_path} status {service_name} 2>/dev/null; echo EXIT_$?",
+        ssh_key=ssh_key,
+        timeout=10,
+    )
+    # sudo -n exits 1 if password is required. We check that it didn't prompt.
+    # The service may not be running (exit 3), but sudo itself should succeed (exit 0).
+    if result.success and "EXIT_" in result.stdout:
+        # Extract the exit code. sudo -n returns 1 if it would prompt.
+        # systemctl status returns 0 (running), 3 (stopped), or 4 (not found).
+        # All of those are fine — we just need sudo not to fail.
+        exit_line = result.stdout.strip().split("EXIT_")[-1].strip()
+        try:
+            code = int(exit_line)
+            # sudo failure is typically exit code 1 from sudo itself
+            # systemctl codes: 0=active, 3=inactive, 4=not-found are all OK (sudo worked)
+            return code != 1
+        except ValueError:
+            pass
+    return False
 
 
 def detect_remote_user(ssh_host: str, ssh_key: str | None = None) -> str | None:
@@ -46,28 +143,42 @@ def detect_remote_user(ssh_host: str, ssh_key: str | None = None) -> str | None:
     return None
 
 
-def detect_clade_ember_path(ssh_host: str, ssh_key: str | None = None) -> str | None:
-    """Detect the path to the clade-ember binary on the remote.
+def detect_clade_entry_point(
+    ssh_host: str,
+    entry_point: str = "clade-ember",
+    ssh_key: str | None = None,
+) -> str | None:
+    """Detect the path to a clade console_scripts entry point on a remote host.
 
     Tries `which` first, then searches common conda/mamba/venv locations
     since non-interactive SSH sessions don't activate environments.
+
+    Args:
+        ssh_host: SSH host string.
+        entry_point: Name of the entry point binary (e.g. 'clade-ember', 'clade-worker').
+        ssh_key: Optional SSH key path.
+
+    Returns:
+        Absolute path to the entry point binary, or None if not found.
     """
-    result = run_remote(ssh_host, "which clade-ember 2>/dev/null", ssh_key=ssh_key, timeout=10)
+    result = run_remote(
+        ssh_host, f"which {entry_point} 2>/dev/null", ssh_key=ssh_key, timeout=10
+    )
     if result.success and result.stdout.strip():
         return result.stdout.strip()
 
     # Search common env locations
-    search_script = r"""
-for d in \
-    ~/mambaforge/envs/*/bin \
-    ~/miniforge3/envs/*/bin \
-    ~/miniconda3/envs/*/bin \
-    ~/anaconda3/envs/*/bin \
-    ~/.conda/envs/*/bin \
-    ~/.local/venv/bin \
+    search_script = f"""
+for d in \\
+    ~/mambaforge/envs/*/bin \\
+    ~/miniforge3/envs/*/bin \\
+    ~/miniconda3/envs/*/bin \\
+    ~/anaconda3/envs/*/bin \\
+    ~/.conda/envs/*/bin \\
+    ~/.local/venv/bin \\
     ~/.local/bin; do
-    if [ -x "$d/clade-ember" ]; then
-        echo "$d/clade-ember"
+    if [ -x "$d/{entry_point}" ]; then
+        echo "$d/{entry_point}"
         exit 0
     fi
 done
@@ -77,6 +188,14 @@ exit 1
     if result.success and result.stdout.strip():
         return result.stdout.strip()
     return None
+
+
+def detect_clade_ember_path(ssh_host: str, ssh_key: str | None = None) -> str | None:
+    """Detect the path to the clade-ember binary on the remote.
+
+    Convenience wrapper around detect_clade_entry_point().
+    """
+    return detect_clade_entry_point(ssh_host, "clade-ember", ssh_key=ssh_key)
 
 
 def detect_clade_dir(ssh_host: str, ssh_key: str | None = None) -> str | None:
@@ -127,6 +246,44 @@ def detect_tailscale_ip(ssh_host: str, ssh_key: str | None = None) -> str | None
     return None
 
 
+def deploy_ember_env(
+    ssh_host: str,
+    remote_user: str,
+    brother_name: str,
+    port: int,
+    working_dir: str,
+    hearth_url: str,
+    api_key: str,
+    ssh_key: str | None = None,
+) -> SSHResult:
+    """Write (or update) the Ember env file on the remote host.
+
+    The file lives at ``~/.config/clade/ember.env`` (user-owned, no sudo).
+
+    Returns:
+        SSHResult from the operation.
+    """
+    env_content = EMBER_ENV_TEMPLATE.format(
+        port=port,
+        brother_name=brother_name,
+        working_dir=working_dir,
+        hearth_url=hearth_url,
+        api_key=api_key,
+    )
+    encoded = base64.b64encode(env_content.encode()).decode()
+
+    script = f"""\
+#!/bin/bash
+set -e
+CONFIG_DIR="$HOME/.config/clade"
+mkdir -p "$CONFIG_DIR"
+echo "{encoded}" | base64 -d > "$CONFIG_DIR/ember.env"
+chmod 600 "$CONFIG_DIR/ember.env"
+echo "EMBER_ENV_OK"
+"""
+    return run_remote(ssh_host, script, ssh_key=ssh_key, timeout=15)
+
+
 def deploy_systemd_service(
     ssh_host: str,
     brother_name: str,
@@ -137,21 +294,37 @@ def deploy_systemd_service(
     working_dir: str,
     hearth_url: str,
     api_key: str,
+    ssh_key: str | None = None,
 ) -> SSHResult:
-    """Deploy the systemd service file and start the Ember server.
+    """Deploy the systemd service file, env file, and start the Ember server.
 
     Returns:
         SSHResult from the deployment.
     """
+    # Write the env file first (no sudo needed)
+    env_result = deploy_ember_env(
+        ssh_host=ssh_host,
+        remote_user=remote_user,
+        brother_name=brother_name,
+        port=port,
+        working_dir=working_dir,
+        hearth_url=hearth_url,
+        api_key=api_key,
+        ssh_key=ssh_key,
+    )
+    if not env_result.success or "EMBER_ENV_OK" not in env_result.stdout:
+        return env_result
+
+    # Build the service file (references the env file via EnvironmentFile=)
+    home = f"/home/{remote_user}"
+    env_file_path = f"{home}/.config/clade/ember.env"
+
     service_content = SERVICE_TEMPLATE.format(
         brother_name=brother_name,
         remote_user=remote_user,
         clade_ember_path=clade_ember_path,
         clade_dir=clade_dir,
-        port=port,
-        working_dir=working_dir,
-        hearth_url=hearth_url,
-        api_key=api_key,
+        env_file_path=env_file_path,
     )
 
     encoded = base64.b64encode(service_content.encode()).decode()
@@ -172,7 +345,7 @@ else
     sudo journalctl -u {SERVICE_NAME} --no-pager -n 10
 fi
 """
-    return run_remote(ssh_host, script, timeout=30)
+    return run_remote(ssh_host, script, ssh_key=ssh_key, timeout=30)
 
 
 def check_ember_health_remote(host: str, port: int) -> bool:
@@ -195,28 +368,40 @@ def generate_manual_instructions(
     api_key: str,
 ) -> str:
     """Generate manual setup instructions when sudo is not available."""
+    home = f"/home/{remote_user}"
+    env_file_path = f"{home}/.config/clade/ember.env"
+
+    env_content = EMBER_ENV_TEMPLATE.format(
+        port=port,
+        brother_name=brother_name,
+        working_dir=working_dir,
+        hearth_url=hearth_url,
+        api_key=api_key,
+    )
     service_content = SERVICE_TEMPLATE.format(
         brother_name=brother_name,
         remote_user=remote_user,
         clade_ember_path=clade_ember_path,
         clade_dir=clade_dir,
-        port=port,
-        working_dir=working_dir,
-        hearth_url=hearth_url,
-        api_key=api_key,
+        env_file_path=env_file_path,
     )
     return f"""\
 Could not deploy automatically (sudo required). Manual steps:
 
-1. Create the service file at /etc/systemd/system/{SERVICE_NAME}.service:
+1. Create the env file at {env_file_path}:
+
+{env_content}
+   chmod 600 {env_file_path}
+
+2. Create the service file at /etc/systemd/system/{SERVICE_NAME}.service:
 
 {service_content}
-2. Run:
+3. Run:
    sudo systemctl daemon-reload
    sudo systemctl enable {SERVICE_NAME}
    sudo systemctl restart {SERVICE_NAME}
 
-3. Verify:
+4. Verify:
    systemctl status {SERVICE_NAME}
    curl http://localhost:{port}/health
 """
@@ -232,6 +417,7 @@ def setup_ember(
     ssh_key: str | None = None,
     yes: bool = False,
     hearth_api_key: str | None = None,
+    verify_ssl: bool = True,
 ) -> tuple[str | None, int]:
     """Set up an Ember server on a remote brother.
 
@@ -302,6 +488,7 @@ def setup_ember(
         working_dir=effective_working_dir,
         hearth_url=hearth_url,
         api_key=api_key,
+        ssh_key=ssh_key,
     )
 
     if result.success and "EMBER_DEPLOY_OK" in result.stdout:
@@ -343,7 +530,6 @@ def setup_ember(
         try:
             from ..communication.mailbox_client import MailboxClient
 
-            verify_ssl = server_url.startswith("https")
             client = MailboxClient(server_url, hearth_api_key, verify_ssl=verify_ssl)
             ok = client.register_ember_sync(name, f"http://{ember_host}:{port}")
             if ok:

@@ -23,7 +23,8 @@ from .deploy_utils import (
     scp_directory,
 )
 from .ember_setup import SERVICE_NAME as EMBER_SERVICE_NAME
-from .ember_setup import check_ember_health_remote
+from .ember_setup import check_ember_health_remote, deploy_ember_env, detect_remote_user
+from .keys import keys_path, load_keys
 from .ssh_utils import run_remote, test_ssh
 
 
@@ -103,7 +104,7 @@ def hearth(ctx: click.Context) -> None:
             resp = httpx.get(
                 f"{server_url}/api/v1/health",
                 timeout=10,
-                verify=not server_url.startswith("https"),
+                verify=config.verify_ssl,
             )
             if resp.status_code == 200:
                 click.echo(click.style("  Health check passed", fg="green"))
@@ -186,7 +187,7 @@ def frontend(ctx: click.Context, skip_build: bool) -> None:
             resp = httpx.get(
                 server_url,
                 timeout=10,
-                verify=not server_url.startswith("https"),
+                verify=config.verify_ssl,
                 follow_redirects=True,
             )
             if resp.status_code == 200:
@@ -273,7 +274,36 @@ def ember(ctx: click.Context, name: str) -> None:
         raise SystemExit(1)
     click.echo(click.style("  Package deployed", fg="green"))
 
-    # Step 3: Restart Ember service
+    # Step 3: Sync ember.env with current API key from keys.json
+    click.echo("Syncing ember.env with current API key...")
+    all_keys = load_keys(keys_path(config_dir))
+    brother_key = all_keys.get(name)
+    if not brother_key:
+        click.echo(click.style(f"  No API key found for '{name}' in keys.json", fg="red"))
+        raise SystemExit(1)
+
+    remote_user = detect_remote_user(ssh_host, ssh_key=ssh_key)
+    if not remote_user:
+        click.echo(click.style("  Could not detect remote user", fg="red"))
+        raise SystemExit(1)
+
+    ember_port = brother.ember_port or 8100
+    env_result = deploy_ember_env(
+        ssh_host=ssh_host,
+        remote_user=remote_user,
+        brother_name=name,
+        port=ember_port,
+        working_dir=brother.working_dir or f"/home/{remote_user}",
+        hearth_url=config.server_url or "",
+        api_key=brother_key,
+        ssh_key=ssh_key,
+    )
+    if env_result.success and "EMBER_ENV_OK" in env_result.stdout:
+        click.echo(click.style("  ember.env synced", fg="green"))
+    else:
+        click.echo(click.style("  Warning: could not sync ember.env", fg="yellow"))
+
+    # Step 4: Restart Ember service
     click.echo("Restarting Ember service...")
     restart_script = (
         f"sudo systemctl restart {EMBER_SERVICE_NAME} && sleep 2 && "
@@ -284,11 +314,19 @@ def ember(ctx: click.Context, name: str) -> None:
         click.echo(click.style("  Restart failed", fg="red"))
         if result.stderr:
             click.echo(f"  {result.stderr[:200]}")
+        if not brother.sudoers_configured:
+            click.echo()
+            click.echo(
+                click.style("  Hint:", bold=True)
+                + " sudo may require a password on this host."
+            )
+            click.echo(
+                "  Run 'clade setup-ember --sudoers " + name + "' to configure passwordless sudo."
+            )
         raise SystemExit(1)
     click.echo(click.style("  Service restarted", fg="green"))
 
-    # Step 4: Health check
-    ember_port = brother.ember_port or 8100
+    # Step 5: Health check
     click.echo(f"Checking health at {brother.ember_host}:{ember_port}...")
     if check_ember_health_remote(brother.ember_host, ember_port):
         click.echo(click.style("  Ember is healthy!", fg="green"))
@@ -296,6 +334,36 @@ def ember(ctx: click.Context, name: str) -> None:
         click.echo(click.style("  Health check failed (may need a moment)", fg="yellow"))
 
     click.echo(click.style(f"\nEmber ({name}) deployed successfully!", fg="green", bold=True))
+
+
+@deploy.command()
+@click.pass_context
+def skills(ctx: click.Context) -> None:
+    """Install bundled skills to ~/.claude/skills/."""
+    from .skills import install_all_skills
+
+    config_dir = ctx.obj.get("config_dir") if ctx.obj else None
+    skills_dir = (Path(config_dir) / "skills") if config_dir else None
+
+    click.echo("Installing bundled skills...")
+    results = install_all_skills(target_dir=skills_dir)
+
+    all_ok = True
+    for name, ok in results.items():
+        if ok:
+            click.echo(click.style(f"  {name}: installed", fg="green"))
+        else:
+            click.echo(click.style(f"  {name}: FAILED", fg="red"))
+            all_ok = False
+
+    if not results:
+        click.echo("  No bundled skills found")
+        return
+
+    if all_ok:
+        click.echo(click.style("\nSkills installed successfully!", fg="green", bold=True))
+    else:
+        raise SystemExit(1)
 
 
 @deploy.command("all")
@@ -348,6 +416,16 @@ def deploy_all(ctx: click.Context, skip_build: bool) -> None:
         except SystemExit:
             results[f"ember:{bro_name}"] = False
             click.echo()
+
+    # Skills
+    click.echo()
+    click.echo(click.style("=== Installing Skills ===", bold=True))
+    try:
+        ctx.invoke(skills)
+        results["skills"] = True
+    except SystemExit:
+        results["skills"] = False
+        click.echo()
 
     # Summary
     click.echo()

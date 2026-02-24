@@ -191,21 +191,89 @@ class TestBuildRemoteScript:
         assert "CLAUDE_TASK_ID" not in script
 
     def test_exit_handler_in_runner(self):
-        """Runner heredoc contains the exit handler curl block."""
+        """Runner heredoc contains the failure trap."""
         script = build_remote_script(
             "sess", None, "dGVzdA==",
             task_id=42,
             mailbox_url="https://example.com",
             mailbox_api_key="secret-key",
         )
-        assert "Auto-mark task failed" in script
-        assert "curl -sf -X PATCH" in script
-        assert "EXIT_CODE" in script
+        assert "Auto-report failure" in script
+        assert "curl -skf -X PATCH" in script
+        assert "_report_failure" in script
 
     def test_no_exit_handler_without_env_vars(self):
         """No exit handler when task env vars aren't set."""
         script = build_remote_script("sess", None, "dGVzdA==")
-        assert "Auto-mark task failed" not in script
+        assert "Auto-report failure" not in script
+        assert "_report_failure" not in script
+
+    def test_failure_trap_before_cd(self):
+        """Trap is set before cd so pre-Claude failures are caught."""
+        script = build_remote_script(
+            "sess", "~/projects/test", "dGVzdA==",
+            task_id=42,
+            mailbox_url="https://example.com",
+            mailbox_api_key="secret-key",
+        )
+        trap_pos = script.index("trap ")
+        cd_pos = script.index("cd ~/projects/test")
+        assert trap_pos < cd_pos, "trap must be set before cd"
+
+    def test_failure_trap_contains_report_function(self):
+        """Trap includes _report_failure function with diagnostic info."""
+        script = build_remote_script(
+            "sess", None, "dGVzdA==",
+            task_id=42,
+            mailbox_url="https://example.com",
+            mailbox_api_key="secret-key",
+        )
+        assert "_report_failure()" in script
+        assert "_CLAUDE_STARTED=0" in script
+        assert "before Claude started" in script
+        assert "Session exited with code" in script
+
+    def test_claude_started_flag_before_claude(self):
+        """_CLAUDE_STARTED=1 is set just before the claude command."""
+        script = build_remote_script(
+            "sess", None, "dGVzdA==",
+            task_id=42,
+            mailbox_url="https://example.com",
+            mailbox_api_key="secret-key",
+        )
+        started_pos = script.index("_CLAUDE_STARTED=1")
+        claude_pos = script.index("claude -p")
+        assert started_pos < claude_pos
+
+    def test_no_trap_without_task_id(self):
+        """No trap or _report_failure when task env vars aren't set."""
+        script = build_remote_script("sess", None, "dGVzdA==")
+        assert "_report_failure" not in script
+        assert "_CLAUDE_STARTED" not in script
+
+    def test_trap_checks_nonzero_exit(self):
+        """Trap function only fires on non-zero exit codes."""
+        script = build_remote_script(
+            "sess", None, "dGVzdA==",
+            task_id=42,
+            mailbox_url="https://example.com",
+            mailbox_api_key="secret-key",
+        )
+        assert "-ne 0" in script
+
+    def test_exit_code_captured_before_cleanup(self):
+        """EXIT_CODE=$? must come right after claude, not after rm."""
+        script = build_remote_script(
+            "sess", None, "dGVzdA==",
+            task_id=42,
+            mailbox_url="https://example.com",
+            mailbox_api_key="secret-key",
+        )
+        claude_pos = script.index("claude -p")
+        exit_code_pos = script.index("EXIT_CODE=")
+        rm_pos = script.index("rm -f")
+        assert claude_pos < exit_code_pos < rm_pos, \
+            "EXIT_CODE must be captured after claude but before rm"
 
 
 # ---------------------------------------------------------------------------

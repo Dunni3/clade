@@ -3,14 +3,20 @@
 from unittest.mock import MagicMock, patch
 
 from clade.cli.ember_setup import (
+    EMBER_ENV_TEMPLATE,
     SERVICE_NAME,
     SERVICE_TEMPLATE,
     detect_clade_dir,
     detect_clade_ember_path,
     detect_remote_user,
+    detect_systemctl_path,
     detect_tailscale_ip,
     generate_manual_instructions,
+    generate_sudoers_command,
+    generate_sudoers_rule,
+    install_sudoers_remote,
     setup_ember,
+    verify_sudoers_remote,
 )
 from clade.cli.ssh_utils import SSHResult
 
@@ -87,22 +93,33 @@ class TestServiceTemplate:
             remote_user="ian",
             clade_ember_path="/usr/local/bin/clade-ember",
             clade_dir="/home/ian/clade",
-            port=8100,
-            working_dir="/home/ian/projects",
-            hearth_url="https://example.com",
-            api_key="test-key-123",
+            env_file_path="/home/ian/.config/clade/ember.env",
         )
         assert "Description=Clade Ember Server (oppy)" in result
         assert "User=ian" in result
         assert "WorkingDirectory=/home/ian/clade" in result
         assert "ExecStart=/usr/local/bin/clade-ember" in result
-        assert 'EMBER_PORT=8100' in result
-        assert 'EMBER_BROTHER_NAME=oppy' in result
-        assert 'EMBER_WORKING_DIR=/home/ian/projects' in result
-        assert 'HEARTH_URL=https://example.com' in result
-        assert 'HEARTH_API_KEY=test-key-123' in result
-        assert 'HEARTH_NAME=oppy' in result
+        assert "EnvironmentFile=/home/ian/.config/clade/ember.env" in result
         assert "WantedBy=multi-user.target" in result
+        # Should NOT contain inline Environment= lines
+        assert "Environment=" not in result
+
+
+class TestEmberEnvTemplate:
+    def test_template_formatting(self):
+        result = EMBER_ENV_TEMPLATE.format(
+            port=8100,
+            brother_name="oppy",
+            working_dir="/home/ian/projects",
+            hearth_url="https://example.com",
+            api_key="test-key-123",
+        )
+        assert "EMBER_PORT=8100" in result
+        assert "EMBER_BROTHER_NAME=oppy" in result
+        assert "EMBER_WORKING_DIR=/home/ian/projects" in result
+        assert "HEARTH_URL=https://example.com" in result
+        assert "HEARTH_API_KEY=test-key-123" in result
+        assert "HEARTH_NAME=oppy" in result
 
 
 class TestGenerateManualInstructions:
@@ -123,6 +140,10 @@ class TestGenerateManualInstructions:
         assert "sudo systemctl restart" in result
         assert "curl http://localhost:8100/health" in result
         assert "ExecStart=/usr/local/bin/clade-ember" in result
+        # Env file path and content should be present
+        assert "ember.env" in result
+        assert "HEARTH_API_KEY=test-key" in result
+        assert "chmod 600" in result
 
     def test_includes_correct_port(self):
         result = generate_manual_instructions(
@@ -136,6 +157,98 @@ class TestGenerateManualInstructions:
             api_key="key",
         )
         assert "9200" in result
+
+
+class TestDetectSystemctlPath:
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_success(self, mock_run):
+        mock_run.return_value = SSHResult(success=True, stdout="/bin/systemctl\n")
+        assert detect_systemctl_path("ian@masuda") == "/bin/systemctl"
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_usr_bin(self, mock_run):
+        mock_run.return_value = SSHResult(success=True, stdout="/usr/bin/systemctl\n")
+        assert detect_systemctl_path("ian@masuda") == "/usr/bin/systemctl"
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_failure(self, mock_run):
+        mock_run.return_value = SSHResult(success=False, message="error")
+        assert detect_systemctl_path("ian@masuda") is None
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_empty_output(self, mock_run):
+        mock_run.return_value = SSHResult(success=True, stdout="")
+        assert detect_systemctl_path("ian@masuda") is None
+
+
+class TestGenerateSudoersRule:
+    def test_basic(self):
+        rule = generate_sudoers_rule("ian", "/bin/systemctl")
+        assert rule == (
+            "ian ALL=(ALL) NOPASSWD: "
+            "/bin/systemctl restart clade-ember, "
+            "/bin/systemctl status clade-ember"
+        )
+
+    def test_custom_service_name(self):
+        rule = generate_sudoers_rule("bob", "/usr/bin/systemctl", service_name="custom-ember")
+        assert "custom-ember" in rule
+        assert "bob" in rule
+        assert "/usr/bin/systemctl" in rule
+
+
+class TestGenerateSudoersCommand:
+    def test_basic(self):
+        cmd = generate_sudoers_command("ian@masuda", "ian", "/bin/systemctl")
+        assert "ssh -t ian@masuda" in cmd
+        assert "sudo tee /etc/sudoers.d/clade-ember" in cmd
+        assert "chmod 440" in cmd
+        assert "ian ALL=(ALL) NOPASSWD" in cmd
+
+
+class TestInstallSudoersRemote:
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_success(self, mock_run):
+        mock_run.return_value = SSHResult(success=True, stdout="SUDOERS_OK")
+        result = install_sudoers_remote("ian@masuda", "ian", "/bin/systemctl")
+        assert result.success
+        assert "SUDOERS_OK" in result.stdout
+        # Verify the script contains the sudoers rule
+        call_args = mock_run.call_args
+        script = call_args[0][1]
+        assert "ian ALL=(ALL) NOPASSWD" in script
+        assert "/etc/sudoers.d/clade-ember" in script
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_failure(self, mock_run):
+        mock_run.return_value = SSHResult(success=False, message="sudo: a password is required")
+        result = install_sudoers_remote("ian@masuda", "ian", "/bin/systemctl")
+        assert not result.success
+
+
+class TestVerifySudoersRemote:
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_success_running(self, mock_run):
+        """Verify passes when service is running (exit 0)."""
+        mock_run.return_value = SSHResult(success=True, stdout="active\nEXIT_0")
+        assert verify_sudoers_remote("ian@masuda", "/bin/systemctl") is True
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_success_stopped(self, mock_run):
+        """Verify passes when service is stopped (exit 3) — sudo still worked."""
+        mock_run.return_value = SSHResult(success=True, stdout="inactive\nEXIT_3")
+        assert verify_sudoers_remote("ian@masuda", "/bin/systemctl") is True
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_failure_password_required(self, mock_run):
+        """Verify fails when sudo requires password (exit 1)."""
+        mock_run.return_value = SSHResult(success=True, stdout="EXIT_1")
+        assert verify_sudoers_remote("ian@masuda", "/bin/systemctl") is False
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_failure_ssh_error(self, mock_run):
+        mock_run.return_value = SSHResult(success=False, message="Connection refused")
+        assert verify_sudoers_remote("ian@masuda", "/bin/systemctl") is False
 
 
 def _make_deploy_ok():
@@ -177,7 +290,7 @@ class TestSetupEmberRegistration:
             assert ember_host == "100.1.2.3"
             assert port == 8100
             mock_client_cls.assert_called_once_with(
-                "https://hearth.example.com", "doot-key", verify_ssl=True
+                "https://hearth.example.com", "doot-key", verify_ssl=True  # default
             )
             mock_client_instance.register_ember_sync.assert_called_once_with(
                 "oppy", "http://100.1.2.3:8100"

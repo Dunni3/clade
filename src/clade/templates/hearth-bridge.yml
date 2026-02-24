@@ -1,3 +1,4 @@
+{% raw %}
 name: Hearth-PR Bridge
 
 on:
@@ -237,3 +238,4 @@ jobs:
                 links: [{"object_type": "card", "object_id": $card_id}]
               }')" \
             "$HEARTH_URL/api/v1/morsels"
+{% endraw %}

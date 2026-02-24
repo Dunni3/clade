@@ -1,0 +1,20 @@
+#!/bin/bash
+set -e
+
+{{ pull_block }}
+
+# Decode prompt from base64 into temp file
+PROMPT_FILE=$(mktemp /tmp/claude_task_XXXXXX.txt)
+echo '{{ prompt_b64 }}' | base64 -d > "$PROMPT_FILE"
+
+# Write a runner script (avoids all tmux quoting issues)
+RUNNER=$(mktemp /tmp/claude_runner_XXXXXX.sh)
+cat > "$RUNNER" << RUNNEREOF
+{{ inner_runner_content }}
+RUNNEREOF
+chmod +x "$RUNNER"
+
+# Launch in detached tmux session with login shell
+tmux new-session -d -s {{ session_name }} "bash --login $RUNNER"
+
+echo "TASK_LAUNCHED"

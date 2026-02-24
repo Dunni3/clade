@@ -1,10 +1,12 @@
 """Conductor MCP server — Kamaji's server for orchestrating task trees and delegating tasks."""
 
 import os
+from pathlib import Path
 
 import yaml
 from mcp.server.fastmcp import FastMCP
 
+from ..cli.keys import load_keys, merge_keys_into_registry
 from ..communication.mailbox_client import MailboxClient
 from .tools.conductor_tools import create_conductor_tools
 from .tools.kanban_tools import create_kanban_tools
@@ -37,6 +39,12 @@ if _workers_config_path and os.path.exists(_workers_config_path):
     with open(_workers_config_path) as f:
         _workers_data = yaml.safe_load(f) or {}
     _worker_registry = _workers_data.get("workers", {})
+
+# Merge API keys from keys.json into registry at runtime
+_keys_file = os.environ.get("KEYS_FILE")
+if _keys_file and os.path.exists(_keys_file):
+    _all_keys = load_keys(Path(_keys_file))
+    merge_keys_into_registry(_worker_registry, _all_keys)
 
 # Register conductor tools
 create_conductor_tools(

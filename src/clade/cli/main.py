@@ -6,6 +6,7 @@ import click
 
 from .init_cmd import init_cmd
 from .add_brother import add_brother
+from .bootstrap_cmd import bootstrap_cmd
 from .deploy_cmd import deploy
 from .setup_ember_cmd import setup_ember_cmd
 from .setup_conductor_cmd import setup_conductor_cmd
@@ -32,6 +33,7 @@ def cli(ctx: click.Context, config_dir: Path | None) -> None:
 
 cli.add_command(init_cmd, "init")
 cli.add_command(add_brother, "add-brother")
+cli.add_command(bootstrap_cmd, "bootstrap")
 cli.add_command(deploy, "deploy")
 cli.add_command(setup_ember_cmd, "setup-ember")
 cli.add_command(setup_conductor_cmd, "setup-conductor")

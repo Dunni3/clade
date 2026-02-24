@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from mcp.server.fastmcp import FastMCP
 
 from ...communication.mailbox_client import MailboxClient
@@ -14,24 +16,34 @@ _NOT_CONFIGURED = "Delegation not configured. Ensure HEARTH_URL and HEARTH_API_K
 def create_delegation_tools(
     mcp: FastMCP,
     mailbox: MailboxClient | None,
-    brothers_registry: dict[str, dict],
+    brothers_registry: dict[str, dict] | None = None,
+    registry_loader: Callable[[], dict[str, dict]] | None = None,
     mailbox_name: str | None = None,
+    hearth_url: str | None = None,
 ) -> dict:
     """Register Ember delegation tool with an MCP server.
 
     Args:
         mcp: FastMCP server instance to register tools with.
         mailbox: MailboxClient instance, or None if not configured.
-        brothers_registry: Dict of brother names to config dicts with keys:
-            ember_url, ember_api_key, working_dir (optional).
+        brothers_registry: Static dict of brother configs (deprecated, use registry_loader).
+        registry_loader: Callable that returns fresh registry on each call.
         mailbox_name: The caller's own name (used as sender_name when delegating).
+        hearth_url: Hearth URL to pass to spawned worker sessions. If not set,
+            the Ember's own HEARTH_URL env var is used (which may have SSL issues).
 
     Returns:
         Dict mapping tool names to their callable functions (for testing).
     """
 
+    def _get_registry() -> dict[str, dict]:
+        if registry_loader is not None:
+            return registry_loader()
+        return brothers_registry or {}
+
     def _get_ember_client(brother: str) -> EmberClient | None:
-        config = brothers_registry.get(brother)
+        registry = _get_registry()
+        config = registry.get(brother)
         if not config:
             return None
         url = config.get("ember_url")
@@ -49,11 +61,17 @@ def create_delegation_tools(
         working_dir: str | None = None,
         max_turns: int | None = None,
         card_id: int | None = None,
+        metadata: dict | None = None,
+        on_complete: str | None = None,
+        blocked_by_task_id: int | None = None,
+        target_branch: str | None = None,
     ) -> str:
         """Delegate a task to a brother via their Ember server.
 
         Creates a task in the Hearth, sends it to the brother's Ember, and
-        updates the task status.
+        updates the task status. If blocked_by_task_id is set, the task is
+        created but not delegated — it will be auto-delegated when the
+        blocking task completes.
 
         Args:
             brother: Brother name (e.g. "oppy").
@@ -63,15 +81,20 @@ def create_delegation_tools(
             working_dir: Override the brother's default working directory.
             max_turns: Optional maximum Claude turns. If not set, no turn limit is applied.
             card_id: Optional kanban card ID to link this task to.
+            metadata: Optional dict stored on root tasks. Supports keys like "max_depth" to configure tree behavior.
+            on_complete: Optional follow-up instructions for the Conductor when this task completes or fails.
+            blocked_by_task_id: Optional task ID that must complete before this task runs. The task will stay in 'pending' until the blocking task completes, then auto-delegate.
+            target_branch: Optional git branch to check out in the worktree. When set, the runner creates the worktree from this branch instead of HEAD.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
 
-        if brother not in brothers_registry:
-            available = ", ".join(brothers_registry.keys()) or "(none)"
+        registry = _get_registry()
+        if brother not in registry:
+            available = ", ".join(registry.keys()) or "(none)"
             return f"Unknown brother '{brother}'. Available brothers: {available}"
 
-        config = brothers_registry[brother]
+        config = registry[brother]
         ember = _get_ember_client(brother)
         if ember is None:
             return f"Brother '{brother}' has no Ember configured."
@@ -83,6 +106,10 @@ def create_delegation_tools(
                 prompt=prompt,
                 subject=subject,
                 parent_task_id=parent_task_id,
+                metadata=metadata,
+                on_complete=on_complete,
+                blocked_by_task_id=blocked_by_task_id,
+                max_turns=max_turns,
             )
             task_id = task_result["id"]
         except Exception as e:
@@ -95,6 +122,21 @@ def create_delegation_tools(
             except Exception:
                 pass  # Non-fatal
 
+        # Check the *actual DB state* of blocked_by_task_id (not the input param).
+        # insert_task auto-clears blocked_by when the blocker is already completed,
+        # so the input param may say "blocked" while the DB says "ready to go".
+        actual_blocked_by = task_result.get("blocked_by_task_id")
+        if actual_blocked_by is not None:
+            result_lines = [
+                f"Task #{task_id} created (deferred — blocked by #{actual_blocked_by}).",
+                f"  Subject: {subject or '(none)'}",
+                f"  Assignee: {brother}",
+                f"  Status: pending (waiting for #{actual_blocked_by} to complete)",
+            ]
+            if card_id is not None:
+                result_lines.append(f"  Linked to card: #{card_id}")
+            return "\n".join(result_lines)
+
         # Send to Ember
         wd = working_dir or config.get("working_dir")
         try:
@@ -104,10 +146,11 @@ def create_delegation_tools(
                 task_id=task_id,
                 working_dir=wd,
                 max_turns=max_turns,
-                hearth_url=None,
+                hearth_url=config.get("hearth_url") or hearth_url,
                 hearth_api_key=config.get("hearth_api_key") or config.get("ember_api_key") or config.get("api_key"),
                 hearth_name=brother,
                 sender_name=mailbox_name,
+                target_branch=target_branch,
             )
         except Exception as e:
             # Mark task as failed

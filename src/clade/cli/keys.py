@@ -62,21 +62,43 @@ def save_keys(keys: dict[str, str], path: Path | None = None) -> Path:
     return kp
 
 
-def add_key(name: str, path: Path | None = None) -> str:
-    """Generate a new API key for a brother and save it.
+def add_key(name: str, path: Path | None = None, force: bool = False) -> str:
+    """Generate an API key for a brother and save it.
+
+    Idempotent: if a key already exists for *name*, returns it unchanged
+    unless *force* is True.
 
     Args:
         name: Brother name.
         path: Path to keys file.
+        force: Generate a new key even if one already exists.
 
     Returns:
-        The generated API key.
+        The API key (existing or newly generated).
     """
     keys = load_keys(path)
+    if not force and name in keys:
+        return keys[name]
     key = generate_api_key()
     keys[name] = key
     save_keys(keys, path)
     return key
+
+
+def merge_keys_into_registry(registry: dict[str, dict], keys: dict[str, str]) -> None:
+    """Merge API keys from keys dict into a brothers/workers registry (in-place).
+
+    For each entry in *registry* whose name appears in *keys*, sets
+    ``ember_api_key`` and ``hearth_api_key`` to the corresponding key value.
+
+    Args:
+        registry: Dict of brother/worker names to config dicts.
+        keys: Dict of names to API keys.
+    """
+    for name, entry in registry.items():
+        if name in keys:
+            entry["ember_api_key"] = keys[name]
+            entry["hearth_api_key"] = keys[name]
 
 
 def format_api_keys_env(keys: dict[str, str]) -> str:

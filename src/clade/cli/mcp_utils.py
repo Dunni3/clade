@@ -48,17 +48,21 @@ def write_claude_json(data: dict, path: Path | None = None) -> None:
 
 def register_mcp_server(
     name: str,
-    python_path: str,
-    module: str,
+    command: str,
+    args: list[str] | None = None,
     env: dict[str, str] | None = None,
     path: Path | None = None,
 ) -> None:
     """Register an MCP server in ~/.claude.json.
 
+    Uses the console_scripts entry point directly (e.g. 'clade-worker')
+    rather than 'python -m module', so the command must be an absolute path
+    to the entry point binary.
+
     Args:
         name: Server name (e.g. 'clade-personal').
-        python_path: Absolute path to the python interpreter.
-        module: Python module to run (e.g. 'clade.mcp.server_full').
+        command: Absolute path to the entry point binary.
+        args: Command arguments (default: empty list).
         env: Environment variables to set for the server.
         path: Path to claude.json.
     """
@@ -67,8 +71,8 @@ def register_mcp_server(
         data["mcpServers"] = {}
 
     server_config: dict = {
-        "command": python_path,
-        "args": ["-m", module],
+        "command": command,
+        "args": args if args is not None else [],
     }
     if env:
         server_config["env"] = env
@@ -162,18 +166,19 @@ print('ENV_UPDATED')
 def register_mcp_remote(
     host: str,
     server_name: str,
-    python_path: str,
-    module: str,
+    command: str,
     env: dict[str, str],
     ssh_key: str | None = None,
 ) -> SSHResult:
     """Register an MCP server in ~/.claude.json on a remote host via SSH.
 
+    Uses the console_scripts entry point directly (e.g. '/path/to/clade-worker')
+    rather than 'python -m module'.
+
     Args:
         host: SSH host string.
         server_name: MCP server name.
-        python_path: Remote python path.
-        module: Python module to run.
+        command: Absolute path to the entry point binary on the remote.
         env: Environment variables for the server.
         ssh_key: Optional SSH key path.
 
@@ -199,8 +204,8 @@ if 'mcpServers' not in data:
     data['mcpServers'] = {{}}
 
 data['mcpServers']['{server_name}'] = {{
-    'command': '{python_path}',
-    'args': ['-m', '{module}'],
+    'command': '{command}',
+    'args': [],
     'env': {env_literal},
 }}
 

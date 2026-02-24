@@ -11,7 +11,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from .auth import verify_token
@@ -126,6 +126,8 @@ class ExecuteTaskRequest(BaseModel):
     hearth_api_key: str | None = None
     hearth_name: str | None = None
     sender_name: str | None = None
+    on_complete: str | None = None
+    target_branch: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -193,15 +195,19 @@ async def execute_task(
         hearth_url=hearth_url,
         hearth_api_key=hearth_api_key,
         hearth_name=hearth_name,
+        target_branch=req.target_branch,
     )
 
     if not result.success:
-        return {
-            "error": "launch_failed",
-            "message": result.message,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-        }
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "launch_failed",
+                "message": result.message,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            },
+        )
 
     # Track aspen
     _state.add(Aspen(
