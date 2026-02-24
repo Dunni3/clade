@@ -1,0 +1,239 @@
+name: Hearth-PR Bridge
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  hearth-bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract card ID from branch name
+        id: extract
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          if [[ "$BRANCH" =~ ^card-([0-9]+) ]]; then
+            echo "card_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "Found card ID: ${BASH_REMATCH[1]}"
+          else
+            echo "Branch '$BRANCH' does not match card pattern. Skipping."
+            echo "card_id=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch card details
+        if: steps.extract.outputs.card_id != ''
+        id: card
+        env:
+          HEARTH_URL: ${{ secrets.HEARTH_URL }}
+          HEARTH_API_KEY: ${{ secrets.HEARTH_API_KEY }}
+          CARD_ID: ${{ steps.extract.outputs.card_id }}
+        run: |
+          CARD_JSON=$(curl -sk \
+            -H "Authorization: Bearer $HEARTH_API_KEY" \
+            "$HEARTH_URL/api/v1/kanban/cards/$CARD_ID" 2>/dev/null) || true
+
+          # Check for error / empty response
+          if [ -z "$CARD_JSON" ] || echo "$CARD_JSON" | jq -e '.detail' >/dev/null 2>&1; then
+            echo "::warning::Could not fetch card $CARD_ID from Hearth. Skipping."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "found=true" >> "$GITHUB_OUTPUT"
+
+          # Save card JSON for later steps
+          echo "$CARD_JSON" > /tmp/card.json
+
+          # Extract card metadata
+          TITLE=$(echo "$CARD_JSON" | jq -r '.title')
+          PRIORITY=$(echo "$CARD_JSON" | jq -r '.priority')
+          ASSIGNEE=$(echo "$CARD_JSON" | jq -r '.assignee // "unassigned"')
+          COL=$(echo "$CARD_JSON" | jq -r '.col')
+          LABELS=$(echo "$CARD_JSON" | jq -r '.labels | join(", ")')
+          PROJECT=$(echo "$CARD_JSON" | jq -r '.project // "—"')
+
+          {
+            echo "title=$TITLE"
+            echo "priority=$PRIORITY"
+            echo "assignee=$ASSIGNEE"
+            echo "col=$COL"
+            echo "labels=$LABELS"
+            echo "project=$PROJECT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Fetch linked tasks and trees
+        if: steps.card.outputs.found == 'true'
+        id: links
+        env:
+          HEARTH_URL: ${{ secrets.HEARTH_URL }}
+          HEARTH_API_KEY: ${{ secrets.HEARTH_API_KEY }}
+        run: |
+          CARD_JSON=$(cat /tmp/card.json)
+
+          # Collect linked task details
+          TASK_ROWS=""
+          while IFS= read -r task_id; do
+            [ -z "$task_id" ] && continue
+            TASK_JSON=$(curl -sk \
+              -H "Authorization: Bearer $HEARTH_API_KEY" \
+              "$HEARTH_URL/api/v1/tasks/$task_id" 2>/dev/null) || continue
+
+            if echo "$TASK_JSON" | jq -e '.detail' >/dev/null 2>&1; then
+              continue
+            fi
+
+            SUBJECT=$(echo "$TASK_JSON" | jq -r '.subject // "—"')
+            STATUS=$(echo "$TASK_JSON" | jq -r '.status')
+            TASK_ASSIGNEE=$(echo "$TASK_JSON" | jq -r '.assignee // "—"')
+            TASK_ROWS="${TASK_ROWS}| #${task_id} | ${SUBJECT} | ${STATUS} | ${TASK_ASSIGNEE} |
+          "
+          done < <(echo "$CARD_JSON" | jq -r '(.links // [])[] | select(.object_type == "task") | .object_id')
+
+          # Collect linked tree details
+          TREE_ROWS=""
+          while IFS= read -r tree_id; do
+            [ -z "$tree_id" ] && continue
+            TREE_JSON=$(curl -sk \
+              -H "Authorization: Bearer $HEARTH_API_KEY" \
+              "$HEARTH_URL/api/v1/trees/$tree_id" 2>/dev/null) || continue
+
+            if echo "$TREE_JSON" | jq -e '.detail' >/dev/null 2>&1; then
+              continue
+            fi
+
+            TREE_SUBJECT=$(echo "$TREE_JSON" | jq -r '.subject // "—"')
+            # Count statuses recursively across all tree nodes
+            COMPLETED=$(echo "$TREE_JSON" | jq '[.. | .status? // empty | select(. == "completed")] | length')
+            IN_PROGRESS=$(echo "$TREE_JSON" | jq '[.. | .status? // empty | select(. == "in_progress")] | length')
+            FAILED=$(echo "$TREE_JSON" | jq '[.. | .status? // empty | select(. == "failed")] | length')
+            PENDING=$(echo "$TREE_JSON" | jq '[.. | .status? // empty | select(. == "pending")] | length')
+            TREE_ROWS="${TREE_ROWS}- **Tree #${tree_id}**: ${TREE_SUBJECT} (${COMPLETED} completed, ${IN_PROGRESS} in progress, ${FAILED} failed, ${PENDING} pending)
+          "
+          done < <(echo "$CARD_JSON" | jq -r '(.links // [])[] | select(.object_type == "tree") | .object_id')
+
+          # Write to files for the next step (avoid GITHUB_OUTPUT multiline issues)
+          echo "$TASK_ROWS" > /tmp/task_rows.txt
+          echo "$TREE_ROWS" > /tmp/tree_rows.txt
+
+      - name: Build and append Hearth Context to PR body
+        if: steps.card.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CARD_ID: ${{ steps.extract.outputs.card_id }}
+          CARD_TITLE: ${{ steps.card.outputs.title }}
+          CARD_COL: ${{ steps.card.outputs.col }}
+          CARD_PRIORITY: ${{ steps.card.outputs.priority }}
+          CARD_ASSIGNEE: ${{ steps.card.outputs.assignee }}
+          CARD_LABELS: ${{ steps.card.outputs.labels }}
+          CARD_PROJECT: ${{ steps.card.outputs.project }}
+        run: |
+          TASK_ROWS=$(cat /tmp/task_rows.txt)
+          TREE_ROWS=$(cat /tmp/tree_rows.txt)
+
+          # Build the Hearth Context section via heredoc
+          cat > /tmp/hearth_context.md <<EOF
+          ---
+
+          ## Hearth Context
+
+          | Field | Value |
+          |-------|-------|
+          | Card | #${CARD_ID}: ${CARD_TITLE} |
+          | Column | ${CARD_COL} |
+          | Priority | ${CARD_PRIORITY} |
+          | Assignee | ${CARD_ASSIGNEE} |
+          | Labels | ${CARD_LABELS} |
+          | Project | ${CARD_PROJECT} |
+          EOF
+
+          # Add linked tasks table if any
+          if [ -n "$TASK_ROWS" ]; then
+            cat >> /tmp/hearth_context.md <<EOF
+
+          ### Linked Tasks
+
+          | Task | Subject | Status | Assignee |
+          |------|---------|--------|----------|
+          ${TASK_ROWS}
+          EOF
+          fi
+
+          # Add linked trees if any
+          if [ -n "$TREE_ROWS" ]; then
+            cat >> /tmp/hearth_context.md <<EOF
+
+          ### Linked Trees
+
+          ${TREE_ROWS}
+          EOF
+          fi
+
+          # Get current PR body and append
+          CURRENT_BODY=$(gh pr view "$PR_NUMBER" --json body -q '.body')
+          {
+            echo "$CURRENT_BODY"
+            echo ""
+            cat /tmp/hearth_context.md
+          } > /tmp/new_body.md
+
+          gh pr edit "$PR_NUMBER" --body-file /tmp/new_body.md
+
+      - name: Link PR back to card
+        if: steps.card.outputs.found == 'true'
+        env:
+          HEARTH_URL: ${{ secrets.HEARTH_URL }}
+          HEARTH_API_KEY: ${{ secrets.HEARTH_API_KEY }}
+          CARD_ID: ${{ steps.extract.outputs.card_id }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          CARD_JSON=$(cat /tmp/card.json)
+          PR_LINK="Dunni3/clade#${PR_NUMBER}"
+
+          # Check if link already exists
+          EXISTS=$(echo "$CARD_JSON" | jq -r \
+            --arg oid "$PR_LINK" \
+            '(.links // [])[] | select(.object_type == "github_pr" and .object_id == $oid) | "yes"')
+
+          if [ "$EXISTS" = "yes" ]; then
+            echo "PR link already exists on card. Skipping."
+            exit 0
+          fi
+
+          # Build new links array: existing + new PR link
+          NEW_LINKS=$(echo "$CARD_JSON" | jq \
+            --arg oid "$PR_LINK" \
+            '.links + [{"object_type": "github_pr", "object_id": $oid}]')
+
+          # PATCH card with updated links
+          curl -sk -X PATCH \
+            -H "Authorization: Bearer $HEARTH_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"links\": $NEW_LINKS}" \
+            "$HEARTH_URL/api/v1/kanban/cards/$CARD_ID"
+
+      - name: Deposit morsel
+        if: steps.card.outputs.found == 'true'
+        env:
+          HEARTH_URL: ${{ secrets.HEARTH_URL }}
+          HEARTH_API_KEY: ${{ secrets.HEARTH_API_KEY }}
+          CARD_ID: ${{ steps.extract.outputs.card_id }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          BODY="PR #${PR_NUMBER} (\"${PR_TITLE}\") opened for card #${CARD_ID}. Hearth context appended to PR body and card linked."
+
+          curl -sk -X POST \
+            -H "Authorization: Bearer $HEARTH_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg body "$BODY" \
+              --arg card_tag "card-${CARD_ID}" \
+              --arg card_id "$CARD_ID" \
+              '{
+                body: $body,
+                tags: ["github-pr", $card_tag],
+                links: [{"object_type": "card", "object_id": $card_id}]
+              }')" \
+            "$HEARTH_URL/api/v1/morsels"
