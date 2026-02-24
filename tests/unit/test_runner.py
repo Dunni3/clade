@@ -7,7 +7,7 @@ class TestBuildRunnerScriptWorktree:
     """Test worktree logic in generated runner scripts."""
 
     def test_default_worktree_from_head(self):
-        """Without target_branch, worktree is created from HEAD."""
+        """Without target_branch, worktree fetches origin and creates from origin/main."""
         _, runner_path = build_runner_script(
             session_name="task-oppy-test-123",
             working_dir="/tmp/repo",
@@ -16,11 +16,12 @@ class TestBuildRunnerScriptWorktree:
         with open(runner_path) as f:
             content = f.read()
 
-        # Should create worktree with a clade/ branch or HEAD detach
+        # Should fetch origin for fresh base
+        assert "git fetch origin" in content
+        # Should try origin/main first, then local branch, then HEAD detach
+        assert 'git worktree add "$_WT_DIR" -b "clade/task-oppy-test-123" origin/main' in content
         assert 'git worktree add "$_WT_DIR" -b "clade/task-oppy-test-123"' in content
         assert 'git worktree add "$_WT_DIR" HEAD --detach' in content
-        # Should NOT have target_branch fetch logic
-        assert "git fetch origin" not in content
 
     def test_target_branch_worktree(self):
         """With target_branch, worktree fetches and checks out that branch."""
