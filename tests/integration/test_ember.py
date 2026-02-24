@@ -207,6 +207,58 @@ class TestExecuteEndpoint:
                             (len(launch_kwargs[0]) > 2 and launch_kwargs[0][2] == "wrapped prompt")
 
     @pytest.mark.asyncio
+    async def test_execute_passes_target_branch(self, auth_headers, env_vars):
+        """target_branch should flow through to launch_local_task."""
+        with patch.dict("os.environ", env_vars):
+            with patch("clade.worker.ember.launch_local_task") as mock_launch:
+                mock_launch.return_value = LocalTaskResult(
+                    success=True,
+                    session_name="task-oppy-test-123",
+                    message="Task launched",
+                )
+                with patch("clade.worker.ember.check_tmux_session", return_value=False):
+                    async with httpx.AsyncClient(
+                        transport=httpx.ASGITransport(app=app),
+                        base_url="http://test",
+                    ) as client:
+                        resp = await client.post(
+                            "/tasks/execute",
+                            json={
+                                "prompt": "do stuff",
+                                "subject": "Test",
+                                "target_branch": "card-5-sudoers",
+                            },
+                            headers=auth_headers,
+                        )
+                        assert resp.status_code == 202
+                    launch_kwargs = mock_launch.call_args
+                    assert launch_kwargs.kwargs.get("target_branch") == "card-5-sudoers"
+
+    @pytest.mark.asyncio
+    async def test_execute_omits_target_branch_when_none(self, auth_headers, env_vars):
+        """target_branch should be None when not provided in request."""
+        with patch.dict("os.environ", env_vars):
+            with patch("clade.worker.ember.launch_local_task") as mock_launch:
+                mock_launch.return_value = LocalTaskResult(
+                    success=True,
+                    session_name="task-oppy-test-123",
+                    message="Task launched",
+                )
+                with patch("clade.worker.ember.check_tmux_session", return_value=False):
+                    async with httpx.AsyncClient(
+                        transport=httpx.ASGITransport(app=app),
+                        base_url="http://test",
+                    ) as client:
+                        resp = await client.post(
+                            "/tasks/execute",
+                            json={"prompt": "do stuff", "subject": "Test"},
+                            headers=auth_headers,
+                        )
+                        assert resp.status_code == 202
+                    launch_kwargs = mock_launch.call_args
+                    assert launch_kwargs.kwargs.get("target_branch") is None
+
+    @pytest.mark.asyncio
     async def test_execute_passes_sender_name(self, auth_headers, env_vars):
         with patch.dict("os.environ", env_vars):
             with patch("clade.worker.ember.launch_local_task") as mock_launch:

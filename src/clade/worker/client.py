@@ -36,6 +36,7 @@ class EmberClient:
         hearth_name: str | None = None,
         sender_name: str | None = None,
         on_complete: str | None = None,
+        target_branch: str | None = None,
     ) -> dict:
         """Submit a task for execution."""
         payload: dict = {
@@ -58,6 +59,8 @@ class EmberClient:
             payload["sender_name"] = sender_name
         if on_complete is not None:
             payload["on_complete"] = on_complete
+        if target_branch is not None:
+            payload["target_branch"] = target_branch
 
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.post(

@@ -92,6 +92,26 @@ class TestExecuteTask:
             assert payload["prompt"] == "do stuff"
             assert "task_id" not in payload
             assert "working_dir" not in payload
+            assert "target_branch" not in payload
+
+    @pytest.mark.asyncio
+    async def test_execute_task_with_target_branch(self, client):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"status": "launched"}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("clade.worker.client.httpx.AsyncClient") as mock_client_cls:
+            mock_ctx = AsyncMock()
+            mock_ctx.post = AsyncMock(return_value=mock_resp)
+            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await client.execute_task(
+                prompt="do stuff",
+                target_branch="card-5-sudoers",
+            )
+            payload = mock_ctx.post.call_args.kwargs["json"]
+            assert payload["target_branch"] == "card-5-sudoers"
 
 
 class TestActiveTasks:

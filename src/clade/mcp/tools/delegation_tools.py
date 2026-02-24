@@ -63,6 +63,7 @@ def create_delegation_tools(
         card_id: int | None = None,
         on_complete: str | None = None,
         blocked_by_task_id: int | None = None,
+        target_branch: str | None = None,
     ) -> str:
         """Delegate a task to a brother via their Ember server.
 
@@ -81,6 +82,7 @@ def create_delegation_tools(
             card_id: Optional kanban card ID to link this task to.
             on_complete: Optional follow-up instructions for the Conductor when this task completes or fails.
             blocked_by_task_id: Optional task ID that must complete before this task runs. The task will stay in 'pending' until the blocking task completes, then auto-delegate.
+            target_branch: Optional git branch to check out in the worktree. When set, the runner creates the worktree from this branch instead of HEAD.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -145,6 +147,7 @@ def create_delegation_tools(
                 hearth_api_key=config.get("hearth_api_key") or config.get("ember_api_key") or config.get("api_key"),
                 hearth_name=brother,
                 sender_name=mailbox_name,
+                target_branch=target_branch,
             )
         except Exception as e:
             # Mark task as failed

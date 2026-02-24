@@ -34,8 +34,16 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
     _GIT_ROOT="$(git rev-parse --show-toplevel)"
     echo "$(date -Iseconds) inside git repo (root: $_GIT_ROOT), creating worktree at $_WT_DIR" >> "$LOGFILE"
 
+{% if target_branch %}
+    echo "$(date -Iseconds) target_branch={{ target_branch }}, fetching and creating worktree from it" >> "$LOGFILE"
+    git fetch origin "{{ target_branch }}" 2>/dev/null || true
+    git worktree add "$_WT_DIR" "origin/{{ target_branch }}" 2>/dev/null || \
+        git worktree add "$_WT_DIR" "{{ target_branch }}" 2>/dev/null || \
+        git worktree add "$_WT_DIR" HEAD --detach 2>/dev/null
+{% else %}
     git worktree add "$_WT_DIR" -b "clade/{{ session_name }}" 2>/dev/null || \
         git worktree add "$_WT_DIR" HEAD --detach 2>/dev/null
+{% endif %}
 
     if [ -d "$_WT_DIR" ]; then
         echo "$(date -Iseconds) worktree created, cd to $_WT_DIR" >> "$LOGFILE"
