@@ -413,6 +413,7 @@ async def create_task(
             on_complete=req.on_complete,
             blocked_by_task_id=req.blocked_by_task_id,
             max_turns=req.max_turns,
+            project=req.project,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

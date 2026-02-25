@@ -88,6 +88,7 @@ class CreateTaskRequest(BaseModel):
     on_complete: str | None = None
     blocked_by_task_id: int | None = None
     max_turns: int | None = None
+    project: str | None = None
 
 
 class UpdateTaskRequest(BaseModel):
@@ -109,6 +110,7 @@ class TaskSummary(BaseModel):
     root_task_id: int | None = None
     depth: int = 0
     blocked_by_task_id: int | None = None
+    project: str | None = None
 
 
 class LinkedCardInfo(BaseModel):
@@ -229,6 +231,7 @@ class TreeNode(BaseModel):
     metadata: dict | None = None
     depth: int = 0
     on_complete: str | None = None
+    project: str | None = None
     children: list["TreeNode"] = []
     linked_cards: list[LinkedCardInfo] = []
 

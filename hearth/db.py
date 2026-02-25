@@ -198,6 +198,13 @@ async def init_db() -> None:
             )
         except Exception:
             pass
+        # Migration: add project column to tasks
+        try:
+            await db.execute(
+                "ALTER TABLE tasks ADD COLUMN project TEXT"
+            )
+        except Exception:
+            pass
         await db.commit()
     finally:
         await db.close()
@@ -556,6 +563,7 @@ async def insert_task(
     on_complete: str | None = None,
     blocked_by_task_id: int | None = None,
     max_turns: int | None = None,
+    project: str | None = None,
 ) -> int:
     db = await get_db()
     try:
@@ -607,9 +615,9 @@ async def insert_task(
             depth = (parent["depth"] or 0) + 1
 
         cursor = await db.execute(
-            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, metadata, depth, on_complete, blocked_by_task_id, max_turns)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, metadata_json, depth, on_complete, blocked_by_task_id, max_turns),
+            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, metadata, depth, on_complete, blocked_by_task_id, max_turns, project)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, metadata_json, depth, on_complete, blocked_by_task_id, max_turns, project),
         )
         task_id = cursor.lastrowid
         # Every task is a root of its own tree when it has no parent
@@ -646,7 +654,7 @@ async def get_tasks(
             params.append(creator)
         where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
         sql = f"""
-            SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, depth, blocked_by_task_id
+            SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, depth, blocked_by_task_id, project
             FROM tasks
             {where_sql}
             ORDER BY created_at DESC
@@ -723,7 +731,7 @@ async def get_task(task_id: int) -> dict | None:
 
         # Get children
         cursor = await db.execute(
-            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, depth, blocked_by_task_id
+            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, depth, blocked_by_task_id, project
                FROM tasks WHERE parent_task_id = ? ORDER BY created_at ASC""",
             (task_id,),
         )
@@ -732,7 +740,7 @@ async def get_task(task_id: int) -> dict | None:
 
         # Get tasks blocked by this task
         cursor = await db.execute(
-            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, blocked_by_task_id
+            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, blocked_by_task_id, project
                FROM tasks WHERE blocked_by_task_id = ? ORDER BY created_at ASC""",
             (task_id,),
         )
@@ -800,7 +808,7 @@ async def get_tasks_blocked_by(task_id: int) -> list[dict]:
     try:
         cursor = await db.execute(
             """SELECT id, creator, assignee, subject, prompt, status, session_name, host,
-                      working_dir, parent_task_id, root_task_id, blocked_by_task_id, max_turns, created_at
+                      working_dir, parent_task_id, root_task_id, blocked_by_task_id, max_turns, project, created_at
                FROM tasks
                WHERE blocked_by_task_id = ? AND status = 'pending'
                ORDER BY created_at ASC""",
@@ -1131,7 +1139,7 @@ async def get_tree(root_task_id: int) -> dict | None:
     try:
         # Fetch root task
         cursor = await db.execute(
-            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, metadata, depth, on_complete, blocked_by_task_id FROM tasks WHERE id = ?",
+            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, metadata, depth, on_complete, blocked_by_task_id, project FROM tasks WHERE id = ?",
             (root_task_id,),
         )
         root_row = await cursor.fetchone()
@@ -1147,7 +1155,7 @@ async def get_tree(root_task_id: int) -> dict | None:
 
         # Fetch all descendants (exclude root itself)
         cursor = await db.execute(
-            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, metadata, depth, on_complete, blocked_by_task_id FROM tasks WHERE root_task_id = ? AND id != ? ORDER BY created_at ASC",
+            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, metadata, depth, on_complete, blocked_by_task_id, project FROM tasks WHERE root_task_id = ? AND id != ? ORDER BY created_at ASC",
             (root_task_id, root_task_id),
         )
         desc_rows = await cursor.fetchall()

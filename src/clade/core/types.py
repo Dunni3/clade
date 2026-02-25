@@ -3,12 +3,13 @@
 from typing import TypedDict, Optional
 
 
-class BrotherConfig(TypedDict):
+class BrotherConfig(TypedDict, total=False):
     """Configuration for a brother instance."""
 
     host: str
     working_dir: Optional[str]
     description: str
+    projects: dict[str, str]
 
 
 class MailboxConfig(TypedDict, total=False):

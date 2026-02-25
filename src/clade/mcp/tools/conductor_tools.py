@@ -64,6 +64,7 @@ def create_conductor_tools(
         on_complete: str | None = None,
         blocked_by_task_id: int | None = None,
         target_branch: str | None = None,
+        project: str | None = None,
     ) -> str:
         """Delegate a task to a worker brother via their Ember server.
 
@@ -84,6 +85,7 @@ def create_conductor_tools(
             on_complete: Optional follow-up instructions for the Conductor when this task completes or fails.
             blocked_by_task_id: Optional task ID that must complete before this task runs. The task will stay in 'pending' until the blocking task completes, then auto-delegate.
             target_branch: Optional git branch to check out in the worktree. When set, the runner creates the worktree from this branch instead of HEAD.
+            project: Optional project name (e.g. "clade", "omtra"). When set, working_dir is resolved from the worker's per-project mapping if no explicit working_dir is provided.
         """
         if mailbox is None:
             return _NOT_CONFIGURED
@@ -131,6 +133,7 @@ def create_conductor_tools(
                 on_complete=on_complete,
                 blocked_by_task_id=blocked_by_task_id,
                 max_turns=max_turns,
+                project=project,
             )
             task_id = task_result["id"]
         except Exception as e:
@@ -162,7 +165,13 @@ def create_conductor_tools(
         # Don't pass hearth_url — the Ember process already has the correct
         # HEARTH_URL for its network context. The conductor's own URL (often
         # localhost) is unreachable from remote workers.
-        wd = working_dir or worker.get("working_dir")
+        # Resolve working_dir: explicit override > project mapping > worker default
+        wd = working_dir
+        if wd is None and project:
+            project_dirs = worker.get("projects") or {}
+            wd = project_dirs.get(project)
+        if wd is None:
+            wd = worker.get("working_dir")
         try:
             ember_result = await ember.execute_task(
                 prompt=prompt,
