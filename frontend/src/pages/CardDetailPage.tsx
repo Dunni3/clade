@@ -9,7 +9,6 @@ import { parseGitHubPrLink } from '../utils/links';
 import type { CardSummary, TaskSummary } from '../types/mailbox';
 
 const COLUMNS = ['backlog', 'todo', 'in_progress', 'done'] as const;
-const ALL_COLUMNS = ['backlog', 'todo', 'in_progress', 'done', 'archived'] as const;
 const PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -387,7 +386,7 @@ export default function CardDetailPage() {
               {card.col !== 'archived' && (
                 <>
                   <span className="text-xs text-gray-500">Move to:</span>
-                  {ALL_COLUMNS.filter(c => c !== card.col).map(col => (
+                  {COLUMNS.filter(c => c !== card.col).map(col => (
                     <button
                       key={col}
                       onClick={() => handleMove(col)}
