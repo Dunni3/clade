@@ -96,8 +96,16 @@ export default function Spotlight({ open, onClose }: SpotlightProps) {
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelectedIndex((i) => Math.max(i - 1, 0));
-    } else if (e.key === 'Enter' && results[selectedIndex]) {
-      handleSelect(results[selectedIndex]);
+    } else if (e.key === 'Enter') {
+      // Quick-jump: #t123 → task, #m123 → morsel, #c123 → card
+      const jumpMatch = query.trim().match(/^#([tmc])(\d+)$/i);
+      if (jumpMatch) {
+        const typeMap: Record<string, string> = { t: '/tasks/', m: '/morsels/', c: '/board/cards/' };
+        onClose();
+        navigate(typeMap[jumpMatch[1].toLowerCase()] + jumpMatch[2]);
+      } else if (results[selectedIndex]) {
+        handleSelect(results[selectedIndex]);
+      }
     }
   };
 
@@ -141,7 +149,7 @@ export default function Spotlight({ open, onClose }: SpotlightProps) {
           </kbd>
         </div>
         <div className="px-4 py-1.5 text-xs text-gray-500 border-b border-gray-700/50">
-          Prefix with task:, morsel:, or card: to filter by type
+          Prefix with task:, morsel:, or card: to filter. Jump with #t123, #m123, #c123
         </div>
 
         {/* Results */}
