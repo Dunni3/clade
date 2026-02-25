@@ -721,6 +721,13 @@ async def retry_task(
             detail=f"No API key found for {assignee}. Child task #{child_id} created but marked failed.",
         )
 
+    # Resolve working_dir: explicit > project lookup > None
+    wd = task.get("working_dir")
+    if wd is None and task.get("project"):
+        bp = await db.get_brother_project(assignee, task["project"])
+        if bp:
+            wd = bp["working_dir"]
+
     # Send to Ember
     try:
         async with httpx.AsyncClient(verify=False, timeout=30.0) as http_client:
@@ -731,7 +738,7 @@ async def retry_task(
                     "task_id": child_id,
                     "subject": retry_subject,
                     "sender_name": caller,
-                    "working_dir": task.get("working_dir"),
+                    "working_dir": wd,
                 },
                 headers={"Authorization": f"Bearer {assignee_key}"},
             )
