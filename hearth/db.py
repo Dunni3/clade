@@ -270,22 +270,25 @@ async def init_db() -> None:
             END;
         """)
 
-        # Backfill FTS indexes for existing rows (idempotent — only if empty)
-        cursor = await db.execute("SELECT COUNT(*) as cnt FROM tasks_fts")
+        # Backfill FTS indexes for existing rows (idempotent — only if empty).
+        # Must check the docsize shadow table, not the FTS table itself,
+        # because SELECT COUNT(*) on a content-sync FTS table reads from
+        # the source content table (always non-zero if data exists).
+        cursor = await db.execute("SELECT COUNT(*) as cnt FROM tasks_fts_docsize")
         row = await cursor.fetchone()
         if row["cnt"] == 0:
             await db.execute("""
                 INSERT INTO tasks_fts(rowid, subject, prompt, output)
                 SELECT id, subject, prompt, COALESCE(output, '') FROM tasks
             """)
-        cursor = await db.execute("SELECT COUNT(*) as cnt FROM morsels_fts")
+        cursor = await db.execute("SELECT COUNT(*) as cnt FROM morsels_fts_docsize")
         row = await cursor.fetchone()
         if row["cnt"] == 0:
             await db.execute("""
                 INSERT INTO morsels_fts(rowid, body)
                 SELECT id, body FROM morsels
             """)
-        cursor = await db.execute("SELECT COUNT(*) as cnt FROM cards_fts")
+        cursor = await db.execute("SELECT COUNT(*) as cnt FROM cards_fts_docsize")
         row = await cursor.fetchone()
         if row["cnt"] == 0:
             await db.execute("""

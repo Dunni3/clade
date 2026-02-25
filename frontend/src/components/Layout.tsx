@@ -36,12 +36,14 @@ export default function Layout() {
     return () => clearInterval(interval);
   }, [apiKey]);
 
-  // Global Cmd+K / Ctrl+K listener
+  // Global "/" shortcut (like GitHub/Slack) — only when not in an input
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      const tag = (e.target as HTMLElement)?.tagName;
+      const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable;
+      if (e.key === '/' && !isInput && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        setSpotlightOpen((prev) => !prev);
+        setSpotlightOpen(true);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -81,7 +83,7 @@ export default function Layout() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-xs font-mono text-gray-500 bg-gray-800 border border-gray-700 rounded">
-              &#x2318;K
+              /
             </kbd>
           </button>
         </div>
