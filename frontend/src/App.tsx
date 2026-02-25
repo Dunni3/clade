@@ -9,6 +9,7 @@ import TaskDetailPage from './pages/TaskDetailPage';
 import TreeListPage from './pages/TreeListPage';
 import TreeDetailPage from './pages/TreeDetailPage';
 import KanbanPage from './pages/KanbanPage';
+import CardDetailPage from './pages/CardDetailPage';
 import MorselFeedPage from './pages/MorselFeedPage';
 import MorselDetailPage from './pages/MorselDetailPage';
 import StatusPage from './pages/StatusPage';
@@ -88,6 +89,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <KanbanPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/board/cards/:id"
+            element={
+              <RequireAuth>
+                <CardDetailPage />
               </RequireAuth>
             }
           />
