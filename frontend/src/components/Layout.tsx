@@ -36,19 +36,6 @@ export default function Layout() {
     return () => clearInterval(interval);
   }, [apiKey]);
 
-  // Global "/" shortcut (like GitHub/Slack) — only when not in an input
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable;
-      if (e.key === '/' && !isInput && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault();
-        setSpotlightOpen(true);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
@@ -77,14 +64,12 @@ export default function Layout() {
           ))}
           <button
             onClick={() => setSpotlightOpen(true)}
-            className="ml-auto flex items-center gap-2 px-3 py-1.5 rounded text-sm text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"
+            title="Search"
+            className="ml-auto p-2 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
-            <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-xs font-mono text-gray-500 bg-gray-800 border border-gray-700 rounded">
-              /
-            </kbd>
           </button>
         </div>
       </nav>
