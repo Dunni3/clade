@@ -1854,6 +1854,8 @@ async def search(
     query: str,
     entity_types: list[str] | None = None,
     limit: int = 20,
+    created_after: str | None = None,
+    created_before: str | None = None,
 ) -> list[dict]:
     """Search across tasks, morsels, and cards using FTS5.
 
@@ -1865,8 +1867,16 @@ async def search(
     db = await get_db()
     try:
         if "task" in types:
+            date_clauses = ""
+            date_params: list = []
+            if created_after:
+                date_clauses += " AND t.created_at >= ?"
+                date_params.append(created_after)
+            if created_before:
+                date_clauses += " AND t.created_at <= ?"
+                date_params.append(created_before)
             cursor = await db.execute(
-                """
+                f"""
                 SELECT
                     t.id, t.subject, t.status, t.assignee, t.creator, t.created_at,
                     snippet(tasks_fts, 0, '<mark>', '</mark>', '...', 32) AS snippet_subject,
@@ -1875,11 +1885,11 @@ async def search(
                     tasks_fts.rank
                 FROM tasks_fts
                 JOIN tasks t ON t.id = tasks_fts.rowid
-                WHERE tasks_fts MATCH ?
+                WHERE tasks_fts MATCH ?{date_clauses}
                 ORDER BY tasks_fts.rank
                 LIMIT ?
                 """,
-                (query, limit),
+                (query, *date_params, limit),
             )
             for row in await cursor.fetchall():
                 r = dict(row)
@@ -1902,19 +1912,27 @@ async def search(
                 })
 
         if "morsel" in types:
+            morsel_date_clauses = ""
+            morsel_date_params: list = []
+            if created_after:
+                morsel_date_clauses += " AND m.created_at >= ?"
+                morsel_date_params.append(created_after)
+            if created_before:
+                morsel_date_clauses += " AND m.created_at <= ?"
+                morsel_date_params.append(created_before)
             cursor = await db.execute(
-                """
+                f"""
                 SELECT
                     m.id, m.creator, m.created_at,
                     snippet(morsels_fts, 0, '<mark>', '</mark>', '...', 32) AS snippet,
                     morsels_fts.rank
                 FROM morsels_fts
                 JOIN morsels m ON m.id = morsels_fts.rowid
-                WHERE morsels_fts MATCH ?
+                WHERE morsels_fts MATCH ?{morsel_date_clauses}
                 ORDER BY morsels_fts.rank
                 LIMIT ?
                 """,
-                (query, limit),
+                (query, *morsel_date_params, limit),
             )
             for row in await cursor.fetchall():
                 r = dict(row)
@@ -1931,8 +1949,16 @@ async def search(
                 })
 
         if "card" in types:
+            card_date_clauses = ""
+            card_date_params: list = []
+            if created_after:
+                card_date_clauses += " AND c.created_at >= ?"
+                card_date_params.append(created_after)
+            if created_before:
+                card_date_clauses += " AND c.created_at <= ?"
+                card_date_params.append(created_before)
             cursor = await db.execute(
-                """
+                f"""
                 SELECT
                     c.id, c.title, c.col, c.priority, c.assignee, c.creator, c.created_at,
                     snippet(cards_fts, 0, '<mark>', '</mark>', '...', 32) AS snippet_title,
@@ -1940,11 +1966,11 @@ async def search(
                     cards_fts.rank
                 FROM cards_fts
                 JOIN kanban_cards c ON c.id = cards_fts.rowid
-                WHERE cards_fts MATCH ?
+                WHERE cards_fts MATCH ?{card_date_clauses}
                 ORDER BY cards_fts.rank
                 LIMIT ?
                 """,
-                (query, limit),
+                (query, *card_date_params, limit),
             )
             for row in await cursor.fetchall():
                 r = dict(row)

@@ -180,6 +180,118 @@ class TestDatabaseSearch:
         assert len(results) > 0
         assert any("<mark>" in r["snippet"] for r in results)
 
+    @pytest.mark.asyncio
+    async def test_created_after_filters(self):
+        """created_after excludes older items across all entity types."""
+        data = await _seed_data()
+        task_id = data["task_ids"][0]
+        morsel_id = data["morsel_id"]
+        card_id = data["card_id"]
+
+        # Backdate all items to 2025
+        db = await hearth_db.get_db()
+        await db.execute(
+            "UPDATE tasks SET created_at = ? WHERE id = ?",
+            ("2025-01-01T00:00:00Z", task_id),
+        )
+        await db.execute(
+            "UPDATE morsels SET created_at = ? WHERE id = ?",
+            ("2025-01-01T00:00:00Z", morsel_id),
+        )
+        await db.execute(
+            "UPDATE kanban_cards SET created_at = ? WHERE id = ?",
+            ("2025-01-01T00:00:00Z", card_id),
+        )
+        await db.commit()
+        await db.close()
+
+        # Searching with created_after=2026 should exclude all backdated items
+        results = await hearth_db.search("deploy*", created_after="2026-01-01T00:00:00Z")
+        # The second task (task_id2) still has its original recent timestamp
+        # but the first task, morsel, and card are all backdated
+        old_ids = {
+            ("task", task_id),
+            ("morsel", morsel_id),
+            ("card", card_id),
+        }
+        found_ids = {(r["type"], r["id"]) for r in results}
+        assert old_ids.isdisjoint(found_ids), "Backdated items should be excluded"
+
+    @pytest.mark.asyncio
+    async def test_created_before_filters(self):
+        """created_before excludes newer items across all entity types."""
+        data = await _seed_data()
+        task_id = data["task_ids"][0]
+
+        # All items have recent timestamps by default.
+        # Searching with created_before=2020 should exclude everything.
+        results = await hearth_db.search("deploy*", created_before="2020-01-01T00:00:00Z")
+        assert results == [], "All items are recent and should be excluded by created_before=2020"
+
+        # Backdate one task and verify it IS returned
+        db = await hearth_db.get_db()
+        await db.execute(
+            "UPDATE tasks SET created_at = ? WHERE id = ?",
+            ("2019-06-15T00:00:00Z", task_id),
+        )
+        await db.commit()
+        await db.close()
+
+        results = await hearth_db.search(
+            "staging", created_before="2020-01-01T00:00:00Z"
+        )
+        assert len(results) == 1
+        assert results[0]["type"] == "task"
+        assert results[0]["id"] == task_id
+
+    @pytest.mark.asyncio
+    async def test_date_range_combined(self):
+        """Both created_after and created_before together form a date range."""
+        data = await _seed_data()
+        task_id1, task_id2 = data["task_ids"]
+
+        # Put task1 in Jan 2025, task2 in Jun 2025
+        db = await hearth_db.get_db()
+        await db.execute(
+            "UPDATE tasks SET created_at = ? WHERE id = ?",
+            ("2025-01-15T00:00:00Z", task_id1),
+        )
+        await db.execute(
+            "UPDATE tasks SET created_at = ? WHERE id = ?",
+            ("2025-06-15T00:00:00Z", task_id2),
+        )
+        await db.commit()
+        await db.close()
+
+        # Range that includes only task1 (Jan-Mar 2025)
+        results = await hearth_db.search(
+            "deploy OR train",
+            entity_types=["task"],
+            created_after="2025-01-01T00:00:00Z",
+            created_before="2025-03-01T00:00:00Z",
+        )
+        assert len(results) == 1
+        assert results[0]["id"] == task_id1
+
+        # Range that includes only task2 (Apr-Aug 2025)
+        results = await hearth_db.search(
+            "deploy OR train",
+            entity_types=["task"],
+            created_after="2025-04-01T00:00:00Z",
+            created_before="2025-08-01T00:00:00Z",
+        )
+        assert len(results) == 1
+        assert results[0]["id"] == task_id2
+
+        # Range that includes both (Jan-Aug 2025)
+        results = await hearth_db.search(
+            "deploy OR train",
+            entity_types=["task"],
+            created_after="2025-01-01T00:00:00Z",
+            created_before="2025-08-01T00:00:00Z",
+        )
+        assert len(results) == 2
+
 
 # ---------------------------------------------------------------------------
 # API layer tests
@@ -247,3 +359,46 @@ class TestAPISearch:
         assert "title" in result
         assert "snippet" in result
         assert "rank" in result
+
+    @pytest.mark.asyncio
+    async def test_date_filter_params(self, client):
+        """API passes created_after and created_before through to db.search."""
+        data = await _seed_data()
+        task_id = data["task_ids"][0]
+
+        # Backdate the first task to 2025
+        db = await hearth_db.get_db()
+        await db.execute(
+            "UPDATE tasks SET created_at = ? WHERE id = ?",
+            ("2025-03-01T00:00:00Z", task_id),
+        )
+        await db.commit()
+        await db.close()
+
+        # With created_after=2026, the backdated task should not appear
+        resp = await client.get(
+            "/api/v1/search",
+            params={
+                "q": "staging",
+                "types": "task",
+                "created_after": "2026-01-01T00:00:00Z",
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert not any(r["id"] == task_id for r in body["results"])
+
+        # With created_before=2026, the backdated task should appear
+        resp = await client.get(
+            "/api/v1/search",
+            params={
+                "q": "staging",
+                "types": "task",
+                "created_before": "2026-01-01T00:00:00Z",
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert any(r["id"] == task_id for r in body["results"])

@@ -182,6 +182,8 @@ export async function searchHearth(params: {
   q: string;
   types?: string;
   limit?: number;
+  created_after?: string;
+  created_before?: string;
 }): Promise<SearchResponse> {
   const { data } = await apiClient.get<SearchResponse>('/search', { params });
   return data;

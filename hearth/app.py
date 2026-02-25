@@ -947,6 +947,8 @@ async def search(
     q: str = "",
     types: str | None = None,
     limit: int = 20,
+    created_after: str | None = None,
+    created_before: str | None = None,
     _caller: str = Depends(resolve_sender),
 ):
     """Full-text search across tasks, morsels, and cards."""
@@ -965,7 +967,13 @@ async def search(
             )
 
     try:
-        results = await db.search(query=q, entity_types=entity_types, limit=limit)
+        results = await db.search(
+            query=q,
+            entity_types=entity_types,
+            limit=limit,
+            created_after=created_after,
+            created_before=created_before,
+        )
     except Exception as e:
         err = str(e)
         if "fts5: syntax error" in err.lower() or "malformed match expression" in err.lower():

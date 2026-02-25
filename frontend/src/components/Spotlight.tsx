@@ -53,7 +53,20 @@ export default function Spotlight({ open, onClose }: SpotlightProps) {
     }
     setLoading(true);
     try {
-      const resp = await searchHearth({ q, limit: 20 });
+      // Parse filter prefixes: "task:deploy" -> type=task, query=deploy
+      let actualQuery = q.trim();
+      let types: string | undefined;
+      const prefixMatch = actualQuery.match(/^(task|morsel|card):\s*(.*)/i);
+      if (prefixMatch) {
+        types = prefixMatch[1].toLowerCase();
+        actualQuery = prefixMatch[2].trim();
+      }
+      if (!actualQuery) {
+        setResults([]);
+        setLoading(false);
+        return;
+      }
+      const resp = await searchHearth({ q: actualQuery, types, limit: 20 });
       setResults(resp.results);
       setSelectedIndex(0);
     } catch {
@@ -126,6 +139,9 @@ export default function Spotlight({ open, onClose }: SpotlightProps) {
           <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-xs font-mono text-gray-400 bg-gray-800 border border-gray-600 rounded">
             ESC
           </kbd>
+        </div>
+        <div className="px-4 py-1.5 text-xs text-gray-500 border-b border-gray-700/50">
+          Prefix with task:, morsel:, or card: to filter by type
         </div>
 
         {/* Results */}

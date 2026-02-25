@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { getUnreadCount } from '../api/mailbox';
 import { useAuthStore } from '../store/authStore';
 import Spotlight from './Spotlight';
+import AdvancedSearch from './AdvancedSearch';
 
 const navItems = [
   { to: '/', label: 'Inbox' },
@@ -19,6 +20,7 @@ const navItems = [
 export default function Layout() {
   const [unread, setUnread] = useState(0);
   const [spotlightOpen, setSpotlightOpen] = useState(false);
+  const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
   const apiKey = useAuthStore((s) => s.apiKey);
   const location = useLocation();
 
@@ -36,13 +38,19 @@ export default function Layout() {
     return () => clearInterval(interval);
   }, [apiKey]);
 
-  // Cmd+K / Ctrl+K opens spotlight (preventDefault stops browser from intercepting)
+  // Cmd+Shift+K opens advanced search, Cmd+K opens spotlight
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         e.stopPropagation();
-        setSpotlightOpen((prev) => !prev);
+        if (e.shiftKey) {
+          setSpotlightOpen(false);
+          setAdvancedSearchOpen((prev) => !prev);
+        } else {
+          setAdvancedSearchOpen(false);
+          setSpotlightOpen((prev) => !prev);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown, { capture: true });
@@ -92,6 +100,7 @@ export default function Layout() {
         <Outlet />
       </main>
       <Spotlight open={spotlightOpen} onClose={() => setSpotlightOpen(false)} />
+      <AdvancedSearch open={advancedSearchOpen} onClose={() => setAdvancedSearchOpen(false)} />
     </div>
   );
 }
