@@ -23,6 +23,7 @@ class BrotherEntry:
     ember_port: int | None = None
     ember_host: str | None = None
     sudoers_configured: bool = False
+    projects: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -91,6 +92,8 @@ def build_brothers_registry(
         }
         if bro.working_dir:
             entry["working_dir"] = bro.working_dir
+        if bro.projects:
+            entry["projects"] = dict(bro.projects)
         registry[name] = entry
 
     return registry
@@ -174,6 +177,7 @@ def load_clade_config(path: Path | None = None) -> CladeConfig | None:
             ember_port=bro_data.get("ember_port"),
             ember_host=bro_data.get("ember_host"),
             sudoers_configured=bro_data.get("sudoers_configured", False),
+            projects=bro_data.get("projects") or {},
         )
 
     return CladeConfig(
@@ -247,6 +251,8 @@ def save_clade_config(config: CladeConfig, path: Path | None = None) -> Path:
                 entry["ember_host"] = bro.ember_host
             if bro.sudoers_configured:
                 entry["sudoers_configured"] = True
+            if bro.projects:
+                entry["projects"] = dict(bro.projects)
             brothers_data[name] = entry
         data["brothers"] = brothers_data
 
