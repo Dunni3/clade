@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { getCards, createCard, updateCard, deleteCard, getTask } from '../api/mailbox';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { CardSummary, CreateCardRequest, TaskSummary } from '../types/mailbox';
@@ -361,7 +361,7 @@ export default function KanbanPage() {
                       onClick={() => { setSelectedCard(card); setEditingCard(false); }}
                     >
                       <div className="flex items-start justify-between gap-1">
-                        <span className="text-sm font-medium text-gray-100 leading-tight">{card.title}</span>
+                        <Link to={`/board/cards/${card.id}`} className="text-sm font-medium text-gray-100 leading-tight hover:text-indigo-300 transition-colors" onClick={e => e.stopPropagation()}>{card.title}</Link>
                         <span className="text-xs text-gray-500 flex-shrink-0">#{card.id}</span>
                       </div>
                       <div className="flex items-center gap-1 mt-1.5 flex-wrap">
@@ -588,6 +588,9 @@ export default function KanbanPage() {
                   );
                 })()}
                 <div className="flex gap-2">
+                  <Link to={`/board/cards/${selectedCard.id}`} className="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-500 inline-block">
+                    View full page
+                  </Link>
                   <button onClick={() => openEdit(selectedCard)} className="px-3 py-1.5 bg-gray-700 text-gray-300 text-sm rounded hover:bg-gray-600">
                     Edit
                   </button>

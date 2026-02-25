@@ -150,7 +150,7 @@ function TaskPeek({ id }: { id: number }) {
             {task.linked_cards.map(card => (
               <Link
                 key={card.id}
-                to={`/board?card=${card.id}`}
+                to={`/board/cards/${card.id}`}
                 className="px-2 py-0.5 rounded text-xs font-medium bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 transition-colors"
               >
                 #{card.id}: {card.title}
@@ -262,8 +262,8 @@ function CardPeek({ id }: { id: number }) {
         <p className="text-sm text-gray-400 whitespace-pre-wrap"><Linkify>{card.description}</Linkify></p>
       )}
       <div className="pt-2">
-        <Link to={`/board?card=${card.id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
-          Open on board &rarr;
+        <Link to={`/board/cards/${card.id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
+          Open full page &rarr;
         </Link>
       </div>
     </div>

@@ -26,7 +26,7 @@ const linkColorMap: Record<string, string> = {
 const linkHrefMap: Record<string, (id: string) => string> = {
   task: (id) => `/tasks/${id}`,
   tree: (id) => `/trees/${id}`,
-  card: (id) => `/board?card=${id}`,
+  card: (id) => `/board/cards/${id}`,
   morsel: (id) => `/morsels/${id}`,
   message: (id) => `/messages/${id}`,
 };

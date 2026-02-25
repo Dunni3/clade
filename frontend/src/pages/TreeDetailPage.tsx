@@ -269,7 +269,7 @@ export default function TreeDetailPage() {
               {selectedTask.linked_cards.map(card => (
                 <Link
                   key={card.id}
-                  to={`/board?card=${card.id}`}
+                  to={`/board/cards/${card.id}`}
                   className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 transition-colors"
                 >
                   Card #{card.id}: {card.title}
