@@ -608,3 +608,101 @@ class TestLoadBrothersRegistry:
         # Should still return the brother, just with empty API keys
         assert "oppy" in registry
         assert registry["oppy"]["ember_api_key"] == ""
+
+
+class TestProjectsField:
+    """Tests for per-project working_dir via BrotherEntry.projects."""
+
+    def test_default_empty(self):
+        bro = BrotherEntry(ssh="ian@masuda")
+        assert bro.projects == {}
+
+    def test_custom(self):
+        bro = BrotherEntry(
+            ssh="ian@masuda",
+            projects={"clade": "~/projects/clade", "omtra": "~/projects/OMTRA"},
+        )
+        assert bro.projects["clade"] == "~/projects/clade"
+        assert bro.projects["omtra"] == "~/projects/OMTRA"
+
+    def test_round_trip(self, tmp_path: Path):
+        config_file = tmp_path / "clade.yaml"
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_host="100.71.57.52",
+                    projects={"clade": "~/projects/clade", "omtra": "~/projects/OMTRA"},
+                ),
+            },
+        )
+        save_clade_config(cfg, config_file)
+        loaded = load_clade_config(config_file)
+
+        assert loaded is not None
+        assert loaded.brothers["oppy"].projects == {
+            "clade": "~/projects/clade",
+            "omtra": "~/projects/OMTRA",
+        }
+
+    def test_not_saved_when_empty(self, tmp_path: Path):
+        config_file = tmp_path / "clade.yaml"
+        cfg = CladeConfig(
+            brothers={"oppy": BrotherEntry(ssh="ian@masuda")},
+        )
+        save_clade_config(cfg, config_file)
+
+        with open(config_file) as f:
+            data = yaml.safe_load(f)
+        assert "projects" not in data["brothers"]["oppy"]
+
+    def test_load_without_projects(self, tmp_path: Path):
+        """Configs written before projects was added should load with empty dict."""
+        config_file = tmp_path / "clade.yaml"
+        data = {
+            "clade": {"name": "Old Clade", "created": "2026-02-01"},
+            "personal": {"name": "doot", "description": "Coordinator"},
+            "brothers": {
+                "oppy": {"ssh": "ian@masuda", "role": "worker"},
+            },
+        }
+        with open(config_file, "w") as f:
+            yaml.dump(data, f)
+
+        loaded = load_clade_config(config_file)
+        assert loaded is not None
+        assert loaded.brothers["oppy"].projects == {}
+
+    def test_registry_includes_projects(self):
+        """build_brothers_registry passes projects through to registry entries."""
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_host="100.71.57.52",
+                    ember_port=8100,
+                    projects={"clade": "~/projects/clade"},
+                ),
+            },
+        )
+        keys = {"oppy": "key-oppy"}
+
+        registry = build_brothers_registry(cfg, keys)
+
+        assert registry["oppy"]["projects"] == {"clade": "~/projects/clade"}
+
+    def test_registry_omits_empty_projects(self):
+        """build_brothers_registry omits projects when empty."""
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_host="100.71.57.52",
+                ),
+            },
+        )
+        keys = {"oppy": "key-oppy"}
+
+        registry = build_brothers_registry(cfg, keys)
+
+        assert "projects" not in registry["oppy"]
