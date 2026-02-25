@@ -341,6 +341,24 @@ class MailboxClient:
             resp.raise_for_status()
             return resp.json()
 
+    # -- Search --
+
+    async def search(
+        self, query: str, types: str | None = None, limit: int = 20
+    ) -> dict:
+        params: dict = {"q": query, "limit": limit}
+        if types:
+            params["types"] = types
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url("/search"),
+                params=params,
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
     # -- Ember Registration --
 
     # -- Kanban --
