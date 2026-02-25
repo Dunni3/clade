@@ -68,6 +68,9 @@ export default function KanbanPage() {
   const [newLabels, setNewLabels] = useState('');
   const [newProject, setNewProject] = useState('');
 
+  // Per-column sort: "updated" (newest first) or "id" (lowest first)
+  const [columnSorts, setColumnSorts] = useState<Record<string, 'updated' | 'id'>>({});
+
   // Peek drawer state
   const [peekObject, setPeekObject] = useState<{ type: string; id: string } | null>(null);
 
@@ -205,7 +208,21 @@ export default function KanbanPage() {
 
   const columnsToShow = showArchived ? ALL_COLUMNS : COLUMNS;
 
-  const cardsByCol = (col: string) => cards.filter(c => c.col === col);
+  const cardsByCol = (col: string) => {
+    const filtered = cards.filter(c => c.col === col);
+    const sort = columnSorts[col] || 'updated';
+    if (sort === 'id') {
+      return filtered.sort((a, b) => a.id - b.id);
+    }
+    return filtered.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+  };
+
+  const toggleColumnSort = (col: string) => {
+    setColumnSorts(prev => ({
+      ...prev,
+      [col]: (prev[col] || 'updated') === 'updated' ? 'id' : 'updated',
+    }));
+  };
 
   if (loading) {
     return <div className="text-gray-400">Loading board...</div>;
@@ -346,10 +363,17 @@ export default function KanbanPage() {
           const colCards = cardsByCol(col);
           return (
             <div key={col} className="flex-shrink-0 w-64 bg-gray-900 border border-gray-800 rounded">
-              <div className="px-3 py-2 border-b border-gray-800">
+              <div className="px-3 py-2 border-b border-gray-800 flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-gray-300">
                   {COLUMN_LABELS[col]} <span className="text-gray-500">({colCards.length})</span>
                 </h2>
+                <button
+                  onClick={() => toggleColumnSort(col)}
+                  className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                  title={`Sort by ${(columnSorts[col] || 'updated') === 'updated' ? 'Card ID' : 'Last Updated'}`}
+                >
+                  {(columnSorts[col] || 'updated') === 'updated' ? '↕ Updated' : '↕ ID'}
+                </button>
               </div>
               <div className="p-2 space-y-2 max-h-[calc(100vh-320px)] overflow-y-auto">
                 {colCards.map(card => {
