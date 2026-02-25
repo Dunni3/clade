@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { getCard, updateCard, deleteCard, getTask } from '../api/mailbox';
 import Linkify from '../components/Linkify';
 import MorselPanel from '../components/MorselPanel';
