@@ -36,6 +36,18 @@ export default function Layout() {
     return () => clearInterval(interval);
   }, [apiKey]);
 
+  // Cmd+K / Ctrl+K opens spotlight (preventDefault stops browser from intercepting)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        e.stopPropagation();
+        setSpotlightOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
@@ -64,12 +76,15 @@ export default function Layout() {
           ))}
           <button
             onClick={() => setSpotlightOpen(true)}
-            title="Search"
-            className="ml-auto p-2 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"
+            title="Search (Cmd+K)"
+            className="ml-auto flex items-center gap-2 px-3 py-1.5 rounded text-sm text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
+            <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-xs font-mono text-gray-500 bg-gray-800 border border-gray-700 rounded">
+              &#x2318;K
+            </kbd>
           </button>
         </div>
       </nav>
