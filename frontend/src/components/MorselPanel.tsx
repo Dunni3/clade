@@ -51,14 +51,19 @@ function renderLink(link: MorselLink, index: number) {
   );
 }
 
-function MorselCard({ morsel }: { morsel: MorselSummary }) {
+function MorselCard({ morsel, defaultExpanded = false }: { morsel: MorselSummary; defaultExpanded?: boolean }) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
   return (
-    <Link
-      to={`/morsels/${morsel.id}`}
-      className="block rounded-lg border border-gray-800 p-3 hover:bg-gray-800/50 transition-colors"
+    <div
+      className="rounded-lg border border-gray-800 p-3 hover:bg-gray-800/50 transition-colors cursor-pointer"
+      onClick={() => setExpanded(!expanded)}
     >
-      <div className="flex items-center gap-2 mb-1.5">
-        <span className="text-xs font-mono text-gray-500">#{morsel.id}</span>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-600 select-none">{expanded ? '\u25BC' : '\u25B6'}</span>
+        <Link to={`/morsels/${morsel.id}`} className="text-xs font-mono text-gray-500 hover:text-gray-300" onClick={(e) => e.stopPropagation()}>
+          #{morsel.id}
+        </Link>
         <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${senderColors[morsel.creator] || 'bg-gray-700 text-gray-300'}`}>
           {morsel.creator}
         </span>
@@ -69,13 +74,17 @@ function MorselCard({ morsel }: { morsel: MorselSummary }) {
         ))}
         <span className="text-xs text-gray-600 ml-auto">{formatRelativeDate(morsel.created_at)}</span>
       </div>
-      <p className="text-sm text-gray-300 whitespace-pre-wrap"><Linkify>{morsel.body}</Linkify></p>
-      {morsel.links.length > 0 && (
-        <div className="flex items-center gap-2 mt-2">
-          {morsel.links.map((link, i) => renderLink(link, i))}
-        </div>
+      {expanded && (
+        <>
+          <p className="text-sm text-gray-300 whitespace-pre-wrap mt-2"><Linkify>{morsel.body}</Linkify></p>
+          {morsel.links.length > 0 && (
+            <div className="flex items-center gap-2 mt-2">
+              {morsel.links.map((link, i) => renderLink(link, i))}
+            </div>
+          )}
+        </>
       )}
-    </Link>
+    </div>
   );
 }
 
