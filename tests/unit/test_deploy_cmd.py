@@ -126,13 +126,20 @@ class TestDeployFrontend:
 class TestDeployEmber:
     @patch("clade.cli.deploy_cmd.check_ember_health_remote")
     @patch("clade.cli.deploy_cmd.run_remote")
+    @patch("clade.cli.deploy_cmd.deploy_ember_env")
+    @patch("clade.cli.deploy_cmd.detect_remote_user")
+    @patch("clade.cli.deploy_cmd.load_keys")
     @patch("clade.cli.deploy_cmd.deploy_clade_package")
     @patch("clade.cli.deploy_cmd.test_ssh")
     @patch("clade.cli.deploy_cmd.load_config_or_exit")
-    def test_success(self, mock_config, mock_ssh, mock_deploy, mock_run, mock_health):
+    def test_success(self, mock_config, mock_ssh, mock_deploy, mock_load_keys,
+                     mock_detect_user, mock_deploy_env, mock_run, mock_health):
         mock_config.return_value = make_config()
         mock_ssh.return_value = SSHResult(success=True)
         mock_deploy.return_value = SSHResult(success=True, stdout="DEPLOY_OK")
+        mock_load_keys.return_value = {"oppy": "test-api-key"}
+        mock_detect_user.return_value = "ian"
+        mock_deploy_env.return_value = SSHResult(success=True, stdout="EMBER_ENV_OK")
         mock_run.return_value = SSHResult(success=True, stdout="RESTART_OK")
         mock_health.return_value = True
 
