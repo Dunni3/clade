@@ -21,53 +21,49 @@ Call `get_task($1)`. If the task is not found, tell the user and stop.
 
 Print a brief summary of the task (subject, status, assignee, output).
 
-### 2. Extract card IDs
+### 2. Extract card and project info
 
 Look for linked card IDs in the task details. Tasks created via `implement-card` are typically linked to a kanban card.
 
-If no card is linked, tell the user and proceed to the fallback in step 3.
+If a card is linked, call `get_card(<card_id>)` and:
+- Use the card's `project` field to determine `repo` and `working_dir`:
+  - `"clade"` → repo `Dunni3/clade`, working_dir `~/.local/share/clade`
+  - `"omtra"` → repo `gnina/OMTRA`, working_dir `~/projects/mol_diffusion/OMTRA`
+  - Otherwise, leave `repo` and `working_dir` unset
+- Note the `card_id` for linking
+
+If no card is linked, tell the user and proceed to the fallback in step 3 (with `repo`, `working_dir`, and `card_id` unset).
 
 ### 3. Infer the branch
 
-Try each strategy in order until one succeeds:
+Try each strategy in order until one succeeds. For strategies that need a `repo`, if `repo` is unset, skip that strategy.
 
 **Strategy A — PR search via linked card:**
 For each linked card ID, run:
 ```
-gh pr list --repo dunni3/clade --search "card #<card_id>" --json number,headRefName --limit 1
+gh pr list --repo <repo> --search "card #<card_id>" --json number,headRefName --limit 1
 ```
 If a PR is found, use its `headRefName` as `target_branch`.
 
 **Strategy B — Parse task output for PR URL:**
-Search the task output for a GitHub PR URL matching `github.com/.*/pull/(\d+)`. If found, run:
+Search the task output for a GitHub PR URL matching `github.com/([^/]+/[^/]+)/pull/(\d+)`. Extract the repo from the URL. Run:
 ```
-gh pr view <number> --repo dunni3/clade --json headRefName
+gh pr view <number> --repo <extracted_repo> --json headRefName
 ```
 Use the result as `target_branch`.
 
 **Strategy C — Branch naming convention:**
 Try to find a branch matching the card-based convention:
 ```
-git ls-remote --heads origin "card-<card_id>-*"
+gh api repos/<repo>/git/matching-refs/heads/card-<card_id>- --jq '.[].ref'
 ```
-If exactly one branch matches, use it as `target_branch`.
+If exactly one branch matches, use it as `target_branch`. (If `repo` is unset, skip this strategy.)
 
 If all strategies fail, tell the user that no branch could be inferred and ask them to provide one manually. Stop.
 
 Print the inferred branch name.
 
-### 4. Determine the card and working directory
-
-If a card was found in step 2, call `get_card(<card_id>)` and:
-- Use the card's `project` field to determine `working_dir`:
-  - `"clade"` → `~/.local/share/clade`
-  - `"omtra"` → `~/projects/mol_diffusion/OMTRA`
-  - Otherwise, leave `working_dir` unset
-- Note the `card_id` for linking
-
-If no card was found, leave `working_dir` and `card_id` unset.
-
-### 5. Delegate review task
+### 4. Delegate review task
 
 Set `brother` to `$2` if provided, otherwise `"oppy"`.
 
@@ -92,9 +88,9 @@ You are reviewing the implementation of task #<task_id>: "<task_subject>"
 5. Post a review comment on the PR using `gh pr review --comment -b "<your review>"` summarizing your findings — what looked good, what you fixed, any concerns. Do this even if everything looks good.
 ```
 
-Call `initiate_ember_task(brother=brother, prompt=<above>, subject="Review task #<task_id>: <task_subject>", parent_task_id=$1, card_id=<card_id if found>, working_dir=<from step 4>, target_branch=<from step 3>)`.
+Call `initiate_ember_task(brother=brother, prompt=<above>, subject="Review task #<task_id>: <task_subject>", parent_task_id=$1, card_id=<card_id if found>, working_dir=<from step 2>, target_branch=<from step 3>)`.
 
-### 6. Report
+### 5. Report
 
 Tell the user:
 - The inferred branch name and how it was found (card PR search, task output, or naming convention)
