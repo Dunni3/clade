@@ -76,16 +76,17 @@ You are reviewing the implementation of kanban card #<card_id>: "<card_title>"
 ## Instructions
 
 1. Read the project's CLAUDE.md to understand the codebase
-2. Find the branch for this card (starts with `card-<card_id>-`)
-3. Check out the branch
-4. Review the diff against main: `git diff main...HEAD`
-5. Check:
+2. Fetch latest: `git fetch origin`
+3. Find the branch for this card (starts with `card-<card_id>-`)
+4. Check out the branch
+5. Review the diff against main: `git diff origin/main...HEAD`
+6. Check:
    - Does the implementation match the card description?
    - Are there any bugs or edge cases?
    - Do all tests pass?
    - Is the code style consistent with the rest of the codebase?
-6. If you find issues, fix them directly — commit and push
-7. Post a review comment on the PR using `gh pr review --comment -b "<your review>"` summarizing your findings — what looked good, what you fixed, any concerns. Do this even if everything looks good.
+7. If you find issues, fix them directly — commit and push
+8. Post a review comment on the PR using `gh pr review --comment -b "<your review>"` summarizing your findings — what looked good, what you fixed, any concerns. Do this even if everything looks good.
 ```
 
 Call `initiate_ember_task(brother=brother, prompt=<above>, subject="Review card #<card_id>: <card_title>", card_id=$1, working_dir=<from step 2>, blocked_by_task_id=<task ID from step 4>)`.
