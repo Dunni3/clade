@@ -117,6 +117,8 @@ export interface EmberInfo {
   status: string;
   active_tasks?: number;
   uptime_seconds?: number;
+  registered_status?: string;
+  last_seen?: string;
 }
 
 export interface EmberStatusResponse {

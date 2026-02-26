@@ -272,6 +272,8 @@ class UpsertEmberRequest(BaseModel):
 class EmberEntry(BaseModel):
     name: str
     ember_url: str
+    status: str = "offline"
+    last_seen: str | None = None
     created_at: str
     updated_at: str
 

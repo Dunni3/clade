@@ -109,6 +109,16 @@ export default function StatusPage() {
                 <span className="text-xs text-gray-500 ml-auto">{formatRelativeTime(last)}</span>
               </div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                <span className="text-gray-500">Ember</span>
+                <span className="text-right">
+                  {emberStatus[member.name]
+                    ? emberStatus[member.name].status === 'ok'
+                      ? <span className="text-emerald-400">online</span>
+                      : emberStatus[member.name].registered_status === 'online'
+                        ? <span className="text-amber-400" title="Registered online but unreachable">unreachable</span>
+                        : <span className="text-gray-500">offline{emberStatus[member.name].last_seen ? ` (${formatRelativeTime(emberStatus[member.name].last_seen!)})` : ''}</span>
+                    : <span className="text-gray-600">&ndash;</span>}
+                </span>
                 <span className="text-gray-500">Messages sent</span>
                 <span className="text-gray-300 text-right">{member.messages_sent}</span>
                 <span className="text-gray-500">Active tasks</span>
