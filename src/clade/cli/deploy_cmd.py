@@ -228,8 +228,9 @@ def conductor(ctx: click.Context, personality: str | None, no_identity: bool) ->
 
 @deploy.command()
 @click.argument("name")
+@click.option("--force", is_flag=True, help="Force restart even if tasks are running")
 @click.pass_context
-def ember(ctx: click.Context, name: str) -> None:
+def ember(ctx: click.Context, name: str, force: bool) -> None:
     """Deploy updated clade code to an Ember brother and restart.
 
     NAME is the brother name (e.g., 'oppy').
@@ -303,7 +304,40 @@ def ember(ctx: click.Context, name: str) -> None:
     else:
         click.echo(click.style("  Warning: could not sync ember.env", fg="yellow"))
 
-    # Step 4: Restart Ember service
+    # Step 4: Check for running tasks before restart
+    click.echo("Checking for running tasks...")
+    try:
+        resp = httpx.get(
+            f"http://{brother.ember_host}:{ember_port}/tasks/active",
+            headers={"Authorization": f"Bearer {brother_key}"},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        active_data = resp.json()
+        aspens = active_data.get("aspens", [])
+        if aspens:
+            click.echo(click.style(f"  {len(aspens)} running task(s):", fg="yellow"))
+            for a in aspens:
+                task_id = a.get("task_id", "?")
+                subject = a.get("subject", "untitled")
+                started = a.get("started_at", "?")
+                click.echo(f"    - Task #{task_id}: {subject} (started {started})")
+            if not force:
+                click.echo(
+                    click.style(
+                        "\n  Aborting: cannot restart Ember while tasks are running.",
+                        fg="red",
+                    )
+                )
+                click.echo("  Use --force to restart anyway, or kill tasks first.")
+                raise SystemExit(1)
+            click.echo(click.style("  --force: restarting anyway", fg="yellow"))
+        else:
+            click.echo(click.style("  No running tasks", fg="green"))
+    except httpx.HTTPError:
+        click.echo(click.style("  Could not reach Ember (may be down)", fg="yellow"))
+
+    # Step 5: Restart Ember service
     click.echo("Restarting Ember service...")
     restart_script = (
         f"sudo systemctl restart {EMBER_SERVICE_NAME} && sleep 2 && "
@@ -326,7 +360,7 @@ def ember(ctx: click.Context, name: str) -> None:
         raise SystemExit(1)
     click.echo(click.style("  Service restarted", fg="green"))
 
-    # Step 5: Health check
+    # Step 6: Health check
     click.echo(f"Checking health at {brother.ember_host}:{ember_port}...")
     if check_ember_health_remote(brother.ember_host, ember_port):
         click.echo(click.style("  Ember is healthy!", fg="green"))
