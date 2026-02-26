@@ -347,11 +347,20 @@ class MailboxClient:
     # -- Search --
 
     async def search(
-        self, query: str, types: str | None = None, limit: int = 20
+        self,
+        query: str,
+        types: str | None = None,
+        limit: int = 20,
+        created_after: str | None = None,
+        created_before: str | None = None,
     ) -> dict:
         params: dict = {"q": query, "limit": limit}
         if types:
             params["types"] = types
+        if created_after:
+            params["created_after"] = created_after
+        if created_before:
+            params["created_before"] = created_before
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.get(
                 self._url("/search"),

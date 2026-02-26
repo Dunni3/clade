@@ -514,6 +514,8 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         query: str,
         types: str | None = None,
         limit: int = 20,
+        created_after: str | None = None,
+        created_before: str | None = None,
     ) -> str:
         """Search across tasks, morsels, and cards using full-text search.
 
@@ -524,11 +526,19 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             query: The search query.
             types: Comma-separated entity types to search (e.g. "task,card"). Default: all.
             limit: Maximum number of results to return.
+            created_after: Filter results created after this date (e.g. "2026-02-20").
+            created_before: Filter results created before this date (e.g. "2026-02-26").
         """
         if mailbox is None:
             return _NOT_CONFIGURED
         try:
-            result = await mailbox.search(query=query, types=types, limit=limit)
+            result = await mailbox.search(
+                query=query,
+                types=types,
+                limit=limit,
+                created_after=created_after,
+                created_before=created_before,
+            )
             results = result.get("results", [])
             if not results:
                 return f"No results for '{query}'."
