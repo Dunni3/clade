@@ -101,6 +101,12 @@ CREATE TABLE IF NOT EXISTS brother_projects (
     PRIMARY KEY (brother_name, project)
 );
 
+CREATE TABLE IF NOT EXISTS task_parents (
+    task_id    INTEGER NOT NULL REFERENCES tasks(id),
+    parent_id  INTEGER NOT NULL REFERENCES tasks(id),
+    PRIMARY KEY (task_id, parent_id)
+);
+
 CREATE TABLE IF NOT EXISTS kanban_cards (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     title       TEXT NOT NULL,
@@ -665,6 +671,7 @@ async def insert_task(
     host: str | None = None,
     working_dir: str | None = None,
     parent_task_id: int | None = None,
+    parent_task_ids: list[int] | None = None,
     metadata: dict | None = None,
     on_complete: str | None = None,
     blocked_by_task_id: int | None = None,
@@ -673,20 +680,50 @@ async def insert_task(
 ) -> int:
     db = await get_db()
     try:
+        # Reconcile parent_task_id and parent_task_ids:
+        # parent_task_ids takes precedence; parent_task_id is the primary (first).
+        all_parent_ids: list[int] = []
+        if parent_task_ids is not None and len(parent_task_ids) > 0:
+            all_parent_ids = list(parent_task_ids)
+            parent_task_id = all_parent_ids[0]
+        elif parent_task_id is not None:
+            all_parent_ids = [parent_task_id]
+
         root_task_id = None
         depth = 0
-        if parent_task_id is not None:
-            # Validate parent exists and compute root_task_id + depth
+
+        if all_parent_ids:
+            # Validate all parents exist, compute root and depth
+            max_depth = 0
+            root_ids_seen: set[int] = set()
+            for pid in all_parent_ids:
+                cursor = await db.execute(
+                    "SELECT id, root_task_id, depth FROM tasks WHERE id = ?",
+                    (pid,),
+                )
+                parent = await cursor.fetchone()
+                if parent is None:
+                    raise ValueError(f"Parent task {pid} does not exist")
+                p_root = parent["root_task_id"] if parent["root_task_id"] is not None else parent["id"]
+                root_ids_seen.add(p_root)
+                p_depth = parent["depth"] or 0
+                if p_depth > max_depth:
+                    max_depth = p_depth
+
+            if len(root_ids_seen) > 1:
+                raise ValueError(
+                    f"Cross-tree joins not supported: parents belong to different trees "
+                    f"(roots: {sorted(root_ids_seen)})"
+                )
+
+            # root_task_id from primary parent
             cursor = await db.execute(
-                "SELECT id, root_task_id, depth FROM tasks WHERE id = ?",
+                "SELECT id, root_task_id FROM tasks WHERE id = ?",
                 (parent_task_id,),
             )
-            parent = await cursor.fetchone()
-            if parent is None:
-                raise ValueError(f"Parent task {parent_task_id} does not exist")
-            # If parent has a root, inherit it; otherwise parent IS the root
-            root_task_id = parent["root_task_id"] if parent["root_task_id"] is not None else parent["id"]
-            depth = (parent["depth"] or 0) + 1
+            primary_parent = await cursor.fetchone()
+            root_task_id = primary_parent["root_task_id"] if primary_parent["root_task_id"] is not None else primary_parent["id"]
+            depth = max_depth + 1
 
         metadata_json = json.dumps(metadata) if metadata is not None else None
 
@@ -711,6 +748,7 @@ async def insert_task(
         # needing to set both. Explicit parent_task_id overrides this.
         if blocked_by_task_id is not None and parent_task_id is None:
             parent_task_id = blocked_by_task_id
+            all_parent_ids = [parent_task_id]
             cursor = await db.execute(
                 "SELECT id, root_task_id, depth FROM tasks WHERE id = ?",
                 (parent_task_id,),
@@ -732,6 +770,14 @@ async def insert_task(
                 "UPDATE tasks SET root_task_id = ? WHERE id = ?",
                 (task_id, task_id),
             )
+
+        # Insert into task_parents join table for all parents
+        for pid in all_parent_ids:
+            await db.execute(
+                "INSERT INTO task_parents (task_id, parent_id) VALUES (?, ?)",
+                (task_id, pid),
+            )
+
         await db.commit()
         return task_id
     finally:
@@ -788,6 +834,14 @@ async def get_task(task_id: int) -> dict | None:
                 task["metadata"] = json.loads(task["metadata"])
             except (json.JSONDecodeError, TypeError):
                 pass
+
+        # Get parent_task_ids from join table
+        cursor = await db.execute(
+            "SELECT parent_id FROM task_parents WHERE task_id = ? ORDER BY rowid",
+            (task_id,),
+        )
+        parent_id_rows = await cursor.fetchall()
+        task["parent_task_ids"] = [r["parent_id"] for r in parent_id_rows]
 
         # Get linked messages (explicit task_id OR mentions "task #N" / "task N")
         task_id_str = str(task_id)
@@ -904,6 +958,20 @@ async def get_task_events(task_id: int) -> list[dict]:
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+async def get_task_parent_ids(task_id: int) -> list[int]:
+    """Get all parent IDs for a task from the task_parents join table."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT parent_id FROM task_parents WHERE task_id = ? ORDER BY rowid",
+            (task_id,),
+        )
+        rows = await cursor.fetchall()
+        return [row["parent_id"] for row in rows]
     finally:
         await db.close()
 
@@ -1284,6 +1352,22 @@ async def get_tree(root_task_id: int) -> dict | None:
             parent_id = d["parent_task_id"]
             if parent_id in nodes:
                 nodes[parent_id]["children"].append(d)
+
+        # Fetch all multi-parent edges for tasks in this tree
+        all_node_ids = list(nodes.keys())
+        placeholders = ",".join("?" * len(all_node_ids))
+        cursor = await db.execute(
+            f"SELECT task_id, parent_id FROM task_parents WHERE task_id IN ({placeholders}) ORDER BY rowid",
+            all_node_ids,
+        )
+        tp_rows = await cursor.fetchall()
+
+        # Build parent_task_ids for each node
+        parent_ids_map: dict[int, list[int]] = {}
+        for r in tp_rows:
+            parent_ids_map.setdefault(r["task_id"], []).append(r["parent_id"])
+        for tid, node in nodes.items():
+            node["parent_task_ids"] = parent_ids_map.get(tid, [])
 
         # Fetch linked cards for all tasks in the tree
         all_task_ids = [str(tid) for tid in nodes.keys()]

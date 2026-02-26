@@ -261,18 +261,24 @@ export default function TaskDetailPage() {
             <h1 className="text-xl font-semibold text-gray-100">
               {task.subject || '(no subject)'}
             </h1>
-            {(task.parent_task_id || task.root_task_id || task.blocked_by_task_id || (task.children && task.children.length > 0) || (task.blocked_tasks && task.blocked_tasks.length > 0) || (task.linked_cards && task.linked_cards.length > 0)) && (
+            {(task.parent_task_id || (task.parent_task_ids && task.parent_task_ids.length > 0) || task.root_task_id || task.blocked_by_task_id || (task.children && task.children.length > 0) || (task.blocked_tasks && task.blocked_tasks.length > 0) || (task.linked_cards && task.linked_cards.length > 0)) && (
               <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                 {task.blocked_by_task_id && (
                   <Link to={`/tasks/${task.blocked_by_task_id}`} className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30 transition-colors">
                     Blocked by #{task.blocked_by_task_id}
                   </Link>
                 )}
-                {task.parent_task_id && (
+                {task.parent_task_ids && task.parent_task_ids.length > 0 ? (
+                  task.parent_task_ids.map(pid => (
+                    <Link key={pid} to={`/tasks/${pid}`} className="text-xs text-indigo-400 hover:text-indigo-300">
+                      Parent: #{pid}
+                    </Link>
+                  ))
+                ) : task.parent_task_id ? (
                   <Link to={`/tasks/${task.parent_task_id}`} className="text-xs text-indigo-400 hover:text-indigo-300">
                     Parent: #{task.parent_task_id}
                   </Link>
-                )}
+                ) : null}
                 {task.root_task_id && (
                   <Link to={`/trees/${task.root_task_id}`} className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-colors">
                     View Tree &rarr;

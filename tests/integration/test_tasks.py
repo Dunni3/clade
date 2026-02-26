@@ -473,6 +473,138 @@ class TestDatabaseTreesKilledCount:
         assert t["completed"] == 1
 
 
+class TestDatabaseMultiParentTasks:
+    """Tests for multi-parent (DAG) task support via task_parents join table."""
+
+    @pytest.mark.asyncio
+    async def test_insert_with_parent_task_ids(self):
+        """parent_task_ids creates entries in task_parents join table."""
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root", subject="Root"
+        )
+        p1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="P1", parent_task_id=root_id,
+        )
+        p2 = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="P2", parent_task_id=root_id,
+        )
+        child_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Child",
+            parent_task_ids=[p1, p2],
+        )
+
+        child = await mailbox_db.get_task(child_id)
+        assert child["parent_task_id"] == p1  # primary parent = first in list
+        assert child["root_task_id"] == root_id
+        assert child["parent_task_ids"] == [p1, p2]
+
+    @pytest.mark.asyncio
+    async def test_depth_from_deepest_parent(self):
+        """Depth is max(parent depths) + 1 when parents are at different depths."""
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root", subject="Root"
+        )
+        shallow = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Shallow", parent_task_id=root_id,
+        )
+        mid = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Mid", parent_task_id=shallow,
+        )
+        deep = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Deep", parent_task_id=mid,
+        )
+        # Join shallow (depth=1) and deep (depth=3) → child depth should be 4
+        child_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Join",
+            parent_task_ids=[shallow, deep],
+        )
+        child = await mailbox_db.get_task(child_id)
+        assert child["depth"] == 4  # max(1, 3) + 1
+
+    @pytest.mark.asyncio
+    async def test_cross_tree_join_rejected(self):
+        """Parents from different trees are rejected."""
+        tree_a_root = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Tree A root",
+        )
+        tree_b_root = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="Tree B root",
+        )
+        with pytest.raises(ValueError, match="Cross-tree joins not supported"):
+            await mailbox_db.insert_task(
+                creator="doot", assignee="oppy", prompt="Cross-tree child",
+                parent_task_ids=[tree_a_root, tree_b_root],
+            )
+
+    @pytest.mark.asyncio
+    async def test_get_task_parent_ids(self):
+        """get_task_parent_ids returns all parents in insertion order."""
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root",
+        )
+        p1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="P1", parent_task_id=root_id,
+        )
+        p2 = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="P2", parent_task_id=root_id,
+        )
+        child_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Child",
+            parent_task_ids=[p1, p2],
+        )
+        parent_ids = await mailbox_db.get_task_parent_ids(child_id)
+        assert parent_ids == [p1, p2]
+
+    @pytest.mark.asyncio
+    async def test_single_parent_via_parent_task_ids(self):
+        """A single-element parent_task_ids behaves like parent_task_id."""
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root",
+        )
+        child_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Child",
+            parent_task_ids=[root_id],
+        )
+        child = await mailbox_db.get_task(child_id)
+        assert child["parent_task_id"] == root_id
+        assert child["parent_task_ids"] == [root_id]
+
+    @pytest.mark.asyncio
+    async def test_tree_includes_parent_task_ids(self):
+        """get_tree returns parent_task_ids on each node."""
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root", subject="Root"
+        )
+        p1 = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="P1", parent_task_id=root_id,
+        )
+        p2 = await mailbox_db.insert_task(
+            creator="doot", assignee="jerry", prompt="P2", parent_task_id=root_id,
+        )
+        child_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Join",
+            parent_task_ids=[p1, p2],
+        )
+
+        tree = await mailbox_db.get_tree(root_id)
+        # Find the join child (it's under p1 since p1 is primary parent)
+        p1_node = next(c for c in tree["children"] if c["id"] == p1)
+        join_node = next(c for c in p1_node["children"] if c["id"] == child_id)
+        assert join_node["parent_task_ids"] == [p1, p2]
+
+    @pytest.mark.asyncio
+    async def test_invalid_parent_in_list_rejected(self):
+        """A non-existent parent in parent_task_ids raises ValueError."""
+        root_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root",
+        )
+        with pytest.raises(ValueError, match="does not exist"):
+            await mailbox_db.insert_task(
+                creator="doot", assignee="oppy", prompt="Bad child",
+                parent_task_ids=[root_id, 999],
+            )
+
+
 class TestDatabaseTaskLinkedMessages:
     @pytest.mark.asyncio
     async def test_message_with_task_id(self):
