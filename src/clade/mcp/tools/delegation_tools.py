@@ -58,7 +58,8 @@ def create_delegation_tools(
 
         try:
             resolution = await resolve_ember_url(brother, mailbox, config_url)
-        except EmberResolutionError:
+        except EmberResolutionError as exc:
+            logger.warning("Ember resolution failed for %s: %s", brother, exc)
             return None, []
 
         for w in resolution.warnings:

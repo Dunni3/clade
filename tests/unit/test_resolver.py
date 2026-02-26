@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from clade.worker.resolver import (
-    EmberResolution,
     EmberResolutionError,
     resolve_ember_url,
 )
