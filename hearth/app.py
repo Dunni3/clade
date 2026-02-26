@@ -36,6 +36,7 @@ from .models import (
     ReadByEntry,
     RegisterKeyRequest,
     RegisterKeyResponse,
+    SearchResponse,
     SendMessageRequest,
     SendMessageResponse,
     TaskDetail,
@@ -994,6 +995,52 @@ async def get_morsel(
     if morsel is None:
         raise HTTPException(status_code=404, detail="Morsel not found")
     return morsel
+
+
+# ---------------------------------------------------------------------------
+# Search endpoint
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/search", response_model=SearchResponse)
+async def search(
+    q: str = "",
+    types: str | None = None,
+    limit: int = 20,
+    created_after: str | None = None,
+    created_before: str | None = None,
+    _caller: str = Depends(resolve_sender),
+):
+    """Full-text search across tasks, morsels, and cards."""
+    if not q.strip():
+        raise HTTPException(status_code=422, detail="Query parameter 'q' must not be empty")
+
+    entity_types = None
+    if types:
+        entity_types = [t.strip() for t in types.split(",")]
+        invalid = [t for t in entity_types if t not in db.VALID_SEARCH_TYPES]
+        if invalid:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid type(s): {', '.join(invalid)}. "
+                f"Valid types: {', '.join(sorted(db.VALID_SEARCH_TYPES))}",
+            )
+
+    try:
+        results = await db.search(
+            query=q,
+            entity_types=entity_types,
+            limit=limit,
+            created_after=created_after,
+            created_before=created_before,
+        )
+    except Exception as e:
+        err = str(e)
+        if "fts5: syntax error" in err.lower() or "malformed match expression" in err.lower():
+            raise HTTPException(status_code=422, detail=f"Invalid search syntax: {err}")
+        raise
+
+    return SearchResponse(query=q, results=results, total=len(results))
 
 
 # ---------------------------------------------------------------------------

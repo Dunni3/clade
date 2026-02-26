@@ -17,6 +17,7 @@ import type {
   CardSummary,
   CreateCardRequest,
   UpdateCardRequest,
+  SearchResponse,
 } from '../types/mailbox';
 
 export async function getInbox(unreadOnly = false, limit = 50): Promise<MessageSummary[]> {
@@ -173,4 +174,17 @@ export async function updateCard(id: number, req: UpdateCardRequest): Promise<Ca
 
 export async function deleteCard(id: number): Promise<void> {
   await apiClient.delete(`/kanban/cards/${id}`);
+}
+
+// -- Search --
+
+export async function searchHearth(params: {
+  q: string;
+  types?: string;
+  limit?: number;
+  created_after?: string;
+  created_before?: string;
+}): Promise<SearchResponse> {
+  const { data } = await apiClient.get<SearchResponse>('/search', { params });
+  return data;
 }

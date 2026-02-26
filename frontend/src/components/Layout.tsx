@@ -2,6 +2,8 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { getUnreadCount } from '../api/mailbox';
 import { useAuthStore } from '../store/authStore';
+import Spotlight from './Spotlight';
+import AdvancedSearch from './AdvancedSearch';
 
 const navItems = [
   { to: '/', label: 'Inbox' },
@@ -17,6 +19,8 @@ const navItems = [
 
 export default function Layout() {
   const [unread, setUnread] = useState(0);
+  const [spotlightOpen, setSpotlightOpen] = useState(false);
+  const [advancedSearchOpen, setAdvancedSearchOpen] = useState(false);
   const apiKey = useAuthStore((s) => s.apiKey);
   const location = useLocation();
 
@@ -33,6 +37,25 @@ export default function Layout() {
     }, 30000);
     return () => clearInterval(interval);
   }, [apiKey]);
+
+  // Cmd+Shift+K opens advanced search, Cmd+K opens spotlight
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.shiftKey) {
+          setSpotlightOpen(false);
+          setAdvancedSearchOpen((prev) => !prev);
+        } else {
+          setAdvancedSearchOpen(false);
+          setSpotlightOpen((prev) => !prev);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
@@ -59,11 +82,25 @@ export default function Layout() {
               )}
             </NavLink>
           ))}
+          <button
+            onClick={() => setSpotlightOpen(true)}
+            title="Search (Cmd+K)"
+            className="ml-auto flex items-center gap-2 px-3 py-1.5 rounded text-sm text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-xs font-mono text-gray-500 bg-gray-800 border border-gray-700 rounded">
+              &#x2318;K
+            </kbd>
+          </button>
         </div>
       </nav>
       <main className="mx-auto max-w-6xl px-4 py-6">
         <Outlet />
       </main>
+      <Spotlight open={spotlightOpen} onClose={() => setSpotlightOpen(false)} />
+      <AdvancedSearch open={advancedSearchOpen} onClose={() => setAdvancedSearchOpen(false)} />
     </div>
   );
 }

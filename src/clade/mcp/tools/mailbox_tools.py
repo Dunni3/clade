@@ -376,6 +376,32 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
             return f"Error depositing morsel: {e}"
 
     @mcp.tool()
+    async def get_morsel(morsel_id: int) -> str:
+        """Get full details of a specific morsel by ID.
+
+        Args:
+            morsel_id: The morsel ID to fetch.
+        """
+        if mailbox is None:
+            return _NOT_CONFIGURED
+        try:
+            m = await mailbox.get_morsel(morsel_id)
+            tags_str = ", ".join(m.get("tags", []))
+            header = f"Morsel #{m['id']} by {m['creator']}"
+            if tags_str:
+                header += f" [{tags_str}]"
+            header += f" ({format_timestamp(m['created_at'])})"
+            lines = [header, "", m["body"]]
+            links = m.get("links", [])
+            if links:
+                lines.append(f"\nLinks ({len(links)}):")
+                for link in links:
+                    lines.append(f"  {link['object_type']}:{link['object_id']}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Error fetching morsel: {e}"
+
+    @mcp.tool()
     async def list_morsels(
         creator: str | None = None,
         tag: str | None = None,
@@ -483,6 +509,55 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         except Exception as e:
             return f"Error fetching tree: {e}"
 
+    @mcp.tool()
+    async def search(
+        query: str,
+        types: str | None = None,
+        limit: int = 20,
+    ) -> str:
+        """Search across tasks, morsels, and cards using full-text search.
+
+        Supports keyword search, prefix matching (e.g. "deploy*"), and phrase queries
+        (e.g. '"exact phrase"'). Results are ranked by relevance.
+
+        Args:
+            query: The search query.
+            types: Comma-separated entity types to search (e.g. "task,card"). Default: all.
+            limit: Maximum number of results to return.
+        """
+        if mailbox is None:
+            return _NOT_CONFIGURED
+        try:
+            result = await mailbox.search(query=query, types=types, limit=limit)
+            results = result.get("results", [])
+            if not results:
+                return f"No results for '{query}'."
+            lines = [f"Search results for '{query}' ({len(results)} found):\n"]
+            type_badges = {"task": "T", "morsel": "M", "card": "C"}
+            for r in results:
+                badge = type_badges.get(r["type"], "?")
+                # Convert <mark> tags to **bold** for MCP text output
+                snippet = r.get("snippet", "")
+                snippet = snippet.replace("<mark>", "**").replace("</mark>", "**")
+                meta_parts = []
+                if r.get("status"):
+                    meta_parts.append(r["status"])
+                if r.get("col"):
+                    meta_parts.append(r["col"])
+                if r.get("assignee"):
+                    meta_parts.append(f"@{r['assignee']}")
+                if r.get("creator"):
+                    meta_parts.append(f"by {r['creator']}")
+                meta = " | ".join(meta_parts)
+                lines.append(
+                    f"[{badge}] #{r['id']}: {r['title']}\n"
+                    f"  {snippet}\n"
+                    f"  {meta}"
+                )
+            return "\n\n".join(lines)
+        except Exception as e:
+            return f"Error searching: {e}"
+
     return {
         "send_message": send_message,
         "check_mailbox": check_mailbox,
@@ -498,4 +573,5 @@ def create_mailbox_tools(mcp: FastMCP, mailbox: MailboxClient | None) -> dict:
         "list_morsels": list_morsels,
         "list_trees": list_trees,
         "get_tree": get_tree,
+        "search": search,
     }

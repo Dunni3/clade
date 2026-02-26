@@ -217,3 +217,25 @@ export interface UpdateCardRequest {
   links?: CardLink[];
   project?: string | null;
 }
+
+// -- Search --
+
+export interface SearchResult {
+  type: string; // "task" | "morsel" | "card"
+  id: number;
+  title: string;
+  snippet: string;
+  rank: number;
+  status?: string | null;
+  col?: string | null;
+  priority?: string | null;
+  assignee?: string | null;
+  creator?: string | null;
+  created_at?: string | null;
+}
+
+export interface SearchResponse {
+  query: string;
+  results: SearchResult[];
+  total: number;
+}

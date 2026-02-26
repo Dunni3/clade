@@ -333,3 +333,26 @@ class BrotherProject(BaseModel):
     project: str
     working_dir: str
     updated_at: str
+
+
+# -- Search --
+
+
+class SearchResult(BaseModel):
+    type: str  # "task" | "morsel" | "card"
+    id: int
+    title: str
+    snippet: str
+    rank: float
+    status: str | None = None
+    col: str | None = None
+    priority: str | None = None
+    assignee: str | None = None
+    creator: str | None = None
+    created_at: str | None = None
+
+
+class SearchResponse(BaseModel):
+    query: str
+    results: list[SearchResult]
+    total: int

@@ -213,6 +213,104 @@ async def init_db() -> None:
             )
         except Exception:
             pass
+
+        # -- FTS5 full-text search indexes (content-sync mode) --
+        await db.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
+                subject, prompt, output,
+                content='tasks', content_rowid='id'
+            )
+        """)
+        await db.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS morsels_fts USING fts5(
+                body,
+                content='morsels', content_rowid='id'
+            )
+        """)
+        await db.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts USING fts5(
+                title, description,
+                content='kanban_cards', content_rowid='id'
+            )
+        """)
+
+        # FTS triggers: keep indexes in sync on INSERT/UPDATE/DELETE
+        # Tasks
+        await db.executescript("""
+            CREATE TRIGGER IF NOT EXISTS tasks_fts_insert AFTER INSERT ON tasks BEGIN
+                INSERT INTO tasks_fts(rowid, subject, prompt, output)
+                VALUES (new.id, new.subject, new.prompt, COALESCE(new.output, ''));
+            END;
+            CREATE TRIGGER IF NOT EXISTS tasks_fts_delete BEFORE DELETE ON tasks BEGIN
+                INSERT INTO tasks_fts(tasks_fts, rowid, subject, prompt, output)
+                VALUES ('delete', old.id, old.subject, old.prompt, COALESCE(old.output, ''));
+            END;
+            CREATE TRIGGER IF NOT EXISTS tasks_fts_update AFTER UPDATE ON tasks BEGIN
+                INSERT INTO tasks_fts(tasks_fts, rowid, subject, prompt, output)
+                VALUES ('delete', old.id, old.subject, old.prompt, COALESCE(old.output, ''));
+                INSERT INTO tasks_fts(rowid, subject, prompt, output)
+                VALUES (new.id, new.subject, new.prompt, COALESCE(new.output, ''));
+            END;
+        """)
+        # Morsels
+        await db.executescript("""
+            CREATE TRIGGER IF NOT EXISTS morsels_fts_insert AFTER INSERT ON morsels BEGIN
+                INSERT INTO morsels_fts(rowid, body) VALUES (new.id, new.body);
+            END;
+            CREATE TRIGGER IF NOT EXISTS morsels_fts_delete BEFORE DELETE ON morsels BEGIN
+                INSERT INTO morsels_fts(morsels_fts, rowid, body)
+                VALUES ('delete', old.id, old.body);
+            END;
+            CREATE TRIGGER IF NOT EXISTS morsels_fts_update AFTER UPDATE ON morsels BEGIN
+                INSERT INTO morsels_fts(morsels_fts, rowid, body)
+                VALUES ('delete', old.id, old.body);
+                INSERT INTO morsels_fts(rowid, body) VALUES (new.id, new.body);
+            END;
+        """)
+        # Cards
+        await db.executescript("""
+            CREATE TRIGGER IF NOT EXISTS cards_fts_insert AFTER INSERT ON kanban_cards BEGIN
+                INSERT INTO cards_fts(rowid, title, description)
+                VALUES (new.id, new.title, COALESCE(new.description, ''));
+            END;
+            CREATE TRIGGER IF NOT EXISTS cards_fts_delete BEFORE DELETE ON kanban_cards BEGIN
+                INSERT INTO cards_fts(cards_fts, rowid, title, description)
+                VALUES ('delete', old.id, old.title, COALESCE(old.description, ''));
+            END;
+            CREATE TRIGGER IF NOT EXISTS cards_fts_update AFTER UPDATE ON kanban_cards BEGIN
+                INSERT INTO cards_fts(cards_fts, rowid, title, description)
+                VALUES ('delete', old.id, old.title, COALESCE(old.description, ''));
+                INSERT INTO cards_fts(rowid, title, description)
+                VALUES (new.id, new.title, COALESCE(new.description, ''));
+            END;
+        """)
+
+        # Backfill FTS indexes for existing rows (idempotent — only if empty).
+        # Must check the docsize shadow table, not the FTS table itself,
+        # because SELECT COUNT(*) on a content-sync FTS table reads from
+        # the source content table (always non-zero if data exists).
+        cursor = await db.execute("SELECT COUNT(*) as cnt FROM tasks_fts_docsize")
+        row = await cursor.fetchone()
+        if row["cnt"] == 0:
+            await db.execute("""
+                INSERT INTO tasks_fts(rowid, subject, prompt, output)
+                SELECT id, subject, prompt, COALESCE(output, '') FROM tasks
+            """)
+        cursor = await db.execute("SELECT COUNT(*) as cnt FROM morsels_fts_docsize")
+        row = await cursor.fetchone()
+        if row["cnt"] == 0:
+            await db.execute("""
+                INSERT INTO morsels_fts(rowid, body)
+                SELECT id, body FROM morsels
+            """)
+        cursor = await db.execute("SELECT COUNT(*) as cnt FROM cards_fts_docsize")
+        row = await cursor.fetchone()
+        if row["cnt"] == 0:
+            await db.execute("""
+                INSERT INTO cards_fts(rowid, title, description)
+                SELECT id, title, COALESCE(description, '') FROM kanban_cards
+            """)
+
         await db.commit()
     finally:
         await db.close()
@@ -1825,5 +1923,159 @@ async def delete_card(card_id: int) -> bool:
         cursor = await db.execute("DELETE FROM kanban_cards WHERE id = ?", (card_id,))
         await db.commit()
         return cursor.rowcount > 0
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# Full-text search
+# ---------------------------------------------------------------------------
+
+VALID_SEARCH_TYPES = {"task", "morsel", "card"}
+
+
+async def search(
+    query: str,
+    entity_types: list[str] | None = None,
+    limit: int = 20,
+    created_after: str | None = None,
+    created_before: str | None = None,
+) -> list[dict]:
+    """Search across tasks, morsels, and cards using FTS5.
+
+    Returns a merged, rank-sorted list of results.
+    """
+    types = set(entity_types) if entity_types else VALID_SEARCH_TYPES
+    results: list[dict] = []
+
+    db = await get_db()
+    try:
+        if "task" in types:
+            date_clauses = ""
+            date_params: list = []
+            if created_after:
+                date_clauses += " AND t.created_at >= ?"
+                date_params.append(created_after)
+            if created_before:
+                date_clauses += " AND t.created_at <= ?"
+                date_params.append(created_before)
+            cursor = await db.execute(
+                f"""
+                SELECT
+                    t.id, t.subject, t.status, t.assignee, t.creator, t.created_at,
+                    snippet(tasks_fts, 0, '<mark>', '</mark>', '...', 32) AS snippet_subject,
+                    snippet(tasks_fts, 1, '<mark>', '</mark>', '...', 32) AS snippet_prompt,
+                    snippet(tasks_fts, 2, '<mark>', '</mark>', '...', 32) AS snippet_output,
+                    tasks_fts.rank
+                FROM tasks_fts
+                JOIN tasks t ON t.id = tasks_fts.rowid
+                WHERE tasks_fts MATCH ?{date_clauses}
+                ORDER BY tasks_fts.rank
+                LIMIT ?
+                """,
+                (query, *date_params, limit),
+            )
+            for row in await cursor.fetchall():
+                r = dict(row)
+                # Pick best snippet (prefer subject, then prompt, then output)
+                snippet = r["snippet_subject"]
+                if not snippet or snippet == "...":
+                    snippet = r["snippet_prompt"]
+                if not snippet or snippet == "...":
+                    snippet = r["snippet_output"] or ""
+                results.append({
+                    "type": "task",
+                    "id": r["id"],
+                    "title": r["subject"] or "(no subject)",
+                    "snippet": snippet,
+                    "rank": r["rank"],
+                    "status": r["status"],
+                    "assignee": r["assignee"],
+                    "creator": r["creator"],
+                    "created_at": r["created_at"],
+                })
+
+        if "morsel" in types:
+            morsel_date_clauses = ""
+            morsel_date_params: list = []
+            if created_after:
+                morsel_date_clauses += " AND m.created_at >= ?"
+                morsel_date_params.append(created_after)
+            if created_before:
+                morsel_date_clauses += " AND m.created_at <= ?"
+                morsel_date_params.append(created_before)
+            cursor = await db.execute(
+                f"""
+                SELECT
+                    m.id, m.creator, m.created_at,
+                    snippet(morsels_fts, 0, '<mark>', '</mark>', '...', 32) AS snippet,
+                    morsels_fts.rank
+                FROM morsels_fts
+                JOIN morsels m ON m.id = morsels_fts.rowid
+                WHERE morsels_fts MATCH ?{morsel_date_clauses}
+                ORDER BY morsels_fts.rank
+                LIMIT ?
+                """,
+                (query, *morsel_date_params, limit),
+            )
+            for row in await cursor.fetchall():
+                r = dict(row)
+                # Use first line of body as title
+                body_line = r["snippet"].split("\n")[0][:80] if r["snippet"] else ""
+                results.append({
+                    "type": "morsel",
+                    "id": r["id"],
+                    "title": body_line,
+                    "snippet": r["snippet"],
+                    "rank": r["rank"],
+                    "creator": r["creator"],
+                    "created_at": r["created_at"],
+                })
+
+        if "card" in types:
+            card_date_clauses = ""
+            card_date_params: list = []
+            if created_after:
+                card_date_clauses += " AND c.created_at >= ?"
+                card_date_params.append(created_after)
+            if created_before:
+                card_date_clauses += " AND c.created_at <= ?"
+                card_date_params.append(created_before)
+            cursor = await db.execute(
+                f"""
+                SELECT
+                    c.id, c.title, c.col, c.priority, c.assignee, c.creator, c.created_at,
+                    snippet(cards_fts, 0, '<mark>', '</mark>', '...', 32) AS snippet_title,
+                    snippet(cards_fts, 1, '<mark>', '</mark>', '...', 32) AS snippet_desc,
+                    cards_fts.rank
+                FROM cards_fts
+                JOIN kanban_cards c ON c.id = cards_fts.rowid
+                WHERE cards_fts MATCH ?{card_date_clauses}
+                ORDER BY cards_fts.rank
+                LIMIT ?
+                """,
+                (query, *card_date_params, limit),
+            )
+            for row in await cursor.fetchall():
+                r = dict(row)
+                snippet = r["snippet_title"]
+                if not snippet or snippet == "...":
+                    snippet = r["snippet_desc"] or ""
+                results.append({
+                    "type": "card",
+                    "id": r["id"],
+                    "title": r["title"],
+                    "snippet": snippet,
+                    "rank": r["rank"],
+                    "col": r["col"],
+                    "priority": r["priority"],
+                    "assignee": r["assignee"],
+                    "creator": r["creator"],
+                    "created_at": r["created_at"],
+                })
+
+        # Sort by rank (lower = better in FTS5) and truncate
+        results.sort(key=lambda x: x["rank"])
+        return results[:limit]
     finally:
         await db.close()
