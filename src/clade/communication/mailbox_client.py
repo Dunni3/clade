@@ -524,7 +524,23 @@ class MailboxClient:
             resp.raise_for_status()
             return resp.json()
 
-    # -- Ember Registration --
+    # -- Ember Registry --
+
+    async def get_ember(self, name: str) -> dict | None:
+        """Get a single Ember entry by brother name from the Hearth registry.
+
+        Returns the entry dict if found, None if not registered.
+        """
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url(f"/embers/{name}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
 
     def register_ember_sync(self, name: str, ember_url: str) -> bool:
         """Register an Ember server with the Hearth. Returns True on success.

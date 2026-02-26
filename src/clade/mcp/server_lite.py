@@ -50,7 +50,7 @@ if not _brothers_registry:
             _brothers_data = yaml.safe_load(f) or {}
         _brothers_registry = _brothers_data.get("brothers", {})
 
-create_ember_tools(mcp, _ember, brothers_registry=_brothers_registry)
+create_ember_tools(mcp, _ember, brothers_registry=_brothers_registry, mailbox=_mailbox)
 create_delegation_tools(mcp, _mailbox, _brothers_registry, mailbox_name=_hearth_name)
 
 

@@ -1605,6 +1605,19 @@ async def upsert_ember(name: str, ember_url: str) -> dict:
         await db.close()
 
 
+async def get_ember(name: str) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT name, ember_url, status, last_seen, created_at, updated_at FROM embers WHERE name = ?",
+            (name,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await db.close()
+
+
 async def get_embers() -> list[dict]:
     db = await get_db()
     try:
