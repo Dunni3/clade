@@ -64,10 +64,13 @@ fi
 : "${HEARTH_URL:?HEARTH_URL not set — add it to $EMBER_ENV_FILE}"
 : "${HEARTH_API_KEY:?HEARTH_API_KEY not set — add it to $EMBER_ENV_FILE}"
 
-# Defaults for ember config
+# Export all required variables so child processes (clade-ember) can access them
+export HEARTH_URL
+export HEARTH_API_KEY
 export HEARTH_NAME="${HEARTH_NAME:-jerry}"
 export EMBER_BROTHER_NAME="${EMBER_BROTHER_NAME:-jerry}"
 export EMBER_WORKING_DIR="${EMBER_WORKING_DIR:-/net/galaxy/home/koes/icd3/moldiff/OMTRA}"
+export EMBER_PORT
 
 # ---------------------------------------------------------------------------
 # Preflight checks
