@@ -16,6 +16,7 @@ from .config import API_KEYS, CONDUCTOR_TICK_CMD, EMBER_URLS
 
 logger = logging.getLogger(__name__)
 from .models import (
+    BrotherProject,
     CardSummary,
     CreateCardRequest,
     CreateMorselRequest,
@@ -46,6 +47,7 @@ from .models import (
     UnreadCountResponse,
     UpdateCardRequest,
     UpdateTaskRequest,
+    UpsertBrotherProjectRequest,
     UpsertEmberRequest,
 )
 
@@ -185,6 +187,13 @@ async def _unblock_and_delegate(completed_task_id: int) -> None:
             )
             continue
 
+        # Resolve working_dir: explicit > project lookup > None
+        wd = task.get("working_dir")
+        if wd is None and task.get("project"):
+            bp = await db.get_brother_project(assignee, task["project"])
+            if bp:
+                wd = bp["working_dir"]
+
         # Send to Ember
         try:
             payload: dict = {
@@ -192,7 +201,7 @@ async def _unblock_and_delegate(completed_task_id: int) -> None:
                 "task_id": task_id,
                 "subject": task["subject"] or "",
                 "sender_name": task["creator"],
-                "working_dir": task.get("working_dir"),
+                "working_dir": wd,
             }
             if task.get("max_turns") is not None:
                 payload["max_turns"] = task["max_turns"]
@@ -414,6 +423,7 @@ async def create_task(
             on_complete=req.on_complete,
             blocked_by_task_id=req.blocked_by_task_id,
             max_turns=req.max_turns,
+            project=req.project,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -663,6 +673,7 @@ async def retry_task(
             working_dir=task.get("working_dir"),
             parent_task_id=task_id,
             on_complete=task.get("on_complete"),
+            project=task.get("project"),
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -711,6 +722,13 @@ async def retry_task(
             detail=f"No API key found for {assignee}. Child task #{child_id} created but marked failed.",
         )
 
+    # Resolve working_dir: explicit > project lookup > None
+    wd = task.get("working_dir")
+    if wd is None and task.get("project"):
+        bp = await db.get_brother_project(assignee, task["project"])
+        if bp:
+            wd = bp["working_dir"]
+
     # Send to Ember
     try:
         async with httpx.AsyncClient(verify=False, timeout=30.0) as http_client:
@@ -721,7 +739,7 @@ async def retry_task(
                     "task_id": child_id,
                     "subject": retry_subject,
                     "sender_name": caller,
-                    "working_dir": task.get("working_dir"),
+                    "working_dir": wd,
                 },
                 headers={"Authorization": f"Bearer {assignee_key}"},
             )
@@ -858,6 +876,48 @@ async def delete_ember(
     if not deleted:
         raise HTTPException(status_code=404, detail="Ember not found")
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Brother Projects endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.put("/api/v1/brothers/{name}/projects/{project}", response_model=BrotherProject)
+async def upsert_brother_project(
+    name: str,
+    project: str,
+    req: UpsertBrotherProjectRequest,
+    _caller: str = Depends(resolve_sender),
+):
+    """Register or update a project working directory for a brother."""
+    entry = await db.upsert_brother_project(name, project, req.working_dir)
+    return entry
+
+
+@app.get("/api/v1/brothers/{name}/projects", response_model=list[BrotherProject])
+async def list_brother_projects(
+    name: str,
+    _caller: str = Depends(resolve_sender),
+):
+    """List all project paths for a brother."""
+    return await db.get_brother_projects(name)
+
+
+@app.get("/api/v1/brothers/{name}/projects/{project}", response_model=BrotherProject)
+async def get_brother_project(
+    name: str,
+    project: str,
+    _caller: str = Depends(resolve_sender),
+):
+    """Get the working directory for a specific brother + project combination."""
+    entry = await db.get_brother_project(name, project)
+    if entry is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No project '{project}' registered for brother '{name}'",
+        )
+    return entry
 
 
 # ---------------------------------------------------------------------------

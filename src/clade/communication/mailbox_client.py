@@ -136,6 +136,7 @@ class MailboxClient:
         on_complete: str | None = None,
         blocked_by_task_id: int | None = None,
         max_turns: int | None = None,
+        project: str | None = None,
     ) -> dict:
         payload: dict = {"assignee": assignee, "prompt": prompt, "subject": subject}
         if session_name is not None:
@@ -154,6 +155,8 @@ class MailboxClient:
             payload["blocked_by_task_id"] = blocked_by_task_id
         if max_turns is not None:
             payload["max_turns"] = max_turns
+        if project is not None:
+            payload["project"] = project
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.post(
                 self._url("/tasks"),
@@ -481,6 +484,45 @@ class MailboxClient:
                 timeout=10,
             )
             return resp.status_code == 204
+
+    # -- Brother Projects --
+
+    async def upsert_brother_project(
+        self, brother_name: str, project: str, working_dir: str
+    ) -> dict:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.put(
+                self._url(f"/brothers/{brother_name}/projects/{project}"),
+                json={"working_dir": working_dir},
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_brother_projects(self, brother_name: str) -> list[dict]:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url(f"/brothers/{brother_name}/projects"),
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_brother_project(
+        self, brother_name: str, project: str
+    ) -> dict | None:
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url(f"/brothers/{brother_name}/projects/{project}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
 
     # -- Ember Registration --
 

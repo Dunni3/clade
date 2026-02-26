@@ -93,6 +93,14 @@ CREATE TABLE IF NOT EXISTS embers (
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS brother_projects (
+    brother_name TEXT NOT NULL,
+    project      TEXT NOT NULL,
+    working_dir  TEXT NOT NULL,
+    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    PRIMARY KEY (brother_name, project)
+);
+
 CREATE TABLE IF NOT EXISTS kanban_cards (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     title       TEXT NOT NULL,
@@ -195,6 +203,13 @@ async def init_db() -> None:
         try:
             await db.execute(
                 "ALTER TABLE tasks ADD COLUMN on_complete TEXT"
+            )
+        except Exception:
+            pass
+        # Migration: add project column to tasks
+        try:
+            await db.execute(
+                "ALTER TABLE tasks ADD COLUMN project TEXT"
             )
         except Exception:
             pass
@@ -654,6 +669,7 @@ async def insert_task(
     on_complete: str | None = None,
     blocked_by_task_id: int | None = None,
     max_turns: int | None = None,
+    project: str | None = None,
 ) -> int:
     db = await get_db()
     try:
@@ -705,9 +721,9 @@ async def insert_task(
             depth = (parent["depth"] or 0) + 1
 
         cursor = await db.execute(
-            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, metadata, depth, on_complete, blocked_by_task_id, max_turns)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, metadata_json, depth, on_complete, blocked_by_task_id, max_turns),
+            """INSERT INTO tasks (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, metadata, depth, on_complete, blocked_by_task_id, max_turns, project)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (creator, assignee, subject, prompt, session_name, host, working_dir, parent_task_id, root_task_id, metadata_json, depth, on_complete, blocked_by_task_id, max_turns, project),
         )
         task_id = cursor.lastrowid
         # Every task is a root of its own tree when it has no parent
@@ -744,7 +760,7 @@ async def get_tasks(
             params.append(creator)
         where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
         sql = f"""
-            SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, depth, blocked_by_task_id
+            SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, depth, blocked_by_task_id, project
             FROM tasks
             {where_sql}
             ORDER BY created_at DESC
@@ -821,7 +837,7 @@ async def get_task(task_id: int) -> dict | None:
 
         # Get children
         cursor = await db.execute(
-            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, depth, blocked_by_task_id
+            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, depth, blocked_by_task_id, project
                FROM tasks WHERE parent_task_id = ? ORDER BY created_at ASC""",
             (task_id,),
         )
@@ -830,7 +846,7 @@ async def get_task(task_id: int) -> dict | None:
 
         # Get tasks blocked by this task
         cursor = await db.execute(
-            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, blocked_by_task_id
+            """SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, blocked_by_task_id, project
                FROM tasks WHERE blocked_by_task_id = ? ORDER BY created_at ASC""",
             (task_id,),
         )
@@ -898,7 +914,7 @@ async def get_tasks_blocked_by(task_id: int) -> list[dict]:
     try:
         cursor = await db.execute(
             """SELECT id, creator, assignee, subject, prompt, status, session_name, host,
-                      working_dir, parent_task_id, root_task_id, blocked_by_task_id, max_turns, created_at
+                      working_dir, parent_task_id, root_task_id, blocked_by_task_id, max_turns, project, created_at
                FROM tasks
                WHERE blocked_by_task_id = ? AND status = 'pending'
                ORDER BY created_at ASC""",
@@ -1229,7 +1245,7 @@ async def get_tree(root_task_id: int) -> dict | None:
     try:
         # Fetch root task
         cursor = await db.execute(
-            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, metadata, depth, on_complete, blocked_by_task_id FROM tasks WHERE id = ?",
+            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, metadata, depth, on_complete, blocked_by_task_id, project FROM tasks WHERE id = ?",
             (root_task_id,),
         )
         root_row = await cursor.fetchone()
@@ -1245,7 +1261,7 @@ async def get_tree(root_task_id: int) -> dict | None:
 
         # Fetch all descendants (exclude root itself)
         cursor = await db.execute(
-            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, metadata, depth, on_complete, blocked_by_task_id FROM tasks WHERE root_task_id = ? AND id != ? ORDER BY created_at ASC",
+            "SELECT id, creator, assignee, subject, status, created_at, started_at, completed_at, parent_task_id, root_task_id, prompt, session_name, host, working_dir, output, metadata, depth, on_complete, blocked_by_task_id, project FROM tasks WHERE root_task_id = ? AND id != ? ORDER BY created_at ASC",
             (root_task_id, root_task_id),
         )
         desc_rows = await cursor.fetchall()
@@ -1586,6 +1602,74 @@ async def delete_ember(name: str) -> bool:
     db = await get_db()
     try:
         cursor = await db.execute("DELETE FROM embers WHERE name = ?", (name,))
+        await db.commit()
+        return cursor.rowcount > 0
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# Brother Projects
+# ---------------------------------------------------------------------------
+
+
+async def upsert_brother_project(
+    brother_name: str, project: str, working_dir: str
+) -> dict:
+    db = await get_db()
+    try:
+        await db.execute(
+            """INSERT INTO brother_projects (brother_name, project, working_dir)
+               VALUES (?, ?, ?)
+               ON CONFLICT(brother_name, project)
+               DO UPDATE SET working_dir = excluded.working_dir,
+                             updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')""",
+            (brother_name, project, working_dir),
+        )
+        await db.commit()
+        cursor = await db.execute(
+            "SELECT brother_name, project, working_dir, updated_at FROM brother_projects WHERE brother_name = ? AND project = ?",
+            (brother_name, project),
+        )
+        row = await cursor.fetchone()
+        return dict(row)
+    finally:
+        await db.close()
+
+
+async def get_brother_projects(brother_name: str) -> list[dict]:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT brother_name, project, working_dir, updated_at FROM brother_projects WHERE brother_name = ? ORDER BY project",
+            (brother_name,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+async def get_brother_project(brother_name: str, project: str) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT brother_name, project, working_dir, updated_at FROM brother_projects WHERE brother_name = ? AND project = ?",
+            (brother_name, project),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def delete_brother_project(brother_name: str, project: str) -> bool:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "DELETE FROM brother_projects WHERE brother_name = ? AND project = ?",
+            (brother_name, project),
+        )
         await db.commit()
         return cursor.rowcount > 0
     finally:

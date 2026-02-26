@@ -41,3 +41,7 @@ cli.add_command(setup_gh_auth_cmd, "setup-gh-auth")
 cli.add_command(setup_github_cmd, "setup-github")
 cli.add_command(status_cmd, "status")
 cli.add_command(doctor, "doctor")
+
+
+if __name__ == "__main__":
+    cli()
