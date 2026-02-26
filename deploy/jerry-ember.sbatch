@@ -94,7 +94,7 @@ cleanup() {
 
     # Notify Hearth that Jerry is going offline
     if [[ -n "${HEARTH_URL:-}" && -n "${HEARTH_API_KEY:-}" ]]; then
-        curl -sf -X POST \
+        curl -sfk -X POST \
             "${HEARTH_URL}/api/v1/embers/${EMBER_BROTHER_NAME}/offline" \
             -H "Authorization: Bearer ${HEARTH_API_KEY}" \
             -H "Content-Type: application/json" \
@@ -212,11 +212,12 @@ fi
 EMBER_URL="http://${TS_IP}:${EMBER_PORT}"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Registering with Hearth: $EMBER_URL"
 
-HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" \
     -X PUT "${HEARTH_URL}/api/v1/embers/${EMBER_BROTHER_NAME}" \
     -H "Authorization: Bearer ${HEARTH_API_KEY}" \
     -H "Content-Type: application/json" \
-    -d "{\"ember_url\": \"${EMBER_URL}\"}")
+    -d "{\"ember_url\": \"${EMBER_URL}\"}" \
+    2>/dev/null) || HTTP_CODE="000"
 
 if [[ "$HTTP_CODE" == "200" ]]; then
     echo "  Registered successfully."
