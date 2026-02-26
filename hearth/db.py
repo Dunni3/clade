@@ -199,6 +199,20 @@ async def init_db() -> None:
         except Exception:
             pass
 
+        # Migration: add status and last_seen columns to embers
+        try:
+            await db.execute(
+                "ALTER TABLE embers ADD COLUMN status TEXT NOT NULL DEFAULT 'offline'"
+            )
+        except Exception:
+            pass
+        try:
+            await db.execute(
+                "ALTER TABLE embers ADD COLUMN last_seen TEXT"
+            )
+        except Exception:
+            pass
+
         # -- FTS5 full-text search indexes (content-sync mode) --
         await db.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
@@ -1553,15 +1567,20 @@ async def get_morsels(
 async def upsert_ember(name: str, ember_url: str) -> dict:
     db = await get_db()
     try:
+        now = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
         await db.execute(
-            """INSERT INTO embers (name, ember_url) VALUES (?, ?)
-               ON CONFLICT(name) DO UPDATE SET ember_url = excluded.ember_url, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')""",
+            f"""INSERT INTO embers (name, ember_url, status, last_seen) VALUES (?, ?, 'online', {now})
+               ON CONFLICT(name) DO UPDATE SET
+                   ember_url = excluded.ember_url,
+                   status = 'online',
+                   last_seen = {now},
+                   updated_at = {now}""",
             (name, ember_url),
         )
         await db.commit()
 
         cursor = await db.execute(
-            "SELECT name, ember_url, created_at, updated_at FROM embers WHERE name = ?",
+            "SELECT name, ember_url, status, last_seen, created_at, updated_at FROM embers WHERE name = ?",
             (name,),
         )
         row = await cursor.fetchone()
@@ -1574,10 +1593,29 @@ async def get_embers() -> list[dict]:
     db = await get_db()
     try:
         cursor = await db.execute(
-            "SELECT name, ember_url, created_at, updated_at FROM embers ORDER BY name"
+            "SELECT name, ember_url, status, last_seen, created_at, updated_at FROM embers ORDER BY name"
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+async def set_ember_offline(name: str) -> dict | None:
+    db = await get_db()
+    try:
+        await db.execute(
+            """UPDATE embers SET status = 'offline', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+               WHERE name = ?""",
+            (name,),
+        )
+        await db.commit()
+        cursor = await db.execute(
+            "SELECT name, ember_url, status, last_seen, created_at, updated_at FROM embers WHERE name = ?",
+            (name,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
     finally:
         await db.close()
 

@@ -801,8 +801,13 @@ async def ember_status(
     # Merge env-var entries with DB entries (DB wins on conflict)
     merged: dict[str, str] = dict(EMBER_URLS)
     db_embers = await db.get_embers()
+    registry_info: dict[str, dict] = {}
     for entry in db_embers:
         merged[entry["name"]] = entry["ember_url"]
+        registry_info[entry["name"]] = {
+            "registered_status": entry.get("status", "offline"),
+            "last_seen": entry.get("last_seen"),
+        }
 
     if not merged:
         return {"embers": {}}
@@ -813,13 +818,18 @@ async def ember_status(
                 resp = await client.get(f"{url}/health")
                 resp.raise_for_status()
                 data = resp.json()
-                return name, {
+                result = {
                     "status": "ok",
                     "active_tasks": data.get("active_tasks", 0),
                     "uptime_seconds": data.get("uptime_seconds"),
                 }
         except Exception:
-            return name, {"status": "unreachable"}
+            result = {"status": "unreachable"}
+        # Merge registry info if available
+        if name in registry_info:
+            result["registered_status"] = registry_info[name]["registered_status"]
+            result["last_seen"] = registry_info[name]["last_seen"]
+        return name, result
 
     results = await asyncio.gather(*[
         _check(name, url) for name, url in merged.items()
@@ -844,6 +854,18 @@ async def list_embers(
 ):
     """List all registered Ember entries."""
     return await db.get_embers()
+
+
+@app.post("/api/v1/embers/{name}/offline", response_model=EmberEntry)
+async def ember_offline(
+    name: str,
+    _caller: str = Depends(resolve_sender),
+):
+    """Mark an Ember as offline (called from SLURM cleanup trap)."""
+    entry = await db.set_ember_offline(name)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Ember not found")
+    return entry
 
 
 @app.delete("/api/v1/embers/{name}", status_code=204)
