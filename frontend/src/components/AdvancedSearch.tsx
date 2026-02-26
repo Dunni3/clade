@@ -171,6 +171,7 @@ export default function AdvancedSearch({ open, onClose }: AdvancedSearchProps) {
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
+      e.preventDefault();
       onClose();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
