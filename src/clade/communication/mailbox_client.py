@@ -204,6 +204,18 @@ class MailboxClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def get_task_context(self, task_id: int, max_levels: int = 3) -> str:
+        """Fetch ancestor/blocker context string for a task from the Hearth."""
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url(f"/tasks/{task_id}/context"),
+                params={"max_levels": max_levels},
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json().get("context", "")
+
     def register_key_sync(self, name: str, key: str) -> bool:
         """Register an API key with the Hearth. Returns True on success.
 

@@ -3208,3 +3208,310 @@ class TestCascadeFailure:
             data = resp.json()
             assert data["status"] == "failed"
             assert f"Upstream task #{upstream} failed" in data["output"]
+
+
+# ---------------------------------------------------------------------------
+# Ancestor context enrichment tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildAncestorContext:
+    """Tests for _build_ancestor_context() used in task delegation."""
+
+    @pytest.mark.asyncio
+    async def test_no_context_for_root_task(self):
+        """Root tasks with no parent or blocker get no context."""
+        from hearth.app import _build_ancestor_context
+
+        task_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Root task"
+        )
+        context = await _build_ancestor_context(task_id)
+        assert context == ""
+
+    @pytest.mark.asyncio
+    async def test_parent_context_included(self):
+        """Tasks with a parent get parent context."""
+        from hearth.app import _build_ancestor_context
+
+        parent_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Parent task",
+            subject="Implement feature X",
+        )
+        await mailbox_db.update_task(parent_id, status="completed", output="Created foo.py with X logic")
+
+        child_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Child task",
+            parent_task_id=parent_id,
+        )
+
+        context = await _build_ancestor_context(child_id)
+        assert "## Context from prior tasks" in context
+        assert "Parent" in context
+        assert f"Task #{parent_id}" in context
+        assert "Implement feature X" in context
+        assert "Created foo.py with X logic" in context
+
+    @pytest.mark.asyncio
+    async def test_blocked_by_context_included(self):
+        """Tasks with blocked_by get predecessor context."""
+        from hearth.app import _build_ancestor_context
+
+        # Create blocker as pending so blocked_by_task_id is preserved at insert time
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker",
+            subject="Setup environment",
+        )
+
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked task",
+            blocked_by_task_id=blocker_id,
+        )
+
+        # Now update the blocker with output (simulating it completing)
+        await mailbox_db.update_task(blocker_id, output="Installed deps, configured DB")
+
+        context = await _build_ancestor_context(blocked_id)
+        assert "Predecessor (blocking task)" in context
+        assert f"Task #{blocker_id}" in context
+        assert "Setup environment" in context
+        assert "Installed deps, configured DB" in context
+
+    @pytest.mark.asyncio
+    async def test_walks_up_to_3_levels(self):
+        """Context walks up to 3 levels of ancestry."""
+        from hearth.app import _build_ancestor_context
+
+        great_grandparent_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="GGP",
+            subject="Great-grandparent task",
+        )
+        await mailbox_db.update_task(great_grandparent_id, output="GGP output")
+
+        grandparent_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="GP",
+            subject="Grandparent task",
+            parent_task_id=great_grandparent_id,
+        )
+        await mailbox_db.update_task(grandparent_id, output="GP output")
+
+        parent_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="P",
+            subject="Parent task",
+            parent_task_id=grandparent_id,
+        )
+        await mailbox_db.update_task(parent_id, output="Parent output")
+
+        child_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Child",
+            parent_task_id=parent_id,
+        )
+
+        context = await _build_ancestor_context(child_id)
+        assert "Parent" in context
+        assert "Parent output" in context
+        assert "Grandparent" in context
+        assert "GP output" in context
+        assert "Great-grandparent" in context
+        assert "GGP output" in context
+
+    @pytest.mark.asyncio
+    async def test_stops_at_3_levels(self):
+        """Context stops at 3 levels — 4th ancestor is not included."""
+        from hearth.app import _build_ancestor_context
+
+        # Create 4-level chain: A -> B -> C -> D -> E (E is the task)
+        a = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="A", subject="Level A"
+        )
+        await mailbox_db.update_task(a, output="A output")
+
+        b = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="B", subject="Level B",
+            parent_task_id=a,
+        )
+        await mailbox_db.update_task(b, output="B output")
+
+        c = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="C", subject="Level C",
+            parent_task_id=b,
+        )
+        await mailbox_db.update_task(c, output="C output")
+
+        d = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="D", subject="Level D",
+            parent_task_id=c,
+        )
+        await mailbox_db.update_task(d, output="D output")
+
+        e = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="E",
+            parent_task_id=d,
+        )
+
+        context = await _build_ancestor_context(e)
+        # D, C, B should be included (3 levels up from E)
+        assert "D output" in context
+        assert "C output" in context
+        assert "B output" in context
+        # A should NOT be included (4th level)
+        assert "A output" not in context
+
+    @pytest.mark.asyncio
+    async def test_no_output_shows_placeholder(self):
+        """Tasks without output show placeholder text."""
+        from hearth.app import _build_ancestor_context
+
+        parent_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Parent", subject="No output task",
+        )
+        child_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Child",
+            parent_task_id=parent_id,
+        )
+
+        context = await _build_ancestor_context(child_id)
+        assert "(no output recorded)" in context
+
+    @pytest.mark.asyncio
+    async def test_blocker_not_duplicated_as_parent(self):
+        """When blocked_by == parent_task_id, the task isn't listed twice."""
+        from hearth.app import _build_ancestor_context
+
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker",
+            subject="Blocker task",
+        )
+        await mailbox_db.update_task(blocker_id, output="Blocker output")
+
+        # blocked_by_task_id auto-sets parent_task_id when parent not explicit
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocked",
+            blocked_by_task_id=blocker_id,
+        )
+
+        context = await _build_ancestor_context(blocked_id)
+        # Should appear once as "Predecessor", not also as "Parent"
+        assert context.count(f"Task #{blocker_id}") == 1
+        assert "Predecessor (blocking task)" in context
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_task_returns_empty(self):
+        """Nonexistent task returns empty context."""
+        from hearth.app import _build_ancestor_context
+
+        context = await _build_ancestor_context(99999)
+        assert context == ""
+
+
+class TestContextEndpoint:
+    """Tests for GET /api/v1/tasks/{id}/context endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_context_endpoint_root_task(self, client):
+        """Root task returns empty context."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Root"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.get(f"/api/v1/tasks/{task_id}/context", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["task_id"] == task_id
+        assert data["context"] == ""
+
+    @pytest.mark.asyncio
+    async def test_context_endpoint_with_parent(self, client):
+        """Task with parent returns ancestor context."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Parent", "subject": "Parent task"},
+            headers=DOOT_HEADERS,
+        )
+        parent_id = resp.json()["id"]
+
+        # Complete parent with output
+        await client.patch(
+            f"/api/v1/tasks/{parent_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+        with patch("hearth.app._maybe_trigger_conductor_tick"):
+            await client.patch(
+                f"/api/v1/tasks/{parent_id}",
+                json={"status": "completed", "output": "Did the work"},
+                headers=OPPY_HEADERS,
+            )
+
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Child", "parent_task_id": parent_id},
+            headers=DOOT_HEADERS,
+        )
+        child_id = resp.json()["id"]
+
+        resp = await client.get(f"/api/v1/tasks/{child_id}/context", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "Parent task" in data["context"]
+        assert "Did the work" in data["context"]
+
+    @pytest.mark.asyncio
+    async def test_context_endpoint_not_found(self, client):
+        """Nonexistent task returns 404."""
+        resp = await client.get("/api/v1/tasks/99999/context", headers=DOOT_HEADERS)
+        assert resp.status_code == 404
+
+
+class TestUnblockWithContext:
+    """Tests that _unblock_and_delegate enriches prompts with ancestor context."""
+
+    @pytest.mark.asyncio
+    async def test_unblock_sends_enriched_prompt(self):
+        """When a blocked task is unblocked, the Ember receives an enriched prompt."""
+        from hearth.app import _unblock_and_delegate
+
+        # Create blocker as pending (so blocked_by_task_id is preserved on the blocked task)
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker",
+            subject="Setup step",
+        )
+
+        # Create blocked task while blocker is still pending
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Do the real work",
+            blocked_by_task_id=blocker_id,
+        )
+
+        # Add output to blocker (simulating it finishing work, but via direct DB update
+        # to avoid triggering the full API update_task → _unblock_and_delegate flow)
+        await mailbox_db.update_task(blocker_id, output="Installed everything")
+
+        # Register an Ember URL so delegation attempts the HTTP call
+        await mailbox_db.upsert_ember("oppy", "http://fake-ember:8100")
+        await mailbox_db.insert_api_key("oppy", "test-key-oppy")
+
+        # Mock the HTTP call to Ember
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("hearth.app.httpx.AsyncClient") as mock_client_cls:
+            mock_client_instance = AsyncMock()
+            mock_client_instance.post = AsyncMock(return_value=mock_response)
+            mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client_instance
+
+            await _unblock_and_delegate(blocker_id)
+
+            # Verify the prompt sent to Ember includes ancestor context
+            call_args = mock_client_instance.post.call_args
+            assert call_args is not None, "Ember was not called — check API key/Ember URL setup"
+            payload = call_args.kwargs.get("json") or call_args[1].get("json")
+            prompt = payload["prompt"]
+            assert "## Context from prior tasks" in prompt
+            assert "Installed everything" in prompt
+            assert "Do the real work" in prompt
