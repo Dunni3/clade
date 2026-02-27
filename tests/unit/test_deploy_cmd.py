@@ -129,18 +129,24 @@ class TestDeployEmber:
     @patch("clade.cli.deploy_cmd.deploy_ember_env")
     @patch("clade.cli.deploy_cmd.detect_remote_user")
     @patch("clade.cli.deploy_cmd.load_keys")
-    @patch("clade.cli.deploy_cmd.deploy_clade_package")
+    @patch("clade.cli.deploy_cmd.detect_clade_entry_point")
+    @patch("clade.cli.deploy_cmd.deploy_clade_to_ember_venv")
     @patch("clade.cli.deploy_cmd.test_ssh")
     @patch("clade.cli.deploy_cmd.load_config_or_exit")
-    def test_success(self, mock_config, mock_ssh, mock_deploy, mock_load_keys,
-                     mock_detect_user, mock_deploy_env, mock_run, mock_health):
+    def test_success(self, mock_config, mock_ssh, mock_deploy_venv, mock_detect_entry,
+                     mock_load_keys, mock_detect_user, mock_deploy_env, mock_run, mock_health):
         mock_config.return_value = make_config()
         mock_ssh.return_value = SSHResult(success=True)
-        mock_deploy.return_value = SSHResult(success=True, stdout="DEPLOY_OK")
+        mock_deploy_venv.return_value = SSHResult(success=True, stdout="DEPLOY_OK")
+        mock_detect_entry.return_value = "/home/ian/.local/ember-venv/bin/clade-ember"
         mock_load_keys.return_value = {"oppy": "test-api-key"}
         mock_detect_user.return_value = "ian"
         mock_deploy_env.return_value = SSHResult(success=True, stdout="EMBER_ENV_OK")
-        mock_run.return_value = SSHResult(success=True, stdout="RESTART_OK")
+        # run_remote: grep ExecStart + restart
+        mock_run.side_effect = [
+            SSHResult(success=True, stdout="ExecStart=/home/ian/.local/ember-venv/bin/clade-ember"),
+            SSHResult(success=True, stdout="RESTART_OK"),
+        ]
         mock_health.return_value = True
 
         runner = CliRunner()
@@ -168,18 +174,55 @@ class TestDeployEmber:
         assert result.exit_code != 0
         assert "no ember_host" in result.output
 
-    @patch("clade.cli.deploy_cmd.deploy_clade_package")
+    @patch("clade.cli.deploy_cmd.deploy_clade_to_ember_venv")
     @patch("clade.cli.deploy_cmd.test_ssh")
     @patch("clade.cli.deploy_cmd.load_config_or_exit")
-    def test_deploy_failure(self, mock_config, mock_ssh, mock_deploy):
+    def test_deploy_failure(self, mock_config, mock_ssh, mock_deploy_venv):
         mock_config.return_value = make_config()
         mock_ssh.return_value = SSHResult(success=True)
-        mock_deploy.return_value = SSHResult(success=False, stdout="", message="Connection lost")
+        mock_deploy_venv.return_value = SSHResult(success=False, stdout="", message="Connection lost")
 
         runner = CliRunner()
         result = runner.invoke(cli, ["deploy", "ember", "oppy"])
         assert result.exit_code != 0
         assert "Deploy failed" in result.output
+
+    @patch("clade.cli.deploy_cmd.check_ember_health_remote")
+    @patch("clade.cli.deploy_cmd.deploy_systemd_service")
+    @patch("clade.cli.deploy_cmd.run_remote")
+    @patch("clade.cli.deploy_cmd.deploy_ember_env")
+    @patch("clade.cli.deploy_cmd.detect_remote_user")
+    @patch("clade.cli.deploy_cmd.load_keys")
+    @patch("clade.cli.deploy_cmd.detect_clade_entry_point")
+    @patch("clade.cli.deploy_cmd.deploy_clade_to_ember_venv")
+    @patch("clade.cli.deploy_cmd.test_ssh")
+    @patch("clade.cli.deploy_cmd.load_config_or_exit")
+    def test_service_migration(self, mock_config, mock_ssh, mock_deploy_venv, mock_detect_entry,
+                                mock_load_keys, mock_detect_user, mock_deploy_env,
+                                mock_run, mock_deploy_svc, mock_health):
+        """When ExecStart differs from detected binary, service file should be regenerated."""
+        mock_config.return_value = make_config()
+        mock_ssh.return_value = SSHResult(success=True)
+        mock_deploy_venv.return_value = SSHResult(success=True, stdout="DEPLOY_OK")
+        # New binary in ember-venv, old binary was in conda
+        mock_detect_entry.return_value = "/home/ian/.local/ember-venv/bin/clade-ember"
+        mock_load_keys.return_value = {"oppy": "test-api-key"}
+        mock_detect_user.return_value = "ian"
+        mock_deploy_env.return_value = SSHResult(success=True, stdout="EMBER_ENV_OK")
+        # grep ExecStart returns OLD conda path (triggers migration)
+        mock_run.return_value = SSHResult(
+            success=True,
+            stdout="ExecStart=/home/ian/miniforge3/envs/clade/bin/clade-ember",
+        )
+        mock_deploy_svc.return_value = SSHResult(success=True, stdout="EMBER_DEPLOY_OK")
+        mock_health.return_value = True
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["deploy", "ember", "oppy"])
+        assert result.exit_code == 0
+        assert "Migrating service" in result.output
+        assert "Service file updated" in result.output
+        mock_deploy_svc.assert_called_once()
 
 
 class TestDeployConductor:
@@ -208,7 +251,7 @@ class TestDeployConductor:
 
 class TestDeployAll:
     @patch("clade.cli.deploy_cmd.check_ember_health_remote")
-    @patch("clade.cli.deploy_cmd.deploy_clade_package")
+    @patch("clade.cli.deploy_cmd.deploy_clade_to_ember_venv")
     @patch("clade.cli.deploy_cmd.deploy_conductor")
     @patch("clade.cli.deploy_cmd.scp_build_directory")
     @patch("clade.cli.deploy_cmd.scp_directory")

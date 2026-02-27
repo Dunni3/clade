@@ -9,6 +9,7 @@ import pytest
 from clade.cli.clade_config import CladeConfig
 from clade.cli.deploy_utils import (
     deploy_clade_package,
+    deploy_clade_to_ember_venv,
     load_config_or_exit,
     require_server_ssh,
     scp_build_directory,
@@ -242,3 +243,104 @@ class TestDeployCladePackage:
 
         result = deploy_clade_package("ubuntu@host")
         assert not result.success
+
+
+class TestDeployCladeToEmberVenv:
+    @patch("clade.cli.deploy_utils.run_remote")
+    @patch("clade.cli.deploy_utils.subprocess.Popen")
+    @patch("clade.cli.deploy_utils.Path")
+    def test_success(self, mock_path_cls, mock_popen, mock_run_remote):
+        # Mock project root with pyproject.toml
+        mock_root = MagicMock()
+        mock_root.parent = MagicMock()
+        mock_root.name = "clade"
+        (mock_root / "pyproject.toml").exists.return_value = True
+
+        mock_file = MagicMock()
+        mock_file.resolve.return_value.parent.parent.parent.parent = mock_root
+        mock_path_cls.return_value = mock_file
+        mock_path_cls.__truediv__ = Path.__truediv__
+
+        # Mock tar + ssh transfer
+        tar_mock = MagicMock()
+        tar_mock.stdout = MagicMock()
+        tar_mock.wait.return_value = 0
+
+        ssh_mock = MagicMock()
+        ssh_mock.communicate.return_value = (b"", b"")
+        ssh_mock.returncode = 0
+
+        mock_popen.side_effect = [tar_mock, ssh_mock]
+
+        # Mock venv + pip install
+        mock_run_remote.return_value = MagicMock(
+            success=True,
+            stdout="DEPLOY_OK\n",
+            stderr="",
+            message="",
+        )
+
+        result = deploy_clade_to_ember_venv("ubuntu@host")
+        assert result.success
+        assert "DEPLOY_OK" in result.stdout
+        # Verify the install script uses .[server]
+        call_args = mock_run_remote.call_args
+        script = call_args[0][1]
+        assert '.[server]' in script
+
+    @patch("clade.cli.deploy_utils.subprocess.Popen")
+    def test_transfer_failure(self, mock_popen):
+        tar_mock = MagicMock()
+        tar_mock.stdout = MagicMock()
+        tar_mock.wait.return_value = 0
+
+        ssh_mock = MagicMock()
+        ssh_mock.communicate.return_value = (b"", b"Connection refused")
+        ssh_mock.returncode = 1
+
+        mock_popen.side_effect = [tar_mock, ssh_mock]
+
+        result = deploy_clade_to_ember_venv("bad@host")
+        assert not result.success
+        assert "File transfer failed" in result.message
+
+    @patch("clade.cli.deploy_utils.run_remote")
+    @patch("clade.cli.deploy_utils.subprocess.Popen")
+    def test_install_failure(self, mock_popen, mock_run_remote):
+        # Transfer succeeds
+        tar_mock = MagicMock()
+        tar_mock.stdout = MagicMock()
+        tar_mock.wait.return_value = 0
+
+        ssh_mock = MagicMock()
+        ssh_mock.communicate.return_value = (b"", b"")
+        ssh_mock.returncode = 0
+
+        mock_popen.side_effect = [tar_mock, ssh_mock]
+
+        # Install fails
+        mock_run_remote.return_value = MagicMock(
+            success=False,
+            stdout="VENV_FAILED",
+            stderr="",
+            message="Remote command failed",
+        )
+
+        result = deploy_clade_to_ember_venv("ubuntu@host")
+        assert not result.success
+
+    @patch("clade.cli.deploy_utils.subprocess.Popen")
+    def test_transfer_timeout(self, mock_popen):
+        tar_mock = MagicMock()
+        tar_mock.stdout = MagicMock()
+        tar_mock.kill = MagicMock()
+
+        ssh_mock = MagicMock()
+        ssh_mock.communicate.side_effect = subprocess.TimeoutExpired(cmd="ssh", timeout=180)
+        ssh_mock.kill = MagicMock()
+
+        mock_popen.side_effect = [tar_mock, ssh_mock]
+
+        result = deploy_clade_to_ember_venv("ubuntu@host", timeout=180)
+        assert not result.success
+        assert "timed out" in result.message

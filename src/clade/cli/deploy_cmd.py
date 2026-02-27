@@ -17,13 +17,20 @@ from .clade_config import default_config_path, load_clade_config
 from .conductor_setup import deploy_conductor
 from .deploy_utils import (
     deploy_clade_package,
+    deploy_clade_to_ember_venv,
     load_config_or_exit,
     require_server_ssh,
     scp_build_directory,
     scp_directory,
 )
 from .ember_setup import SERVICE_NAME as EMBER_SERVICE_NAME
-from .ember_setup import check_ember_health_remote, deploy_ember_env, detect_remote_user
+from .ember_setup import (
+    check_ember_health_remote,
+    deploy_ember_env,
+    deploy_systemd_service,
+    detect_clade_entry_point,
+    detect_remote_user,
+)
 from .keys import keys_path, load_keys
 from .ssh_utils import run_remote, test_ssh
 
@@ -265,15 +272,31 @@ def ember(ctx: click.Context, name: str, force: bool) -> None:
         raise SystemExit(1)
     click.echo(click.style("  SSH OK", fg="green"))
 
-    # Step 2: Deploy clade package
-    click.echo("Deploying clade package...")
-    result = deploy_clade_package(ssh_host, ssh_key=ssh_key)
+    # Step 2: Deploy clade package to ember venv
+    click.echo("Deploying clade package to ember venv...")
+    result = deploy_clade_to_ember_venv(ssh_host, ssh_key=ssh_key)
     if not result.success or "DEPLOY_OK" not in result.stdout:
         click.echo(click.style(f"  Deploy failed: {result.message}", fg="red"))
         if result.stderr:
             click.echo(f"  {result.stderr[:200]}")
         raise SystemExit(1)
-    click.echo(click.style("  Package deployed", fg="green"))
+    click.echo(click.style("  Package deployed to ember venv", fg="green"))
+
+    # Step 2b: Check if systemd service needs migration to new binary path
+    click.echo("Checking service binary path...")
+    new_ember_path = detect_clade_entry_point(ssh_host, "clade-ember", ssh_key=ssh_key)
+    if new_ember_path:
+        check_result = run_remote(
+            ssh_host,
+            f"grep -o 'ExecStart=.*' /etc/systemd/system/{EMBER_SERVICE_NAME}.service 2>/dev/null || echo NOSERVICE",
+            ssh_key=ssh_key,
+            timeout=10,
+        )
+        current_exec = check_result.stdout.strip().replace("ExecStart=", "") if check_result.success else ""
+        if current_exec != new_ember_path and current_exec != "NOSERVICE":
+            click.echo(f"  Migrating service: {current_exec} -> {new_ember_path}")
+        else:
+            click.echo(f"  Binary: {new_ember_path}")
 
     # Step 3: Sync ember.env with current API key from keys.json
     click.echo("Syncing ember.env with current API key...")
@@ -303,6 +326,42 @@ def ember(ctx: click.Context, name: str, force: bool) -> None:
         click.echo(click.style("  ember.env synced", fg="green"))
     else:
         click.echo(click.style("  Warning: could not sync ember.env", fg="yellow"))
+
+    # Step 3b: Regenerate systemd service if binary path changed
+    if new_ember_path and current_exec and current_exec not in (new_ember_path, "NOSERVICE"):
+        click.echo("Regenerating systemd service file...")
+        # Use $HOME as WorkingDirectory for ember-venv installs
+        if "/ember-venv/" in new_ember_path:
+            clade_dir = f"/home/{remote_user}"
+        else:
+            clade_dir = f"/home/{remote_user}"
+
+        svc_result = deploy_systemd_service(
+            ssh_host=ssh_host,
+            brother_name=name,
+            remote_user=remote_user,
+            clade_ember_path=new_ember_path,
+            clade_dir=clade_dir,
+            port=ember_port,
+            working_dir=brother.working_dir or f"/home/{remote_user}",
+            hearth_url=config.server_url or "",
+            api_key=brother_key,
+            ssh_key=ssh_key,
+        )
+        if svc_result.success and "EMBER_DEPLOY_OK" in svc_result.stdout:
+            click.echo(click.style("  Service file updated and restarted", fg="green"))
+            # Skip the normal restart since deploy_systemd_service already restarts
+            click.echo(f"Checking health at {brother.ember_host}:{ember_port}...")
+            if check_ember_health_remote(brother.ember_host, ember_port):
+                click.echo(click.style("  Ember is healthy!", fg="green"))
+            else:
+                click.echo(click.style("  Health check failed (may need a moment)", fg="yellow"))
+            click.echo(click.style(f"\nEmber ({name}) deployed successfully!", fg="green", bold=True))
+            return
+        else:
+            click.echo(click.style("  Service file update failed", fg="red"))
+            if svc_result.stderr:
+                click.echo(f"  {svc_result.stderr[:200]}")
 
     # Step 4: Check for running tasks before restart
     click.echo("Checking for running tasks...")

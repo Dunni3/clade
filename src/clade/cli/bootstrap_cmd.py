@@ -97,20 +97,23 @@ fi
 VERIFY_SCRIPT = r"""#!/bin/bash
 # Check prerequisites after bootstrap
 
-# Find clade-worker and clade-ember
+# Find clade-worker (prefer conda envs over ember-venv)
 for d in \
     ~/miniforge3/envs/*/bin \
     ~/mambaforge/envs/*/bin \
     ~/miniconda3/envs/*/bin \
     ~/anaconda3/envs/*/bin \
-    ~/.conda/envs/*/bin; do
+    ~/.conda/envs/*/bin \
+    ~/.local/ember-venv/bin; do
     if [ -x "$d/clade-worker" ]; then
         echo "CLADE_WORKER:$d/clade-worker"
         break
     fi
 done
 
+# Find clade-ember (prefer ember-venv over conda envs)
 for d in \
+    ~/.local/ember-venv/bin \
     ~/miniforge3/envs/*/bin \
     ~/mambaforge/envs/*/bin \
     ~/miniconda3/envs/*/bin \
@@ -153,17 +156,28 @@ echo "VERIFY_OK"
     default=True,
     help="Auto-install miniforge3 if no conda/mamba found (default: yes)",
 )
+@click.option(
+    "--ember-only",
+    is_flag=True,
+    default=False,
+    help="Only set up the Ember venv (skip conda/dev environment)",
+)
 @click.pass_context
 def bootstrap_cmd(
     ctx: click.Context,
     ssh_host: str,
     ssh_key: str | None,
     install_conda: bool,
+    ember_only: bool,
 ) -> None:
     """Bootstrap a remote machine for clade add-brother.
 
     Ensures the remote has a conda/mamba environment with Python 3.11,
     deploys the clade package, and verifies prerequisites.
+
+    With --ember-only, creates a dedicated venv for the Ember service
+    instead of setting up a full conda environment. Use this when you
+    only need the Ember server running (no dev environment).
 
     After bootstrap, run: clade add-brother --ssh SSH_HOST
     """
@@ -177,15 +191,23 @@ def bootstrap_cmd(
         raise SystemExit(1)
     click.echo(click.style("   SSH OK", fg="green"))
 
-    # Step 2: Detect/create conda env
-    click.echo("\n2. Setting up conda environment...")
-    pip_path = _setup_conda_env(ssh_host, ssh_key, install_conda)
-    if not pip_path:
-        raise SystemExit(1)
+    if ember_only:
+        # Ember-only path: venv + non-editable install
+        click.echo("\n2. Setting up Ember venv...")
+        if not _setup_ember_venv(ssh_host, ssh_key):
+            raise SystemExit(1)
 
-    # Step 3: Deploy clade package via tar-pipe
-    click.echo("\n3. Deploying clade package...")
-    _deploy_clade(ssh_host, ssh_key, pip_path)
+        click.echo("\n3. Deploying clade package to ember venv...")
+        _deploy_clade_ember_venv(ssh_host, ssh_key)
+    else:
+        # Standard path: conda env + editable install
+        click.echo("\n2. Setting up conda environment...")
+        pip_path = _setup_conda_env(ssh_host, ssh_key, install_conda)
+        if not pip_path:
+            raise SystemExit(1)
+
+        click.echo("\n3. Deploying clade package...")
+        _deploy_clade(ssh_host, ssh_key, pip_path)
 
     # Step 4: Verify
     click.echo("\n4. Verifying installation...")
@@ -198,6 +220,76 @@ def bootstrap_cmd(
             bold=True,
         )
     )
+
+
+def _setup_ember_venv(
+    ssh_host: str,
+    ssh_key: str | None,
+) -> bool:
+    """Create the Ember venv on the remote if it doesn't exist. Returns True on success."""
+    script = r"""#!/bin/bash
+set -e
+VENV="$HOME/.local/ember-venv"
+
+if [ -x "$VENV/bin/python" ]; then
+    echo "VENV_EXISTS"
+    echo "PIP:$VENV/bin/pip"
+    exit 0
+fi
+
+PYBIN=""
+for py in python3.12 python3.11 python3.10 python3; do
+    command -v "$py" &>/dev/null && PYBIN="$py" && break
+done
+
+if [ -z "$PYBIN" ]; then
+    echo "NO_PYTHON"
+    exit 1
+fi
+
+echo "CREATING_VENV:$PYBIN"
+"$PYBIN" -m venv "$VENV" 2>&1 || { echo "VENV_FAILED"; echo "Hint: sudo apt install python3-venv"; exit 1; }
+echo "VENV_CREATED"
+echo "PIP:$VENV/bin/pip"
+"""
+    result = run_remote(ssh_host, script, ssh_key=ssh_key, timeout=60)
+    if not result.success:
+        click.echo(click.style(f"   Failed: {result.message}", fg="red"))
+        return False
+
+    stdout = result.stdout
+    for line in stdout.strip().splitlines():
+        if line == "VENV_EXISTS":
+            click.echo(click.style("   Ember venv already exists", fg="green"))
+        elif line.startswith("CREATING_VENV:"):
+            click.echo(f"   Creating venv with {line.split(':', 1)[1]}...")
+        elif line == "VENV_CREATED":
+            click.echo(click.style("   Ember venv created", fg="green"))
+        elif line.startswith("PIP:"):
+            click.echo(click.style(f"   Pip: {line.split(':', 1)[1]}", fg="green"))
+        elif line == "NO_PYTHON":
+            click.echo(click.style("   No python3 found on remote", fg="red"))
+            return False
+        elif line == "VENV_FAILED":
+            click.echo(click.style("   Failed to create venv", fg="red"))
+            click.echo("   Hint: sudo apt install python3-venv")
+            return False
+
+    return True
+
+
+def _deploy_clade_ember_venv(ssh_host: str, ssh_key: str | None) -> None:
+    """Deploy clade to the Ember venv via tar-pipe + non-editable install."""
+    from .deploy_utils import deploy_clade_to_ember_venv
+
+    result = deploy_clade_to_ember_venv(ssh_host, ssh_key=ssh_key)
+    if result.success and "DEPLOY_OK" in result.stdout:
+        click.echo(click.style("   Clade package installed in ember venv", fg="green"))
+    else:
+        click.echo(click.style(f"   Deploy failed: {result.message}", fg="red"))
+        if result.stderr:
+            click.echo(f"   {result.stderr[:300]}")
+        raise SystemExit(1)
 
 
 def _setup_conda_env(
