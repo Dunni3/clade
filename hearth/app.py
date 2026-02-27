@@ -675,6 +675,7 @@ async def retry_task(
             parent_task_id=task_id,
             on_complete=task.get("on_complete"),
             project=task.get("project"),
+            max_turns=task.get("max_turns"),
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -732,16 +733,19 @@ async def retry_task(
 
     # Send to Ember
     try:
+        payload: dict = {
+            "prompt": task["prompt"],
+            "task_id": child_id,
+            "subject": retry_subject,
+            "sender_name": caller,
+            "working_dir": wd,
+        }
+        if task.get("max_turns") is not None:
+            payload["max_turns"] = task["max_turns"]
         async with httpx.AsyncClient(verify=False, timeout=30.0) as http_client:
             resp = await http_client.post(
                 f"{ember_url}/tasks/execute",
-                json={
-                    "prompt": task["prompt"],
-                    "task_id": child_id,
-                    "subject": retry_subject,
-                    "sender_name": caller,
-                    "working_dir": wd,
-                },
+                json=payload,
                 headers={"Authorization": f"Bearer {assignee_key}"},
             )
             resp.raise_for_status()
