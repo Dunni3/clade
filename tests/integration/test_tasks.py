@@ -2491,8 +2491,8 @@ class TestAutoSyncCardStatus:
         assert resp.json()["assignee"] == "jerry"
 
     @pytest.mark.asyncio
-    async def test_no_sync_when_card_already_done(self, client):
-        """Cards in done/archived should NOT be moved back to in_progress."""
+    async def test_done_card_reopens_on_in_progress(self, client):
+        """Cards in done should be re-opened to in_progress when a linked task becomes active."""
         resp = await client.post(
             "/api/v1/tasks",
             json={"assignee": "oppy", "prompt": "Do stuff"},
@@ -2518,9 +2518,9 @@ class TestAutoSyncCardStatus:
             headers=OPPY_HEADERS,
         )
 
-        # Card should still be done
+        # Card should be re-opened to in_progress
         resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
-        assert resp.json()["col"] == "done"
+        assert resp.json()["col"] == "in_progress"
 
     @pytest.mark.asyncio
     async def test_no_sync_when_card_archived(self, client):
@@ -2589,8 +2589,8 @@ class TestAutoSyncCardStatus:
         assert resp.json()["assignee"] == "jerry"
 
     @pytest.mark.asyncio
-    async def test_no_sync_on_other_status_changes(self, client):
-        """Moving a task to completed should NOT trigger card sync."""
+    async def test_completed_task_moves_card_to_done(self, client):
+        """When a task completes and all linked tasks are terminal, card moves to done."""
         resp = await client.post(
             "/api/v1/tasks",
             json={"assignee": "oppy", "prompt": "Do stuff"},
@@ -2616,9 +2616,9 @@ class TestAutoSyncCardStatus:
             headers=OPPY_HEADERS,
         )
 
-        # Card should still be in todo
+        # Card should move to done (single task completed = all terminal + has completed)
         resp = await client.get(f"/api/v1/kanban/cards/{card_id}", headers=DOOT_HEADERS)
-        assert resp.json()["col"] == "todo"
+        assert resp.json()["col"] == "done"
 
     @pytest.mark.asyncio
     async def test_no_linked_cards_no_error(self, client):
@@ -2676,9 +2676,9 @@ class TestAutoSyncCardStatus:
         resp = await client.get(f"/api/v1/kanban/cards/{card_ids[1]}", headers=DOOT_HEADERS)
         assert resp.json()["col"] == "in_progress"
 
-        # Card C (was done) -> still done
+        # Card C (was done) -> re-opened to in_progress (bidirectional sync)
         resp = await client.get(f"/api/v1/kanban/cards/{card_ids[2]}", headers=DOOT_HEADERS)
-        assert resp.json()["col"] == "done"
+        assert resp.json()["col"] == "in_progress"
 
 
 # ---------------------------------------------------------------------------

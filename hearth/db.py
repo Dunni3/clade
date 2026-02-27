@@ -1230,6 +1230,23 @@ async def get_cards_for_objects(
         await db.close()
 
 
+async def get_linked_task_statuses(card_id: int) -> list[str]:
+    """Return the status of every task linked to a kanban card."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT t.status
+               FROM kanban_card_links cl
+               JOIN tasks t ON t.id = CAST(cl.object_id AS INTEGER)
+               WHERE cl.card_id = ? AND cl.object_type = 'task'""",
+            (card_id,),
+        )
+        rows = await cursor.fetchall()
+        return [r["status"] for r in rows]
+    finally:
+        await db.close()
+
+
 async def count_children(task_id: int) -> int:
     """Count direct children of a task."""
     db = await get_db()

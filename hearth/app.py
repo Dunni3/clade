@@ -80,10 +80,11 @@ _COLUMN_ORDER = {"backlog": 0, "todo": 1, "in_progress": 2, "done": 3, "archived
 
 
 async def _sync_linked_cards_to_in_progress(task_id: int, assignee: str) -> None:
-    """When a task moves to in_progress, sync any linked kanban cards forward.
+    """When a task moves to in_progress, sync any linked kanban cards to in_progress.
 
-    Only cards in columns before in_progress (backlog, todo) are moved.
-    Cards already in in_progress, done, or archived are left untouched.
+    Moves cards from backlog/todo forward to in_progress.
+    Also re-opens cards in 'done' back to in_progress (bidirectional sync).
+    Cards in 'archived' are never touched.
 
     Note: The card's assignee is unconditionally set to the task's assignee,
     overwriting any existing card assignee. This ensures the card reflects
@@ -93,9 +94,36 @@ async def _sync_linked_cards_to_in_progress(task_id: int, assignee: str) -> None
     cards = card_map.get(str(task_id), [])
     for card_info in cards:
         card_col = card_info.get("col", "")
-        # Only sync forward: don't overwrite cards already in_progress, done, or archived
-        if _COLUMN_ORDER.get(card_col, 0) < _COLUMN_ORDER["in_progress"]:
+        # Move forward from backlog/todo, or re-open from done
+        if _COLUMN_ORDER.get(card_col, 0) < _COLUMN_ORDER["in_progress"] or card_col == "done":
             await db.update_card(card_info["id"], col="in_progress", assignee=assignee)
+
+
+async def _sync_linked_cards_to_done(task_id: int) -> None:
+    """When a task reaches a terminal state, move linked cards to done if appropriate.
+
+    A card moves to done when:
+    - At least one linked task has status 'completed'
+    - No linked tasks remain in active states (pending, launched, in_progress)
+
+    Cards already in 'done' or 'archived' are left untouched.
+    Cards where all tasks failed/killed (none completed) stay where they are.
+    """
+    ACTIVE_STATES = {"pending", "launched", "in_progress"}
+    card_map = await db.get_cards_for_objects("task", [str(task_id)])
+    cards = card_map.get(str(task_id), [])
+    for card_info in cards:
+        card_col = card_info.get("col", "")
+        # Don't touch cards already in done or archived
+        if _COLUMN_ORDER.get(card_col, 0) >= _COLUMN_ORDER["done"]:
+            continue
+        statuses = await db.get_linked_task_statuses(card_info["id"])
+        if not statuses:
+            continue
+        has_completed = any(s == "completed" for s in statuses)
+        has_active = any(s in ACTIVE_STATES for s in statuses)
+        if has_completed and not has_active:
+            await db.update_card(card_info["id"], col="done")
 
 
 def _maybe_trigger_conductor_tick(
@@ -552,6 +580,13 @@ async def update_task(
     if req.status == "failed":
         await _cascade_failure(task_id)
 
+    # Auto-sync linked kanban cards to done when task reaches terminal state
+    if req.status in ("completed", "failed", "killed"):
+        try:
+            await _sync_linked_cards_to_done(task_id)
+        except Exception:
+            logger.warning("Failed to sync linked cards to done for task %d", task_id, exc_info=True)
+
     # Trigger conductor tick when any task reaches a terminal state
     # Note: "killed" is intentionally excluded — killed tasks must not trigger Kamaji
     if req.status in ("completed", "failed"):
@@ -629,6 +664,12 @@ async def kill_task(
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    # Auto-sync linked kanban cards to done
+    try:
+        await _sync_linked_cards_to_done(task_id)
+    except Exception:
+        logger.warning("Failed to sync linked cards to done for task %d", task_id, exc_info=True)
 
     # Do NOT trigger conductor tick for killed tasks
     return updated
