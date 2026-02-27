@@ -27,6 +27,11 @@ export default function Markdown({ children, className = '' }: MarkdownProps) {
               {children}
             </a>
           ),
+          table: ({ children }) => (
+            <div className="overflow-x-auto">
+              <table>{children}</table>
+            </div>
+          ),
         }}
       >
         {children}
