@@ -150,6 +150,56 @@ def _maybe_trigger_conductor_tick(
         logger.warning("Failed to trigger conductor tick", exc_info=True)
 
 
+def _format_task_section(task: dict, label: str) -> str:
+    """Format a single ancestor/blocker task as a context section."""
+    task_id = task["id"]
+    subject = task.get("subject") or "(no subject)"
+    status = task.get("status", "unknown")
+    output = task.get("output") or "(no output recorded)"
+    return f"### {label}: Task #{task_id} — \"{subject}\"\nStatus: {status}\nOutput: {output}"
+
+
+async def _build_ancestor_context(task_id: int, max_levels: int = 3) -> str:
+    """Walk up the task tree and build a context summary for worker prompts.
+
+    Collects output summaries from parent tasks (up to max_levels) and the
+    blocked_by task, then formats them as a preamble to prepend to the prompt.
+    """
+    task = await db.get_task(task_id)
+    if not task:
+        return ""
+
+    sections: list[str] = []
+    seen: set[int] = set()
+
+    # Include blocked_by task context
+    blocked_by_id = task.get("blocked_by_task_id")
+    if blocked_by_id:
+        blocker = await db.get_task(blocked_by_id)
+        if blocker:
+            sections.append(_format_task_section(blocker, "Predecessor (blocking task)"))
+            seen.add(blocked_by_id)
+
+    # Walk parent chain
+    labels = ["Parent", "Grandparent", "Great-grandparent"]
+    current_id = task.get("parent_task_id")
+    for i in range(max_levels):
+        if current_id is None or current_id in seen:
+            break
+        ancestor = await db.get_task(current_id)
+        if not ancestor:
+            break
+        label = labels[i] if i < len(labels) else f"Ancestor (depth {i + 1})"
+        sections.append(_format_task_section(ancestor, label))
+        seen.add(current_id)
+        current_id = ancestor.get("parent_task_id")
+
+    if not sections:
+        return ""
+
+    return "## Context from prior tasks\n\n" + "\n\n".join(sections) + "\n\n---\n\n"
+
+
 async def _cascade_failure(failed_task_id: int) -> None:
     """When a task fails, cascade failure to any pending tasks blocked by it.
 
@@ -186,6 +236,10 @@ async def _unblock_and_delegate(completed_task_id: int) -> None:
     for task in blocked_tasks:
         assignee = task["assignee"]
         task_id = task["id"]
+
+        # Enrich prompt with ancestor/blocker context BEFORE clearing blocked_by
+        context = await _build_ancestor_context(task_id)
+        enriched_prompt = context + task["prompt"] if context else task["prompt"]
 
         # Clear the blocked_by reference
         await db.clear_blocked_by(task_id)
@@ -225,7 +279,7 @@ async def _unblock_and_delegate(completed_task_id: int) -> None:
         # Send to Ember
         try:
             payload: dict = {
-                "prompt": task["prompt"],
+                "prompt": enriched_prompt,
                 "task_id": task_id,
                 "subject": task["subject"] or "",
                 "sender_name": task["creator"],
@@ -493,6 +547,20 @@ async def get_task(
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
+
+
+@app.get("/api/v1/tasks/{task_id}/context")
+async def get_task_context(
+    task_id: int,
+    max_levels: int = 3,
+    _caller: str = Depends(resolve_sender),
+):
+    """Return ancestor/blocker context for a task (used by delegation tools)."""
+    task = await db.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    context = await _build_ancestor_context(task_id, max_levels=max_levels)
+    return {"task_id": task_id, "context": context}
 
 
 @app.post("/api/v1/tasks/{task_id}/log", response_model=TaskEvent)
@@ -776,13 +844,17 @@ async def retry_task(
         if bp:
             wd = bp["working_dir"]
 
+    # Enrich prompt with ancestor context (child has parent_task_id → original task)
+    context = await _build_ancestor_context(child_id)
+    enriched_prompt = context + task["prompt"] if context else task["prompt"]
+
     # Send to Ember
     try:
         async with httpx.AsyncClient(verify=False, timeout=30.0) as http_client:
             resp = await http_client.post(
                 f"{ember_url}/tasks/execute",
                 json={
-                    "prompt": task["prompt"],
+                    "prompt": enriched_prompt,
                     "task_id": child_id,
                     "subject": retry_subject,
                     "sender_name": caller,

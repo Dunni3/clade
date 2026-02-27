@@ -169,9 +169,19 @@ def create_delegation_tools(
                 result_lines.append(f"  Linked to card: #{card_id}")
             return "\n".join(result_lines)
 
+        # Enrich prompt with ancestor/blocker context
+        enriched_prompt = prompt
+        if parent_task_id is not None:
+            try:
+                context = await mailbox.get_task_context(task_id)
+                if context:
+                    enriched_prompt = context + prompt
+            except Exception:
+                pass  # Non-fatal: proceed with original prompt
+
         try:
             ember_result = await ember.execute_task(
-                prompt=prompt,
+                prompt=enriched_prompt,
                 subject=subject,
                 task_id=task_id,
                 working_dir=wd,
