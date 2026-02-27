@@ -560,3 +560,57 @@ def setup_ember(
             click.echo(click.style(f"  Warning: could not register ember with Hearth: {e}", fg="yellow"))
 
     return ember_host, port
+
+
+def setup_sudoers(ssh_host: str) -> bool:
+    """Set up passwordless sudo for Ember service restarts.
+
+    Handles the full interactive flow: detect user/systemctl, show the
+    sudoers command, confirm with user, install, and verify.
+
+    Returns True if sudoers was successfully configured and verified.
+    """
+    click.echo()
+    click.echo(click.style("Setting up passwordless sudo for Ember restarts...", bold=True))
+
+    remote_user = detect_remote_user(ssh_host)
+    if not remote_user:
+        click.echo(click.style("  Could not detect remote user", fg="red"))
+        return False
+
+    systemctl_path = detect_systemctl_path(ssh_host)
+    if not systemctl_path:
+        click.echo(click.style("  Could not detect systemctl path on remote", fg="red"))
+        return False
+
+    click.echo(f"  User: {remote_user}")
+    click.echo(f"  systemctl: {systemctl_path}")
+
+    cmd = generate_sudoers_command(ssh_host, remote_user, systemctl_path)
+    click.echo()
+    click.echo("  The following command will install a scoped sudoers rule:")
+    click.echo()
+    click.echo(f"    {cmd}")
+    click.echo()
+
+    if not click.confirm("  Install this sudoers rule now?", default=True):
+        click.echo("  Skipped. You can run the command above manually.")
+        return False
+
+    result = install_sudoers_remote(ssh_host, remote_user, systemctl_path)
+    if not result.success or "SUDOERS_OK" not in result.stdout:
+        click.echo(click.style("  Failed to install sudoers rule", fg="red"))
+        if result.stderr:
+            click.echo(f"  Error: {result.stderr[:200]}")
+        click.echo("  You can run the command above manually instead.")
+        return False
+
+    click.echo(click.style("  Sudoers rule installed", fg="green"))
+
+    click.echo("  Verifying passwordless sudo...")
+    if verify_sudoers_remote(ssh_host, systemctl_path):
+        click.echo(click.style("  Verification passed!", fg="green"))
+        return True
+    else:
+        click.echo(click.style("  Verification failed — sudo may still require a password", fg="yellow"))
+        return False
