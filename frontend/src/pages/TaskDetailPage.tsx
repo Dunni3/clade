@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getTask, killTask } from '../api/mailbox';
 import KillConfirmModal from '../components/KillConfirmModal';
-import Linkify from '../components/Linkify';
+import Markdown from '../components/Markdown';
 import MorselPanel from '../components/MorselPanel';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { TaskDetail, FeedMessage, TaskEvent } from '../types/mailbox';
@@ -329,7 +329,7 @@ export default function TaskDetailPage() {
       {task.output && (
         <div className="rounded-xl border border-gray-700 bg-gray-900 p-4 mb-4">
           <p className="text-sm font-medium text-gray-300 mb-2">Output</p>
-          <pre className="text-sm text-gray-400 whitespace-pre-wrap overflow-x-auto"><Linkify>{task.output}</Linkify></pre>
+          <Markdown className="text-sm text-gray-400">{task.output}</Markdown>
         </div>
       )}
 

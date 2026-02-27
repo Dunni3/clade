@@ -14,6 +14,7 @@ import '@xyflow/react/dist/style.css';
 import dagre from 'dagre';
 import { getTree, killTask } from '../api/mailbox';
 import KillConfirmModal from '../components/KillConfirmModal';
+import Markdown from '../components/Markdown';
 import MorselPanel from '../components/MorselPanel';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { TreeNode } from '../types/mailbox';
@@ -290,7 +291,7 @@ export default function TreeDetailPage() {
           {selectedTask.output && (
             <div>
               <p className="text-xs text-gray-400 mb-1">Output</p>
-              <pre className="text-xs text-gray-500 whitespace-pre-wrap overflow-x-auto max-h-40 overflow-y-auto">{selectedTask.output}</pre>
+              <div className="max-h-40 overflow-y-auto"><Markdown className="text-xs text-gray-500">{selectedTask.output}</Markdown></div>
             </div>
           )}
           {selectedTask.linked_cards && selectedTask.linked_cards.length > 0 && (

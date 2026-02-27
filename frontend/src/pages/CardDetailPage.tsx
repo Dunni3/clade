@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getCard, updateCard, deleteCard, getTask } from '../api/mailbox';
-import Linkify from '../components/Linkify';
+import Markdown from '../components/Markdown';
 import MorselPanel from '../components/MorselPanel';
 import PeekDrawer from '../components/PeekDrawer';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
@@ -286,7 +286,7 @@ export default function CardDetailPage() {
           {card.description && (
             <div className="rounded-xl border border-gray-700 bg-gray-900 p-4 mb-4">
               <p className="text-sm font-medium text-gray-300 mb-2">Description</p>
-              <div className="text-sm text-gray-400 whitespace-pre-wrap"><Linkify>{card.description}</Linkify></div>
+              <Markdown className="text-sm text-gray-400">{card.description}</Markdown>
             </div>
           )}
 

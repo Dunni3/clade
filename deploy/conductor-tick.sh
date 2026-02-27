@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Conductor tick — runs Kamaji's periodic check-in.
-# Called by systemd timer or cron every 15 minutes.
+# Called by systemd timer every 60 minutes.
 #
 # Usage:
 #   conductor-tick.sh                  # periodic tick
