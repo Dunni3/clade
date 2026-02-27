@@ -2,13 +2,32 @@
 _CLAUDE_STARTED=0
 _report_failure() {
     local rc=$1
-    if [ "$rc" -ne 0 ] && [ -n "$CLAUDE_TASK_ID" ] && [ -n "$HEARTH_URL" ] && [ -n "$HEARTH_API_KEY" ]; then
-        local msg
+    if [ -z "$CLAUDE_TASK_ID" ] || [ -z "$HEARTH_URL" ] || [ -z "$HEARTH_API_KEY" ]; then
+        return
+    fi
+
+    local msg=""
+
+    if [ "$rc" -ne 0 ]; then
+        # Non-zero exit — definite failure
         if [ "$_CLAUDE_STARTED" -eq 0 ]; then
             msg="Runner script failed before Claude started (exit code $rc)"
         else
             msg="Session exited with code $rc"
         fi
+    elif [ "$_CLAUDE_STARTED" -eq 1 ]; then
+        # Exit code 0 but Claude ran — check if task is still in_progress
+        # (e.g. max-turns exhausted without completing the task)
+        local status
+        status=$(curl -skf "$HEARTH_URL/api/v1/tasks/$CLAUDE_TASK_ID" \
+            -H "Authorization: Bearer $HEARTH_API_KEY" 2>/dev/null \
+            | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+        if [ "$status" = "in_progress" ]; then
+            msg="Claude exited cleanly (code 0) but task is still in_progress — likely hit max-turns limit"
+        fi
+    fi
+
+    if [ -n "$msg" ]; then
 {% if log_path is defined and log_path %}
         # Append log tail for context
         if [ -f "$LOGFILE" ]; then
@@ -22,6 +41,11 @@ _report_failure() {
             -H "Content-Type: application/json" \
             -d "{\"status\":\"failed\",\"output\":\"$msg\"}" \
             >/dev/null 2>&1 || true
+{% if log_path is defined and log_path %}
+    else
+        # Task completed successfully — clean up log file
+        rm -f "$LOGFILE"
+{% endif %}
     fi
 }
 trap '_report_failure $?' EXIT
