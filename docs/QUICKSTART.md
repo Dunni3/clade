@@ -52,7 +52,7 @@ clade init --name "My Clade" --personal-name doot \
   --server-url https://your-server.com --server-key <existing-key>
 ```
 
-This registers your generated key with the Hearth so it's immediately usable. Without `--server-key`, you'd need to manually add the key on the server. See [MAILBOX_SETUP.md](MAILBOX_SETUP.md) for details.
+This registers your generated key with the Hearth so it's immediately usable. Without `--server-key`, you'd need to manually add the key on the server. See [HEARTH_API.md](HEARTH_API.md) for details.
 
 **After init, restart Claude Code** to pick up the new MCP server.
 
@@ -234,11 +234,11 @@ browse_feed(sender="doot", limit=20)
 ### Mailbox not working
 1. Verify Hearth server is configured: `clade status`
 2. Check env vars in `~/.claude.json`
-3. See [MAILBOX_SETUP.md](MAILBOX_SETUP.md) for server setup
+3. See [HEARTH_API.md](HEARTH_API.md) for server setup
 
 ## Next Steps
 
-- [Set up The Hearth](MAILBOX_SETUP.md) — Deploy the communication server
+- [Set up The Hearth](HEARTH_API.md) — Deploy the communication server
 - [Configure remote brothers](BROTHER_SETUP.md) — Detailed brother setup
 - [Install the task logger hook](BROTHER_SETUP.md#step-4-install-task-logger-hook-optional-but-recommended) — Live activity tracking for SSH tasks
 - [Task delegation](TASKS.md) — Send tasks to brothers via SSH

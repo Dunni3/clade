@@ -22,7 +22,6 @@ clade/
 ├── docker/             # Docker Compose test environment
 ├── deploy/             # Deployment scripts, systemd units, Tailscale
 ├── docs/               # Documentation
-└── HEARTH_SETUP.md     # Self-setup guide for brothers
 ```
 
 **Five entry points** (defined in `pyproject.toml`):
@@ -79,7 +78,7 @@ Directions from Ian:
 
 ## New Brother Onboarding
 
-If you are a brother and you do not yet have the `send_message`, `check_mailbox`, `read_message`, or `unread_count` MCP tools available, follow the self-setup guide at [HEARTH_SETUP.md](HEARTH_SETUP.md) to plug yourself into the Hearth.
+If you are a brother and you do not yet have the `send_message`, `check_mailbox`, `read_message`, or `unread_count` MCP tools available, follow the self-setup guide at [docs/BROTHER_SETUP.md](docs/BROTHER_SETUP.md) to plug yourself into the Hearth.
 
 ## Research Notes
 
