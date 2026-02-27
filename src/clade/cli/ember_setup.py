@@ -167,16 +167,28 @@ def detect_clade_entry_point(
     if result.success and result.stdout.strip():
         return result.stdout.strip()
 
-    # Search common env locations
+    # Search common env locations.
+    # Conditional order: prefer ember-venv for clade-ember (so the Ember
+    # service picks up the dedicated venv binary), prefer conda for other
+    # entry points like clade-worker (since pip install also creates those
+    # in the venv, but the dev/conda copy is the intended one).
+    ember_venv_path = "~/.local/ember-venv/bin"
+    conda_paths = (
+        "~/mambaforge/envs/*/bin "
+        "~/miniforge3/envs/*/bin "
+        "~/miniconda3/envs/*/bin "
+        "~/anaconda3/envs/*/bin "
+        "~/.conda/envs/*/bin "
+        "~/.local/venv/bin "
+        "~/.local/bin"
+    )
+    if entry_point == "clade-ember":
+        search_dirs = f"{ember_venv_path} {conda_paths}"
+    else:
+        search_dirs = f"{conda_paths} {ember_venv_path}"
+
     search_script = f"""
-for d in \\
-    ~/mambaforge/envs/*/bin \\
-    ~/miniforge3/envs/*/bin \\
-    ~/miniconda3/envs/*/bin \\
-    ~/anaconda3/envs/*/bin \\
-    ~/.conda/envs/*/bin \\
-    ~/.local/venv/bin \\
-    ~/.local/bin; do
+for d in {search_dirs}; do
     if [ -x "$d/{entry_point}" ]; then
         echo "$d/{entry_point}"
         exit 0
@@ -211,7 +223,7 @@ def detect_clade_dir(ssh_host: str, ssh_key: str | None = None) -> str | None:
     if result.success and result.stdout.strip().startswith("/"):
         return result.stdout.strip()
 
-    # Search conda/mamba/venv pythons
+    # Search conda/mamba/venv pythons (including ember-venv)
     search_script = f"""
 for py in \\
     ~/mambaforge/envs/*/bin/python \\
@@ -219,7 +231,8 @@ for py in \\
     ~/miniconda3/envs/*/bin/python \\
     ~/anaconda3/envs/*/bin/python \\
     ~/.conda/envs/*/bin/python \\
-    ~/.local/venv/bin/python; do
+    ~/.local/venv/bin/python \\
+    ~/.local/ember-venv/bin/python; do
     if [ -x "$py" ]; then
         result=$("$py" -c "{import_cmd}" 2>/dev/null)
         if [ $? -eq 0 ] && [ -n "$result" ]; then
@@ -453,14 +466,21 @@ def setup_ember(
         return None, port
     click.echo(f"  Binary: {ember_path}")
 
-    # Detect clade directory (for WorkingDirectory)
+    # Detect clade directory (for WorkingDirectory).
+    # When the ember binary is in the dedicated venv, use $HOME — the Ember
+    # server doesn't need a specific cwd, and the venv site-packages path
+    # would be wrong.
     click.echo("  Detecting clade package directory...")
-    clade_dir = detect_clade_dir(ssh_host, ssh_key=ssh_key)
-    if not clade_dir:
+    if ember_path and "/ember-venv/" in ember_path:
         clade_dir = f"/home/{remote_user}"
-        click.echo(click.style(f"  Could not detect, using {clade_dir}", fg="yellow"))
+        click.echo(f"  Using home directory (ember-venv): {clade_dir}")
     else:
-        click.echo(f"  Directory: {clade_dir}")
+        clade_dir = detect_clade_dir(ssh_host, ssh_key=ssh_key)
+        if not clade_dir:
+            clade_dir = f"/home/{remote_user}"
+            click.echo(click.style(f"  Could not detect, using {clade_dir}", fg="yellow"))
+        else:
+            click.echo(f"  Directory: {clade_dir}")
 
     # Detect Tailscale IP
     click.echo("  Detecting Tailscale IP...")
