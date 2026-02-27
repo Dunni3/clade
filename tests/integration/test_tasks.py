@@ -1948,6 +1948,7 @@ class TestAPIRetryTask:
         with patch("hearth.app.httpx.AsyncClient") as MockClient:
             mock_instance = AsyncMock()
             mock_resp = MagicMock()
+            mock_resp.status_code = 200
             mock_resp.raise_for_status.return_value = None
             mock_resp.json.return_value = {"status": "accepted"}
             mock_instance.post.return_value = mock_resp
@@ -2017,6 +2018,7 @@ class TestAPIRetryTask:
             with patch("hearth.app.httpx.AsyncClient") as MockClient:
                 mock_instance = AsyncMock()
                 mock_resp = MagicMock()
+                mock_resp.status_code = 200
                 mock_resp.raise_for_status.return_value = None
                 mock_resp.json.return_value = {"status": "accepted"}
                 mock_instance.post.return_value = mock_resp
