@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 from mcp.server.fastmcp import FastMCP
 
 from ...communication.mailbox_client import MailboxClient
 from ...worker.client import EmberClient
+from ...worker.resolver import EmberResolutionError, resolve_ember_url
+
+logger = logging.getLogger(__name__)
 
 
 _NOT_CONFIGURED = "Delegation not configured. Ensure HEARTH_URL and HEARTH_API_KEY are set."
@@ -41,16 +45,30 @@ def create_delegation_tools(
             return registry_loader()
         return brothers_registry or {}
 
-    def _get_ember_client(brother: str) -> EmberClient | None:
+    async def _get_ember_client(brother: str) -> tuple[EmberClient | None, list[str]]:
+        """Resolve ember URL (registry-first) and build an EmberClient.
+
+        Returns:
+            (EmberClient, warnings) on success, (None, warnings) on failure.
+        """
         registry = _get_registry()
-        config = registry.get(brother)
-        if not config:
-            return None
-        url = config.get("ember_url")
+        config = registry.get(brother, {})
+        config_url = config.get("ember_url")
         key = config.get("ember_api_key") or config.get("api_key")
-        if not url or not key:
-            return None
-        return EmberClient(url, key, verify_ssl=False)
+
+        try:
+            resolution = await resolve_ember_url(brother, mailbox, config_url)
+        except EmberResolutionError as exc:
+            logger.warning("Ember resolution failed for %s: %s", brother, exc)
+            return None, []
+
+        for w in resolution.warnings:
+            logger.info("Ember resolution [%s]: %s", brother, w)
+
+        if not key:
+            return None, resolution.warnings
+
+        return EmberClient(resolution.url, key, verify_ssl=False), resolution.warnings
 
     @mcp.tool()
     async def initiate_ember_task(
@@ -97,7 +115,7 @@ def create_delegation_tools(
             return f"Unknown brother '{brother}'. Available brothers: {available}"
 
         config = registry[brother]
-        ember = _get_ember_client(brother)
+        ember, warnings = await _get_ember_client(brother)
         if ember is None:
             return f"Brother '{brother}' has no Ember configured."
 
@@ -181,6 +199,8 @@ def create_delegation_tools(
             f"  Session: {session}",
             f"  Status: launched",
         ]
+        if warnings:
+            result_lines.append(f"  Note: {'; '.join(warnings)}")
         if card_id is not None:
             result_lines.append(f"  Linked to card: #{card_id}")
         return "\n".join(result_lines)

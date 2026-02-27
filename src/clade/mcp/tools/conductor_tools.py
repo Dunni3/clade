@@ -7,10 +7,9 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-logger = logging.getLogger(__name__)
-
 from ...communication.mailbox_client import MailboxClient
 from ...worker.client import EmberClient
+from ...worker.resolver import EmberResolutionError, resolve_ember_url
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +40,29 @@ def create_conductor_tools(
         Dict mapping tool names to their callable functions (for testing).
     """
 
-    def _get_ember_client(brother: str) -> EmberClient | None:
-        worker = worker_registry.get(brother)
-        if not worker:
-            return None
-        url = worker.get("ember_url")
+    async def _get_ember_client(brother: str) -> tuple[EmberClient | None, list[str]]:
+        """Resolve ember URL (registry-first) and build an EmberClient.
+
+        Returns:
+            (EmberClient, warnings) on success, (None, warnings) on failure.
+        """
+        worker = worker_registry.get(brother, {})
+        config_url = worker.get("ember_url")
         key = worker.get("ember_api_key") or worker.get("api_key")
-        if not url or not key:
-            return None
-        return EmberClient(url, key, verify_ssl=False)
+
+        try:
+            resolution = await resolve_ember_url(brother, mailbox, config_url)
+        except EmberResolutionError as exc:
+            logger.warning("Ember resolution failed for %s: %s", brother, exc)
+            return None, []
+
+        for w in resolution.warnings:
+            logger.info("Ember resolution [%s]: %s", brother, w)
+
+        if not key:
+            return None, resolution.warnings
+
+        return EmberClient(resolution.url, key, verify_ssl=False), resolution.warnings
 
     async def _delegate_to_ember(
         brother: str,
@@ -64,7 +77,7 @@ def create_conductor_tools(
     ) -> str:
         """Shared delegation logic: resolve working_dir, send to Ember, handle errors."""
         worker = worker_registry[brother]
-        ember = _get_ember_client(brother)
+        ember, warnings = await _get_ember_client(brother)
         if ember is None:
             return f"Worker '{brother}' has no Ember configured."
 
@@ -116,6 +129,8 @@ def create_conductor_tools(
             f"  Session: {session}",
             f"  Status: launched",
         ]
+        if warnings:
+            result_lines.append(f"  Note: {'; '.join(warnings)}")
         if card_id is not None:
             result_lines.append(f"  Linked to card: #{card_id}")
         return "\n".join(result_lines)
@@ -439,17 +454,20 @@ def create_conductor_tools(
 
         lines = []
         for name, _config in workers.items():
-            ember = _get_ember_client(name)
-            if ember is None:
+            client, warnings = await _get_ember_client(name)
+            if client is None:
                 lines.append(f"{name}: No Ember configured")
                 continue
             try:
-                result = await ember.health()
-                lines.append(
-                    f"{name}: Healthy\n"
-                    f"  Active tasks: {result.get('active_tasks', '?')}\n"
-                    f"  Uptime: {result.get('uptime_seconds', '?')}s"
-                )
+                result = await client.health()
+                entry_lines = [
+                    f"{name}: Healthy",
+                    f"  Active tasks: {result.get('active_tasks', '?')}",
+                    f"  Uptime: {result.get('uptime_seconds', '?')}s",
+                ]
+                if warnings:
+                    entry_lines.append(f"  Note: {'; '.join(warnings)}")
+                lines.append("\n".join(entry_lines))
             except Exception as e:
                 lines.append(f"{name}: Unreachable ({e})")
 
@@ -476,12 +494,12 @@ def create_conductor_tools(
 
         lines = []
         for name, _config in workers.items():
-            ember = _get_ember_client(name)
-            if ember is None:
+            client, _warnings = await _get_ember_client(name)
+            if client is None:
                 lines.append(f"{name}: No Ember configured")
                 continue
             try:
-                result = await ember.active_tasks()
+                result = await client.active_tasks()
                 # New multi-aspen format, with fallback for old Embers
                 aspens = result.get("aspens")
                 if aspens is None:

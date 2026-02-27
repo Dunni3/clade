@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 from mcp.server.fastmcp import FastMCP
 
+from ...communication.mailbox_client import MailboxClient
 from ...worker.client import EmberClient
+from ...worker.resolver import EmberResolutionError, resolve_ember_url
+
+logger = logging.getLogger(__name__)
 
 
 _NOT_CONFIGURED = "Ember not configured. Set EMBER_URL and EMBER_API_KEY env vars."
@@ -17,6 +22,7 @@ def create_ember_tools(
     ember: EmberClient | None,
     brothers_registry: dict[str, dict] | None = None,
     registry_loader: Callable[[], dict[str, dict]] | None = None,
+    mailbox: MailboxClient | None = None,
 ) -> dict:
     """Register Ember tools with an MCP server.
 
@@ -25,6 +31,7 @@ def create_ember_tools(
         ember: EmberClient instance, or None if not configured (for local/default Ember)
         brothers_registry: Static dict of brother configs (deprecated, use registry_loader)
         registry_loader: Callable that returns fresh registry on each call
+        mailbox: MailboxClient for Hearth registry lookups (registry-first resolution)
 
     Returns:
         Dict mapping tool names to their callable functions (for testing).
@@ -35,16 +42,31 @@ def create_ember_tools(
             return registry_loader()
         return brothers_registry or {}
 
-    def _get_ember_client(brother: str) -> EmberClient | None:
+    async def _get_ember_client(brother: str) -> tuple[EmberClient | None, list[str]]:
+        """Resolve ember URL (registry-first) and build an EmberClient.
+
+        Returns:
+            (EmberClient, warnings) on success, (None, warnings) on failure.
+        """
         registry = _get_registry()
-        config = registry.get(brother)
-        if not config:
-            return None
-        url = config.get("ember_url")
+        config = registry.get(brother, {})
+        config_url = config.get("ember_url")
         key = config.get("ember_api_key") or config.get("api_key")
-        if not url or not key:
-            return None
-        return EmberClient(url, key, verify_ssl=False)
+
+        try:
+            resolution = await resolve_ember_url(brother, mailbox, config_url)
+        except EmberResolutionError as exc:
+            logger.warning("Ember resolution failed for %s: %s", brother, exc)
+            return None, []
+
+        for w in resolution.warnings:
+            logger.info("Ember resolution [%s]: %s", brother, w)
+
+        if not key:
+            # Health checks don't need auth, so create client with empty key
+            return EmberClient(resolution.url, api_key="", verify_ssl=False), resolution.warnings
+
+        return EmberClient(resolution.url, key, verify_ssl=False), resolution.warnings
 
     @mcp.tool()
     async def check_ember_health(
@@ -77,16 +99,19 @@ def create_ember_tools(
             reg = _get_registry()
             if brother not in reg:
                 return f"Unknown brother '{brother}'."
-            client = _get_ember_client(brother)
+            client, warnings = await _get_ember_client(brother)
             if client is None:
                 return f"{brother}: No Ember configured"
             try:
                 result = await client.health()
-                return (
-                    f"{brother}: Healthy\n"
-                    f"  Active tasks: {result.get('active_tasks', '?')}\n"
-                    f"  Uptime: {result.get('uptime_seconds', '?')}s"
-                )
+                lines = [
+                    f"{brother}: Healthy",
+                    f"  Active tasks: {result.get('active_tasks', '?')}",
+                    f"  Uptime: {result.get('uptime_seconds', '?')}s",
+                ]
+                if warnings:
+                    lines.append(f"  Note: {'; '.join(warnings)}")
+                return "\n".join(lines)
             except Exception as e:
                 return f"{brother}: Unreachable ({e})"
 
@@ -95,17 +120,20 @@ def create_ember_tools(
         if reg:
             lines = []
             for name in reg:
-                client = _get_ember_client(name)
+                client, warnings = await _get_ember_client(name)
                 if client is None:
                     lines.append(f"{name}: No Ember configured")
                     continue
                 try:
                     result = await client.health()
-                    lines.append(
-                        f"{name}: Healthy\n"
-                        f"  Active tasks: {result.get('active_tasks', '?')}\n"
-                        f"  Uptime: {result.get('uptime_seconds', '?')}s"
-                    )
+                    entry_lines = [
+                        f"{name}: Healthy",
+                        f"  Active tasks: {result.get('active_tasks', '?')}",
+                        f"  Uptime: {result.get('uptime_seconds', '?')}s",
+                    ]
+                    if warnings:
+                        entry_lines.append(f"  Note: {'; '.join(warnings)}")
+                    lines.append("\n".join(entry_lines))
                 except Exception as e:
                     lines.append(f"{name}: Unreachable ({e})")
             return "\n\n".join(lines)
@@ -137,7 +165,7 @@ def create_ember_tools(
             reg = _get_registry()
             if brother not in reg:
                 return f"Unknown brother '{brother}'."
-            client = _get_ember_client(brother)
+            client, _warnings = await _get_ember_client(brother)
             if client is None:
                 return f"{brother}: No Ember configured"
             try:
@@ -151,7 +179,7 @@ def create_ember_tools(
         if reg:
             lines = []
             for name in reg:
-                client = _get_ember_client(name)
+                client, _warnings = await _get_ember_client(name)
                 if client is None:
                     lines.append(f"{name}: No Ember configured")
                     continue

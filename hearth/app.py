@@ -875,6 +875,18 @@ async def list_embers(
     return await db.get_embers()
 
 
+@app.get("/api/v1/embers/{name}", response_model=EmberEntry)
+async def get_ember(
+    name: str,
+    _caller: str = Depends(resolve_sender),
+):
+    """Get a single Ember entry by brother name."""
+    entry = await db.get_ember(name)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No ember registered for '{name}'")
+    return entry
+
+
 @app.post("/api/v1/embers/{name}/offline", response_model=EmberEntry)
 async def ember_offline(
     name: str,
