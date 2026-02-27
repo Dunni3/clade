@@ -69,7 +69,12 @@ class EmberClient:
                 headers=self.headers,
                 timeout=10,
             )
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                try:
+                    detail = resp.json()
+                except Exception:
+                    detail = resp.text
+                raise RuntimeError(f"Ember returned {resp.status_code}: {detail}")
             return resp.json()
 
     async def kill_task(self, task_id: int) -> dict:

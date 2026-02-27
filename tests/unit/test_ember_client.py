@@ -53,6 +53,7 @@ class TestExecuteTask:
     @pytest.mark.asyncio
     async def test_execute_task(self, client):
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.json.return_value = {
             "status": "launched",
             "session_name": "task-oppy-test-123",
@@ -78,6 +79,7 @@ class TestExecuteTask:
     @pytest.mark.asyncio
     async def test_execute_task_minimal(self, client):
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.json.return_value = {"status": "launched"}
         mock_resp.raise_for_status = MagicMock()
 
@@ -97,6 +99,7 @@ class TestExecuteTask:
     @pytest.mark.asyncio
     async def test_execute_task_with_target_branch(self, client):
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.json.return_value = {"status": "launched"}
         mock_resp.raise_for_status = MagicMock()
 

@@ -211,7 +211,12 @@ async def _unblock_and_delegate(completed_task_id: int) -> None:
                     json=payload,
                     headers={"Authorization": f"Bearer {assignee_key}"},
                 )
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    try:
+                        detail = resp.json()
+                    except Exception:
+                        detail = resp.text
+                    raise RuntimeError(f"Ember returned {resp.status_code}: {detail}")
             await db.update_task(task_id, status="launched")
             logger.info(
                 "Auto-delegated unblocked task #%d to %s (was blocked by #%d)",
@@ -744,7 +749,12 @@ async def retry_task(
                 },
                 headers={"Authorization": f"Bearer {assignee_key}"},
             )
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                try:
+                    detail = resp.json()
+                except Exception:
+                    detail = resp.text
+                raise RuntimeError(f"Ember returned {resp.status_code}: {detail}")
     except Exception as e:
         await db.update_task(
             child_id, status="failed",
