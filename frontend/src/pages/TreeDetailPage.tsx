@@ -14,6 +14,7 @@ import '@xyflow/react/dist/style.css';
 import dagre from 'dagre';
 import { getTree, killTask } from '../api/mailbox';
 import KillConfirmModal from '../components/KillConfirmModal';
+import Markdown from '../components/Markdown';
 import MorselPanel from '../components/MorselPanel';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { TreeNode } from '../types/mailbox';
@@ -83,6 +84,8 @@ function layoutTree(root: TreeNode): { nodes: Node<TaskNodeData>[]; edges: Edge[
   g.setDefaultEdgeLabel(() => ({}));
 
   const nodeDataMap = new Map<string, TaskNodeData>();
+  // Track secondary parent edges for multi-parent DAG support
+  const secondaryEdges: { source: string; target: string }[] = [];
 
   function walk(node: TreeNode) {
     const id = String(node.id);
@@ -94,12 +97,29 @@ function layoutTree(root: TreeNode): { nodes: Node<TaskNodeData>[]; edges: Edge[
       status: node.status,
       blockedByTaskId: node.blocked_by_task_id,
     });
+    // Add primary parent → child edges (tree structure)
     for (const child of node.children) {
       g.setEdge(id, String(child.id));
       walk(child);
     }
+    // Track secondary parent edges from parent_task_ids
+    const parentIds = node.parent_task_ids || [];
+    if (parentIds.length > 1) {
+      // Skip primary parent (index 0) — already handled by tree structure
+      for (let i = 1; i < parentIds.length; i++) {
+        secondaryEdges.push({ source: String(parentIds[i]), target: id });
+      }
+    }
   }
   walk(root);
+
+  // Add secondary parent edges to the graph for dagre layout
+  for (const se of secondaryEdges) {
+    if (g.hasNode(se.source) && g.hasNode(se.target)) {
+      g.setEdge(se.source, se.target);
+    }
+  }
+
   dagre.layout(g);
 
   const nodes: Node<TaskNodeData>[] = g.nodes().map((id) => {
@@ -112,14 +132,24 @@ function layoutTree(root: TreeNode): { nodes: Node<TaskNodeData>[]; edges: Edge[
     };
   });
 
-  const edges: Edge[] = g.edges().map((e) => ({
-    id: `${e.v}-${e.w}`,
-    source: e.v,
-    target: e.w,
-    type: 'smoothstep',
-    animated: nodeDataMap.get(e.w)?.status === 'in_progress',
-    style: { stroke: '#4b5563' },
-  }));
+  // Build a set of secondary edge keys for styling
+  const secondaryEdgeKeys = new Set(secondaryEdges.map(se => `${se.source}-${se.target}`));
+
+  const edges: Edge[] = g.edges().map((e) => {
+    const key = `${e.v}-${e.w}`;
+    const isSecondary = secondaryEdgeKeys.has(key);
+    return {
+      id: key,
+      source: e.v,
+      target: e.w,
+      type: 'smoothstep',
+      animated: nodeDataMap.get(e.w)?.status === 'in_progress',
+      style: {
+        stroke: isSecondary ? '#6366f1' : '#4b5563',
+        strokeDasharray: isSecondary ? '5 5' : undefined,
+      },
+    };
+  });
 
   return { nodes, edges };
 }
@@ -261,7 +291,7 @@ export default function TreeDetailPage() {
           {selectedTask.output && (
             <div>
               <p className="text-xs text-gray-400 mb-1">Output</p>
-              <pre className="text-xs text-gray-500 whitespace-pre-wrap overflow-x-auto max-h-40 overflow-y-auto">{selectedTask.output}</pre>
+              <div className="max-h-40 overflow-y-auto"><Markdown className="text-xs text-gray-500">{selectedTask.output}</Markdown></div>
             </div>
           )}
           {selectedTask.linked_cards && selectedTask.linked_cards.length > 0 && (

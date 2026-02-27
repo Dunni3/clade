@@ -211,7 +211,12 @@ async def _unblock_and_delegate(completed_task_id: int) -> None:
                     json=payload,
                     headers={"Authorization": f"Bearer {assignee_key}"},
                 )
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    try:
+                        detail = resp.json()
+                    except Exception:
+                        detail = resp.text
+                    raise RuntimeError(f"Ember returned {resp.status_code}: {detail}")
             await db.update_task(task_id, status="launched")
             logger.info(
                 "Auto-delegated unblocked task #%d to %s (was blocked by #%d)",
@@ -419,6 +424,7 @@ async def create_task(
             host=req.host,
             working_dir=req.working_dir,
             parent_task_id=req.parent_task_id,
+            parent_task_ids=req.parent_task_ids,
             metadata=req.metadata,
             on_complete=req.on_complete,
             blocked_by_task_id=req.blocked_by_task_id,
@@ -743,7 +749,12 @@ async def retry_task(
                 },
                 headers={"Authorization": f"Bearer {assignee_key}"},
             )
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                try:
+                    detail = resp.json()
+                except Exception:
+                    detail = resp.text
+                raise RuntimeError(f"Ember returned {resp.status_code}: {detail}")
     except Exception as e:
         await db.update_task(
             child_id, status="failed",
@@ -872,6 +883,18 @@ async def list_embers(
 ):
     """List all registered Ember entries."""
     return await db.get_embers()
+
+
+@app.get("/api/v1/embers/{name}", response_model=EmberEntry)
+async def get_ember(
+    name: str,
+    _caller: str = Depends(resolve_sender),
+):
+    """Get a single Ember entry by brother name."""
+    entry = await db.get_ember(name)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No ember registered for '{name}'")
+    return entry
 
 
 @app.post("/api/v1/embers/{name}/offline", response_model=EmberEntry)

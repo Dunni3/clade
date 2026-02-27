@@ -132,6 +132,7 @@ class MailboxClient:
         host: str | None = None,
         working_dir: str | None = None,
         parent_task_id: int | None = None,
+        parent_task_ids: list[int] | None = None,
         metadata: dict | None = None,
         on_complete: str | None = None,
         blocked_by_task_id: int | None = None,
@@ -145,7 +146,9 @@ class MailboxClient:
             payload["host"] = host
         if working_dir is not None:
             payload["working_dir"] = working_dir
-        if parent_task_id is not None:
+        if parent_task_ids is not None:
+            payload["parent_task_ids"] = parent_task_ids
+        elif parent_task_id is not None:
             payload["parent_task_id"] = parent_task_id
         if metadata is not None:
             payload["metadata"] = metadata
@@ -533,7 +536,23 @@ class MailboxClient:
             resp.raise_for_status()
             return resp.json()
 
-    # -- Ember Registration --
+    # -- Ember Registry --
+
+    async def get_ember(self, name: str) -> dict | None:
+        """Get a single Ember entry by brother name from the Hearth registry.
+
+        Returns the entry dict if found, None if not registered.
+        """
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.get(
+                self._url(f"/embers/{name}"),
+                headers=self.headers,
+                timeout=10,
+            )
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
 
     def register_ember_sync(self, name: str, ember_url: str) -> bool:
         """Register an Ember server with the Hearth. Returns True on success.

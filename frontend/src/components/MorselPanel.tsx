@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getMorsels } from '../api/mailbox';
-import Linkify from './Linkify';
+import Markdown from './Markdown';
 import type { MorselSummary, MorselLink } from '../types/mailbox';
 import { parseGitHubPrLink } from '../utils/links';
 
@@ -76,7 +76,7 @@ function MorselCard({ morsel, defaultExpanded = false }: { morsel: MorselSummary
       </div>
       {expanded && (
         <>
-          <p className="text-sm text-gray-300 whitespace-pre-wrap mt-2"><Linkify>{morsel.body}</Linkify></p>
+          <Markdown className="text-sm text-gray-300 mt-2">{morsel.body}</Markdown>
           {morsel.links.length > 0 && (
             <div className="flex items-center gap-2 mt-2">
               {morsel.links.map((link, i) => renderLink(link, i))}

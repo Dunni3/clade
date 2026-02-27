@@ -40,10 +40,10 @@ TimeoutStartSec=600
 
 TIMER_TEMPLATE = """\
 [Unit]
-Description=Run Conductor tick every 30 minutes
+Description=Run Conductor tick every 60 minutes
 
 [Timer]
-OnCalendar=*:0/30
+OnCalendar=hourly
 Persistent=true
 RandomizedDelaySec=60
 

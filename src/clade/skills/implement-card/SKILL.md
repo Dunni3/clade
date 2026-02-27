@@ -16,11 +16,18 @@ Delegate a kanban card to a worker brother for implementation, then chain a bloc
 
 ## Steps
 
-### 1. Read the card
+### 1. Read the card and gather context
 
 Call `get_card($1)`. If the card is not found, tell the user and stop.
 
 Print a brief summary of the card (title, description, current column, labels).
+
+**Gather the 1-hop neighborhood:** Check the card's links. For each linked item, pull it down:
+- Linked cards → `get_card(id)` for each
+- Linked morsels → `get_morsel(id)` for each
+- Linked tasks → `get_task(id)` for each
+
+Fetch all linked items in parallel where possible. Save their content — you'll include it in the delegation prompt (step 4).
 
 ### 2. Determine working directory
 
@@ -39,13 +46,28 @@ Call `move_card($1, "in_progress")`.
 
 Set `brother` to `$2` if provided, otherwise `"oppy"`.
 
-Build the implementation prompt (use the card title and description verbatim):
+Build the implementation prompt (use the card title and description verbatim, plus gathered context):
 
 ```
 You are implementing kanban card #<card_id>: "<card_title>"
 
 ## Card Description
 <card_description>
+
+## Context
+<For each linked item gathered in step 1, include a section:>
+
+### Linked Card #<id>: <title>
+<description>
+
+### Linked Morsel #<id>
+<body>
+
+### Linked Task #<id>: <subject>
+Status: <status>
+<output or prompt summary>
+
+<If no linked items, omit this section entirely.>
 
 ## Instructions
 
@@ -65,13 +87,17 @@ Note the task ID from the response.
 
 ### 5. Delegate review task (blocked)
 
-Build the senior review prompt:
+Build the senior review prompt (include the same context from step 1):
 
 ```
 You are reviewing the implementation of kanban card #<card_id>: "<card_title>"
 
 ## Card Description
 <card_description>
+
+## Context
+<Same linked item sections as the implementation prompt — cards, morsels, tasks from step 1.>
+<If no linked items, omit this section entirely.>
 
 ## Instructions
 

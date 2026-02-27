@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getMorsel } from '../api/mailbox';
-import Linkify from '../components/Linkify';
+import Markdown from '../components/Markdown';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { MorselSummary } from '../types/mailbox';
 import { parseGitHubPrLink } from '../utils/links';
@@ -90,7 +90,7 @@ export default function MorselDetailPage() {
         )}
 
         {/* Body */}
-        <div className="text-sm text-gray-300 whitespace-pre-wrap mb-4"><Linkify>{morsel.body}</Linkify></div>
+        <Markdown className="text-sm text-gray-300 mb-4">{morsel.body}</Markdown>
 
         {/* Linked objects */}
         {morsel.links.length > 0 && (
