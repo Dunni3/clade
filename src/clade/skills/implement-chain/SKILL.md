@@ -1,6 +1,7 @@
 ---
 name: implement-chain
-description: This skill should be used when the user asks to "implement a chain of cards", "implement cards in sequence", "chain card implementations", "implement-chain", or wants to delegate multiple kanban cards as a sequential implementation chain with parallel reviews using stacked branches. Trigger on any request involving ordered multi-card implementation delegation.
+description: Delegate a sequence of kanban card implementations as a chained pipeline with parallel reviews using stacked branches.
+argument-hint: <card_ids> [brother] [project]
 disable-model-invocation: true
 ---
 
@@ -60,6 +61,13 @@ For each card ID, call `get_card(card_id)`. Validate:
 
 Collect each card's title for branch name generation.
 
+**Gather linked context for each card:** Check each card's links. For each linked item, fetch it:
+- Linked cards → `get_card(id)` for each
+- Linked morsels → `get_morsel(id)` for each
+- Linked tasks → `get_task(id)` for each
+
+Fetch linked items in parallel where possible. Save the content per card — you'll include it in the delegation prompts (steps 5 and 6).
+
 ### Step 3: Generate Branch Names
 
 For each card, generate a branch name using the convention `card-<id>-<slug>`:
@@ -95,6 +103,21 @@ Call `initiate_ember_task` with these parameters. Use this prompt template for e
 ### Card Description
 {card_description}
 
+### Context
+<For each linked item gathered in step 2, include a section:>
+
+#### Linked Card #<id>: <title>
+<description>
+
+#### Linked Morsel #<id>
+<body>
+
+#### Linked Task #<id>: <subject>
+Status: <status>
+<output or prompt summary>
+
+<If no linked items, omit this section entirely.>
+
 ### Git Instructions
 - Your worktree is based on branch `{parent_branch}`.
 - Create and work on a new branch called `{new_branch}`.
@@ -106,11 +129,12 @@ Branch stack: {branch_stack}
 
 ### Task Protocol
 1. Update your task status to 'in_progress'.
-2. Check card #{card_id} with `get_card` for full context.
+2. Read the project's CLAUDE.md to understand the codebase.
 3. Create branch `{new_branch}` from the current HEAD (which is `{parent_branch}`).
 4. Implement the card's requirements.
-5. Commit, push, and create a PR targeting `{parent_branch}`.
-6. Update your task status to 'completed' with a summary of what was done.
+5. Run the project's test suite and fix any failures.
+6. Commit, push, and create a PR targeting `{parent_branch}`.
+7. Update your task status to 'completed' with a summary of what was done.
 ```
 
 Set `subject` to `Implement card #{card_id}: {card_title}`.
@@ -143,21 +167,26 @@ Use this prompt template for each review task:
 ### Card Description
 {card_description}
 
+### Context
+<Same linked item sections as the implementation prompt — cards, morsels, tasks from step 2.>
+<If no linked items, omit this section entirely.>
+
 ### Chain Context
 This card is #{position} of {total} in an implementation chain: {chain_summary}.
 
 ### Review Instructions
 1. Update your task status to 'in_progress'.
-2. Check out or read the branch `{card_branch}`.
-3. Review the implementation against the card requirements.
+2. Read the project's CLAUDE.md to understand the codebase.
+3. Review the diff against the parent branch: `git diff {parent_branch}...HEAD`
 4. Check for:
    - Correctness: Does the implementation match the card description?
    - Code quality: Clean, readable, well-structured code?
-   - Tests: Are there appropriate tests?
+   - Tests: Are there appropriate tests? Do they pass?
    - No regressions: Does this break anything from the parent branch?
-5. If issues are found, push fix commits to `{card_branch}` or leave PR comments.
-6. Move card #{card_id} to 'done' when the review passes.
-7. Update your task status to 'completed' with a review summary.
+5. If issues are found, fix them directly — commit and push to `{card_branch}`.
+6. Post a review comment on the PR using `gh pr review --comment -b "<your review>"`.
+7. Move card #{card_id} to 'done' when the review passes.
+8. Update your task status to 'completed' with a review summary.
 ```
 
 Set `subject` to `Review card #{card_id}: {card_title}`.
@@ -213,3 +242,5 @@ All tasks use `initiate_ember_task` with these parameters:
 | `target_branch` | parent branch name | card's branch name |
 | `on_complete` | not set | set on last review only |
 | `project` | from args (if provided) | from args (if provided) |
+
+$ARGUMENTS
