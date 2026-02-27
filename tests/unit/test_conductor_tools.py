@@ -30,6 +30,28 @@ def _make_conductor_tools(mailbox=None, registry=None, **kwargs):
     )
 
 
+def _mock_ember_client_patcher(mp, mock_execute=None):
+    """Patch EmberClient with a mock that delegates to mock_execute."""
+    from clade.mcp.tools import conductor_tools
+
+    if mock_execute is None:
+        mock_execute = AsyncMock(
+            return_value={"session_name": "task-oppy-test-123", "message": "ok"}
+        )
+
+    class MockEmberClient:
+        def __init__(self, url, key, verify_ssl=True):
+            self.base_url = url
+            self.api_key = key
+            self.verify_ssl = verify_ssl
+
+        async def execute_task(self, **kwargs):
+            return await mock_execute(**kwargs)
+
+    mp.setattr(conductor_tools, "EmberClient", MockEmberClient)
+    return mock_execute
+
+
 class TestDelegateTask:
     @pytest.mark.asyncio
     async def test_not_configured(self):
@@ -51,24 +73,7 @@ class TestDelegateTask:
         mock_mailbox.update_task.return_value = {"id": 7, "status": "launched"}
 
         with pytest.MonkeyPatch.context() as mp:
-            from clade.mcp.tools import conductor_tools
-
-            original_ember_init = conductor_tools.EmberClient.__init__
-            mock_execute = AsyncMock(
-                return_value={"session_name": "task-oppy-test-123", "message": "ok"}
-            )
-
-            class MockEmberClient:
-                def __init__(self, url, key, verify_ssl=True):
-                    self.base_url = url
-                    self.api_key = key
-                    self.verify_ssl = verify_ssl
-
-                async def execute_task(self, **kwargs):
-                    return await mock_execute(**kwargs)
-
-            mp.setattr(conductor_tools, "EmberClient", MockEmberClient)
-
+            _mock_ember_client_patcher(mp)
             tools = _make_conductor_tools(mock_mailbox)
             result = await tools["delegate_task"](
                 "oppy", "Review the code", subject="Code review"
@@ -150,64 +155,32 @@ class TestDelegateTask:
         assert "no Ember configured" in result
 
     @pytest.mark.asyncio
-    async def test_auto_parent_from_env(self):
+    async def test_trigger_env_ignored_by_delegate_task(self):
+        """delegate_task no longer reads TRIGGER_TASK_ID — that's delegate_child_task's job."""
         mock_mailbox = AsyncMock()
         mock_mailbox.create_task.return_value = {"id": 20}
         mock_mailbox.update_task.return_value = {"id": 20, "status": "launched"}
 
         with pytest.MonkeyPatch.context() as mp:
-            from clade.mcp.tools import conductor_tools
-
             mp.setenv("TRIGGER_TASK_ID", "42")
-
-            mock_execute = AsyncMock(
-                return_value={"session_name": "task-oppy-test-abc", "message": "ok"}
-            )
-
-            class MockEmberClient:
-                def __init__(self, url, key, verify_ssl=True):
-                    self.base_url = url
-                    self.api_key = key
-                    self.verify_ssl = verify_ssl
-
-                async def execute_task(self, **kwargs):
-                    return await mock_execute(**kwargs)
-
-            mp.setattr(conductor_tools, "EmberClient", MockEmberClient)
+            _mock_ember_client_patcher(mp)
 
             tools = _make_conductor_tools(mock_mailbox)
             result = await tools["delegate_task"]("oppy", "Do stuff")
 
         assert "Task #20" in result
-        # Verify parent_task_id was passed through to create_task
         call_kwargs = mock_mailbox.create_task.call_args
-        assert call_kwargs.kwargs["parent_task_id"] == 42
+        # delegate_task should NOT auto-link from TRIGGER_TASK_ID
+        assert call_kwargs.kwargs["parent_task_id"] is None
 
     @pytest.mark.asyncio
-    async def test_explicit_parent_overrides_env(self):
+    async def test_explicit_parent(self):
         mock_mailbox = AsyncMock()
         mock_mailbox.create_task.return_value = {"id": 21}
         mock_mailbox.update_task.return_value = {"id": 21, "status": "launched"}
 
         with pytest.MonkeyPatch.context() as mp:
-            from clade.mcp.tools import conductor_tools
-
-            mp.setenv("TRIGGER_TASK_ID", "42")
-
-            mock_execute = AsyncMock(
-                return_value={"session_name": "task-oppy-test-def", "message": "ok"}
-            )
-
-            class MockEmberClient:
-                def __init__(self, url, key, verify_ssl=True):
-                    self.base_url = url
-                    self.api_key = key
-                    self.verify_ssl = verify_ssl
-
-                async def execute_task(self, **kwargs):
-                    return await mock_execute(**kwargs)
-
-            mp.setattr(conductor_tools, "EmberClient", MockEmberClient)
+            _mock_ember_client_patcher(mp)
 
             tools = _make_conductor_tools(mock_mailbox)
             result = await tools["delegate_task"](
@@ -216,75 +189,295 @@ class TestDelegateTask:
 
         assert "Task #21" in result
         call_kwargs = mock_mailbox.create_task.call_args
-        # Explicit parent_task_id=99 should win over env TRIGGER_TASK_ID=42
         assert call_kwargs.kwargs["parent_task_id"] == 99
 
-    @pytest.mark.asyncio
-    async def test_invalid_trigger_id_ignored(self):
-        mock_mailbox = AsyncMock()
-        mock_mailbox.create_task.return_value = {"id": 22}
-        mock_mailbox.update_task.return_value = {"id": 22, "status": "launched"}
 
-        with pytest.MonkeyPatch.context() as mp:
-            from clade.mcp.tools import conductor_tools
-
-            mp.setenv("TRIGGER_TASK_ID", "abc")
-
-            mock_execute = AsyncMock(
-                return_value={"session_name": "task-oppy-test-ghi", "message": "ok"}
-            )
-
-            class MockEmberClient:
-                def __init__(self, url, key, verify_ssl=True):
-                    self.base_url = url
-                    self.api_key = key
-                    self.verify_ssl = verify_ssl
-
-                async def execute_task(self, **kwargs):
-                    return await mock_execute(**kwargs)
-
-            mp.setattr(conductor_tools, "EmberClient", MockEmberClient)
-
-            tools = _make_conductor_tools(mock_mailbox)
-            result = await tools["delegate_task"]("oppy", "Do stuff")
-
-        assert "Task #22" in result
-        call_kwargs = mock_mailbox.create_task.call_args
-        # Invalid env value should result in parent_task_id=None
-        assert call_kwargs.kwargs["parent_task_id"] is None
+class TestDelegateChildTask:
+    """Tests for the new delegate_child_task tool."""
 
     @pytest.mark.asyncio
-    async def test_no_trigger_env(self):
+    async def test_not_configured(self):
+        tools = _make_conductor_tools(None)
+        result = await tools["delegate_child_task"]("oppy", "Do stuff")
+        assert "not configured" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_unknown_worker(self):
+        mock_client = AsyncMock()
+        tools = _make_conductor_tools(mock_client)
+        result = await tools["delegate_child_task"]("unknown", "Do stuff")
+        assert "Unknown worker" in result
+
+    @pytest.mark.asyncio
+    async def test_requires_parent_error(self):
+        """Should error if no parent_task_ids and no TRIGGER_TASK_ID."""
         mock_mailbox = AsyncMock()
-        mock_mailbox.create_task.return_value = {"id": 23}
-        mock_mailbox.update_task.return_value = {"id": 23, "status": "launched"}
-
         with pytest.MonkeyPatch.context() as mp:
-            from clade.mcp.tools import conductor_tools
-
             mp.delenv("TRIGGER_TASK_ID", raising=False)
+            tools = _make_conductor_tools(mock_mailbox)
+            result = await tools["delegate_child_task"]("oppy", "Do stuff")
+        assert "requires a parent" in result.lower()
 
-            mock_execute = AsyncMock(
-                return_value={"session_name": "task-oppy-test-jkl", "message": "ok"}
-            )
+    @pytest.mark.asyncio
+    async def test_auto_parent_from_trigger_env(self):
+        """Should auto-link parent from TRIGGER_TASK_ID when no explicit parents."""
+        mock_mailbox = AsyncMock()
+        mock_mailbox.create_task.return_value = {"id": 30}
+        mock_mailbox.update_task.return_value = {"id": 30, "status": "launched"}
+        mock_mailbox.get_task.return_value = {
+            "id": 42,
+            "subject": "Parent task",
+            "status": "completed",
+            "output": "All done",
+            "depth": 0,
+            "root_task_id": 42,
+            "project": "clade",
+            "linked_cards": [{"id": 60, "title": "Test card"}],
+            "metadata": None,
+        }
 
-            class MockEmberClient:
-                def __init__(self, url, key, verify_ssl=True):
-                    self.base_url = url
-                    self.api_key = key
-                    self.verify_ssl = verify_ssl
-
-                async def execute_task(self, **kwargs):
-                    return await mock_execute(**kwargs)
-
-            mp.setattr(conductor_tools, "EmberClient", MockEmberClient)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("TRIGGER_TASK_ID", "42")
+            _mock_ember_client_patcher(mp)
 
             tools = _make_conductor_tools(mock_mailbox)
-            result = await tools["delegate_task"]("oppy", "Do stuff")
+            result = await tools["delegate_child_task"]("oppy", "Follow up")
 
-        assert "Task #23" in result
+        assert "Task #30" in result
         call_kwargs = mock_mailbox.create_task.call_args
-        assert call_kwargs.kwargs["parent_task_id"] is None
+        assert call_kwargs.kwargs["parent_task_ids"] == [42]
+
+    @pytest.mark.asyncio
+    async def test_explicit_parents(self):
+        """Should use explicitly provided parent_task_ids."""
+        mock_mailbox = AsyncMock()
+        mock_mailbox.create_task.return_value = {"id": 31}
+        mock_mailbox.update_task.return_value = {"id": 31, "status": "launched"}
+        mock_mailbox.get_task.return_value = {
+            "id": 10,
+            "subject": "Parent",
+            "status": "completed",
+            "output": "Done",
+            "depth": 1,
+            "root_task_id": 5,
+            "project": "clade",
+            "linked_cards": [],
+            "metadata": None,
+        }
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("TRIGGER_TASK_ID", "99")  # Should be ignored
+            _mock_ember_client_patcher(mp)
+
+            tools = _make_conductor_tools(mock_mailbox)
+            result = await tools["delegate_child_task"](
+                "oppy", "Follow up", parent_task_ids=[10]
+            )
+
+        assert "Task #31" in result
+        call_kwargs = mock_mailbox.create_task.call_args
+        assert call_kwargs.kwargs["parent_task_ids"] == [10]
+
+    @pytest.mark.asyncio
+    async def test_depth_guard(self):
+        """Should block tasks that exceed max_depth."""
+        mock_mailbox = AsyncMock()
+        # Parent at depth 2, root has max_depth=2
+        mock_mailbox.get_task.side_effect = [
+            # First call: parent task
+            {
+                "id": 50,
+                "subject": "Deep task",
+                "status": "completed",
+                "output": "Done",
+                "depth": 2,
+                "root_task_id": 40,
+                "project": "clade",
+                "linked_cards": [],
+                "metadata": None,
+            },
+            # Second call: root task
+            {
+                "id": 40,
+                "subject": "Root",
+                "status": "completed",
+                "output": "",
+                "depth": 0,
+                "root_task_id": 40,
+                "project": "clade",
+                "linked_cards": [],
+                "metadata": {"max_depth": 2},
+            },
+        ]
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv("TRIGGER_TASK_ID", raising=False)
+            tools = _make_conductor_tools(mock_mailbox)
+            result = await tools["delegate_child_task"](
+                "oppy", "Too deep", parent_task_ids=[50]
+            )
+
+        assert "Depth guard" in result
+        assert "max_depth=2" in result
+
+    @pytest.mark.asyncio
+    async def test_auto_inherit_card_id(self):
+        """Should inherit card_id from primary parent's linked cards."""
+        mock_mailbox = AsyncMock()
+        mock_mailbox.create_task.return_value = {"id": 32}
+        mock_mailbox.update_task.return_value = {"id": 32, "status": "launched"}
+        mock_mailbox.get_task.return_value = {
+            "id": 10,
+            "subject": "Parent",
+            "status": "completed",
+            "output": "Done",
+            "depth": 0,
+            "root_task_id": 10,
+            "project": "clade",
+            "linked_cards": [{"id": 60, "title": "Test card"}],
+            "metadata": None,
+        }
+        mock_mailbox.add_card_link.return_value = {}
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv("TRIGGER_TASK_ID", raising=False)
+            _mock_ember_client_patcher(mp)
+
+            tools = _make_conductor_tools(mock_mailbox)
+            result = await tools["delegate_child_task"](
+                "oppy", "Follow up", parent_task_ids=[10]
+            )
+
+        assert "Task #32" in result
+        # Should have linked to inherited card
+        mock_mailbox.add_card_link.assert_called_once_with(60, "task", "32")
+
+    @pytest.mark.asyncio
+    async def test_auto_inherit_project(self):
+        """Should inherit project from primary parent."""
+        mock_mailbox = AsyncMock()
+        mock_mailbox.create_task.return_value = {"id": 33}
+        mock_mailbox.update_task.return_value = {"id": 33, "status": "launched"}
+        mock_mailbox.get_task.return_value = {
+            "id": 10,
+            "subject": "Parent",
+            "status": "completed",
+            "output": "Done",
+            "depth": 0,
+            "root_task_id": 10,
+            "project": "omtra",
+            "linked_cards": [],
+            "metadata": None,
+        }
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv("TRIGGER_TASK_ID", raising=False)
+            _mock_ember_client_patcher(mp)
+
+            tools = _make_conductor_tools(mock_mailbox)
+            result = await tools["delegate_child_task"](
+                "oppy", "Follow up", parent_task_ids=[10]
+            )
+
+        assert "Task #33" in result
+        call_kwargs = mock_mailbox.create_task.call_args
+        assert call_kwargs.kwargs["project"] == "omtra"
+
+    @pytest.mark.asyncio
+    async def test_multi_parent_context_injection(self):
+        """Should prepend parent summaries into prompt for multi-parent joins."""
+        mock_mailbox = AsyncMock()
+        mock_mailbox.create_task.return_value = {"id": 34}
+        mock_mailbox.update_task.return_value = {"id": 34, "status": "launched"}
+        mock_mailbox.get_task.side_effect = [
+            # Parent 1
+            {
+                "id": 10,
+                "subject": "Research A",
+                "status": "completed",
+                "output": "Found approach A",
+                "depth": 1,
+                "root_task_id": 5,
+                "project": "clade",
+                "linked_cards": [],
+                "metadata": None,
+            },
+            # Parent 2
+            {
+                "id": 11,
+                "subject": "Research B",
+                "status": "completed",
+                "output": "Found approach B",
+                "depth": 1,
+                "root_task_id": 5,
+                "project": "clade",
+                "linked_cards": [],
+                "metadata": None,
+            },
+            # Root task (for depth guard)
+            {
+                "id": 5,
+                "subject": "Root",
+                "status": "completed",
+                "output": "",
+                "depth": 0,
+                "root_task_id": 5,
+                "metadata": None,
+            },
+        ]
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv("TRIGGER_TASK_ID", raising=False)
+            _mock_ember_client_patcher(mp)
+
+            tools = _make_conductor_tools(mock_mailbox)
+            result = await tools["delegate_child_task"](
+                "oppy", "Synthesize findings",
+                parent_task_ids=[10, 11],
+            )
+
+        assert "Task #34" in result
+        # The prompt should include parent context
+        call_kwargs = mock_mailbox.create_task.call_args
+        augmented_prompt = call_kwargs.kwargs["prompt"]
+        assert "Parent #10" in augmented_prompt
+        assert "Research A" in augmented_prompt
+        assert "Parent #11" in augmented_prompt
+        assert "Research B" in augmented_prompt
+        assert "Synthesize findings" in augmented_prompt
+
+    @pytest.mark.asyncio
+    async def test_invalid_trigger_env(self):
+        """Invalid TRIGGER_TASK_ID should result in 'requires parent' error."""
+        mock_mailbox = AsyncMock()
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("TRIGGER_TASK_ID", "abc")
+            tools = _make_conductor_tools(mock_mailbox)
+            result = await tools["delegate_child_task"]("oppy", "Do stuff")
+        assert "requires a parent" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_no_ember_configured(self):
+        mock_mailbox = AsyncMock()
+        mock_mailbox.get_task.return_value = {
+            "id": 10,
+            "subject": "Parent",
+            "status": "completed",
+            "output": "",
+            "depth": 0,
+            "root_task_id": 10,
+            "project": None,
+            "linked_cards": [],
+            "metadata": None,
+        }
+        registry = {"oppy": {"working_dir": "~/test"}}
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv("TRIGGER_TASK_ID", raising=False)
+            tools = _make_conductor_tools(mock_mailbox, registry=registry)
+            result = await tools["delegate_child_task"](
+                "oppy", "Do stuff", parent_task_ids=[10]
+            )
+        assert "no Ember configured" in result
 
 
 class TestCheckWorkerHealth:

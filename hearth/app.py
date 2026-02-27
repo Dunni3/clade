@@ -419,6 +419,7 @@ async def create_task(
             host=req.host,
             working_dir=req.working_dir,
             parent_task_id=req.parent_task_id,
+            parent_task_ids=req.parent_task_ids,
             metadata=req.metadata,
             on_complete=req.on_complete,
             blocked_by_task_id=req.blocked_by_task_id,

@@ -92,6 +92,7 @@ export interface TaskDetail extends TaskSummary {
   output: string | null;
   metadata: Record<string, unknown> | null;
   on_complete: string | null;
+  parent_task_ids?: number[];
   children: TaskSummary[];
   blocked_tasks: TaskSummary[];
   messages: FeedMessage[];
@@ -149,6 +150,7 @@ export interface TreeNode {
   started_at: string | null;
   completed_at: string | null;
   parent_task_id: number | null;
+  parent_task_ids?: number[];
   root_task_id: number | null;
   blocked_by_task_id: number | null;
   prompt: string | null;
