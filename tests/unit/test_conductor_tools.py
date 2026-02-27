@@ -174,6 +174,68 @@ class TestDelegateTask:
         assert call_kwargs.kwargs["parent_task_id"] is None
 
     @pytest.mark.asyncio
+    async def test_working_dir_persisted_on_task(self):
+        """delegate_task should resolve working_dir and pass it to create_task."""
+        mock_mailbox = AsyncMock()
+        mock_mailbox.create_task.return_value = {"id": 22}
+        mock_mailbox.update_task.return_value = {"id": 22, "status": "launched"}
+
+        with pytest.MonkeyPatch.context() as mp:
+            _mock_ember_client_patcher(mp)
+            tools = _make_conductor_tools(mock_mailbox)
+            result = await tools["delegate_task"]("oppy", "Do stuff")
+
+        assert "Task #22" in result
+        call_kwargs = mock_mailbox.create_task.call_args
+        assert call_kwargs.kwargs["working_dir"] == "~/projects/test"
+
+    @pytest.mark.asyncio
+    async def test_working_dir_explicit_override(self):
+        """Explicit working_dir should override the registry default."""
+        mock_mailbox = AsyncMock()
+        mock_mailbox.create_task.return_value = {"id": 23}
+        mock_mailbox.update_task.return_value = {"id": 23, "status": "launched"}
+
+        with pytest.MonkeyPatch.context() as mp:
+            _mock_ember_client_patcher(mp)
+            tools = _make_conductor_tools(mock_mailbox)
+            result = await tools["delegate_task"](
+                "oppy", "Do stuff", working_dir="/custom/path"
+            )
+
+        assert "Task #23" in result
+        call_kwargs = mock_mailbox.create_task.call_args
+        assert call_kwargs.kwargs["working_dir"] == "/custom/path"
+
+    @pytest.mark.asyncio
+    async def test_working_dir_from_project_mapping(self):
+        """working_dir should resolve from project mapping when project is set."""
+        mock_mailbox = AsyncMock()
+        mock_mailbox.create_task.return_value = {"id": 24}
+        mock_mailbox.update_task.return_value = {"id": 24, "status": "launched"}
+
+        registry = {
+            "oppy": {
+                "ember_url": "http://100.71.57.52:8100",
+                "ember_api_key": "oppy-key",
+                "hearth_api_key": "oppy-hearth-key",
+                "working_dir": "~/projects/default",
+                "projects": {"omtra": "~/projects/omtra"},
+            },
+        }
+
+        with pytest.MonkeyPatch.context() as mp:
+            _mock_ember_client_patcher(mp)
+            tools = _make_conductor_tools(mock_mailbox, registry=registry)
+            result = await tools["delegate_task"](
+                "oppy", "Do stuff", project="omtra"
+            )
+
+        assert "Task #24" in result
+        call_kwargs = mock_mailbox.create_task.call_args
+        assert call_kwargs.kwargs["working_dir"] == "~/projects/omtra"
+
+    @pytest.mark.asyncio
     async def test_explicit_parent(self):
         mock_mailbox = AsyncMock()
         mock_mailbox.create_task.return_value = {"id": 21}
@@ -455,6 +517,78 @@ class TestDelegateChildTask:
             tools = _make_conductor_tools(mock_mailbox)
             result = await tools["delegate_child_task"]("oppy", "Do stuff")
         assert "requires a parent" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_working_dir_persisted_on_task(self):
+        """delegate_child_task should resolve working_dir and pass it to create_task."""
+        mock_mailbox = AsyncMock()
+        mock_mailbox.create_task.return_value = {"id": 35}
+        mock_mailbox.update_task.return_value = {"id": 35, "status": "launched"}
+        mock_mailbox.get_task.return_value = {
+            "id": 10,
+            "subject": "Parent",
+            "status": "completed",
+            "output": "Done",
+            "depth": 0,
+            "root_task_id": 10,
+            "project": None,
+            "linked_cards": [],
+            "metadata": None,
+        }
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv("TRIGGER_TASK_ID", raising=False)
+            _mock_ember_client_patcher(mp)
+
+            tools = _make_conductor_tools(mock_mailbox)
+            result = await tools["delegate_child_task"](
+                "oppy", "Follow up", parent_task_ids=[10]
+            )
+
+        assert "Task #35" in result
+        call_kwargs = mock_mailbox.create_task.call_args
+        assert call_kwargs.kwargs["working_dir"] == "~/projects/test"
+
+    @pytest.mark.asyncio
+    async def test_working_dir_from_inherited_project(self):
+        """delegate_child_task should resolve working_dir from inherited project mapping."""
+        mock_mailbox = AsyncMock()
+        mock_mailbox.create_task.return_value = {"id": 36}
+        mock_mailbox.update_task.return_value = {"id": 36, "status": "launched"}
+        mock_mailbox.get_task.return_value = {
+            "id": 10,
+            "subject": "Parent",
+            "status": "completed",
+            "output": "Done",
+            "depth": 0,
+            "root_task_id": 10,
+            "project": "omtra",
+            "linked_cards": [],
+            "metadata": None,
+        }
+
+        registry = {
+            "oppy": {
+                "ember_url": "http://100.71.57.52:8100",
+                "ember_api_key": "oppy-key",
+                "hearth_api_key": "oppy-hearth-key",
+                "working_dir": "~/projects/default",
+                "projects": {"omtra": "~/projects/omtra"},
+            },
+        }
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv("TRIGGER_TASK_ID", raising=False)
+            _mock_ember_client_patcher(mp)
+
+            tools = _make_conductor_tools(mock_mailbox, registry=registry)
+            result = await tools["delegate_child_task"](
+                "oppy", "Follow up", parent_task_ids=[10]
+            )
+
+        assert "Task #36" in result
+        call_kwargs = mock_mailbox.create_task.call_args
+        assert call_kwargs.kwargs["working_dir"] == "~/projects/omtra"
 
     @pytest.mark.asyncio
     async def test_no_ember_configured(self):

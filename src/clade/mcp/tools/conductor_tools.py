@@ -186,6 +186,15 @@ def create_conductor_tools(
         if ember is None:
             return f"Worker '{brother}' has no Ember configured."
 
+        # Resolve working_dir early so it's persisted on the task record.
+        # Resolution order: explicit override > project mapping > worker default
+        wd = working_dir
+        if wd is None and project:
+            project_dirs = worker.get("projects") or {}
+            wd = project_dirs.get(project)
+        if wd is None:
+            wd = worker.get("working_dir")
+
         # Create task in Hearth
         try:
             task_result = await mailbox.create_task(
@@ -193,6 +202,7 @@ def create_conductor_tools(
                 prompt=prompt,
                 subject=subject,
                 parent_task_id=parent_task_id,
+                working_dir=wd,
                 metadata=metadata,
                 on_complete=on_complete,
                 blocked_by_task_id=blocked_by_task_id,
@@ -378,6 +388,15 @@ def create_conductor_tools(
             context_block = "\n".join(context_lines)
             augmented_prompt = f"{context_block}\n---\n\n{prompt}"
 
+        # Resolve working_dir early so it's persisted on the task record.
+        # Resolution order: explicit override > project mapping > worker default
+        wd = working_dir
+        if wd is None and inherited_project:
+            project_dirs = worker.get("projects") or {}
+            wd = project_dirs.get(inherited_project)
+        if wd is None:
+            wd = worker.get("working_dir")
+
         # Create task in Hearth with multi-parent support
         try:
             task_result = await mailbox.create_task(
@@ -385,6 +404,7 @@ def create_conductor_tools(
                 prompt=augmented_prompt,
                 subject=subject,
                 parent_task_ids=resolved_parent_ids,
+                working_dir=wd,
                 on_complete=on_complete,
                 blocked_by_task_id=blocked_by_task_id,
                 max_turns=max_turns,

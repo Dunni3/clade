@@ -2087,6 +2087,55 @@ class TestAPIRetryTask:
         )
         assert resp.status_code == 403
 
+    @pytest.mark.asyncio
+    async def test_retry_inherits_working_dir_and_project(self, client):
+        """Retry inherits working_dir and project from the original task."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={
+                "assignee": "oppy",
+                "prompt": "Do stuff",
+                "subject": "Job with wd",
+                "working_dir": "/home/ian/.local/share/clade",
+                "project": "clade",
+            },
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "failed", "output": "broke"},
+            headers=OPPY_HEADERS,
+        )
+
+        await mailbox_db.upsert_ember("oppy", "http://fake-ember:8100")
+        await mailbox_db.insert_api_key("oppy", "oppy-ember-key")
+
+        with patch("hearth.app.httpx.AsyncClient") as MockClient:
+            mock_instance = AsyncMock()
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.return_value = None
+            mock_resp.json.return_value = {"status": "accepted"}
+            mock_instance.post.return_value = mock_resp
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_instance
+
+            resp = await client.post(
+                f"/api/v1/tasks/{task_id}/retry",
+                headers=DOOT_HEADERS,
+            )
+
+            # Verify the Ember was called with the correct working_dir
+            call_args = mock_instance.post.call_args
+            ember_payload = call_args.kwargs.get("json") or call_args[1].get("json")
+            assert ember_payload["working_dir"] == "/home/ian/.local/share/clade"
+
+        assert resp.status_code == 200
+        child = resp.json()
+        assert child["working_dir"] == "/home/ian/.local/share/clade"
+        assert child["project"] == "clade"
+
 
 # ---------------------------------------------------------------------------
 # PATCH parent_task_id — API endpoint
