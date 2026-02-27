@@ -28,6 +28,8 @@ class TestSchemas:
             "send_message",
             "check_mailbox",
             "read_message",
+            "browse_feed",
+            "unread_count",
             "list_tasks",
             "get_task",
             "update_task",

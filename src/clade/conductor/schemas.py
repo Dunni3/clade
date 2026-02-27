@@ -127,6 +127,28 @@ TOOLS: list[dict] = [
             "required": ["message_id"],
         },
     },
+    {
+        "name": "browse_feed",
+        "description": "Browse the shared message feed. Shows all brother-to-brother messages.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Maximum number of messages to return."},
+                "offset": {"type": "integer", "description": "Number of messages to skip (for pagination)."},
+                "sender": {"type": "string", "description": "Filter by sender name."},
+                "recipient": {"type": "string", "description": "Filter by recipient name."},
+                "query": {"type": "string", "description": "Search keyword in subject and body."},
+            },
+        },
+    },
+    {
+        "name": "unread_count",
+        "description": "Get the number of unread messages in the mailbox.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
     # --- Tasks ---
     {
         "name": "list_tasks",

@@ -104,6 +104,63 @@ class TestReadMessage:
         assert "Task finished." in result
 
 
+class TestBrowseFeed:
+    @pytest.mark.asyncio
+    async def test_no_messages(self):
+        mb = AsyncMock()
+        mb.browse_feed.return_value = []
+        executor = _make_executor(mb)
+        result = await executor.execute("browse_feed", {})
+        assert "No messages in feed" in result
+
+    @pytest.mark.asyncio
+    async def test_with_messages(self):
+        mb = AsyncMock()
+        mb.browse_feed.return_value = [
+            {
+                "id": 15,
+                "sender": "oppy",
+                "recipients": ["kamaji"],
+                "subject": "Update",
+                "body": "All done",
+                "created_at": "2026-02-26T12:00:00Z",
+                "read_by": [{"brother": "kamaji"}],
+            }
+        ]
+        executor = _make_executor(mb)
+        result = await executor.execute("browse_feed", {"limit": 10, "sender": "oppy"})
+        assert "#15" in result
+        assert "oppy" in result
+        assert "Read by: kamaji" in result
+
+
+class TestUnreadCount:
+    @pytest.mark.asyncio
+    async def test_no_unread(self):
+        mb = AsyncMock()
+        mb.unread_count.return_value = 0
+        executor = _make_executor(mb)
+        result = await executor.execute("unread_count", {})
+        assert "No unread messages" in result
+
+    @pytest.mark.asyncio
+    async def test_with_unread(self):
+        mb = AsyncMock()
+        mb.unread_count.return_value = 3
+        executor = _make_executor(mb)
+        result = await executor.execute("unread_count", {})
+        assert "3 unread messages" in result
+
+    @pytest.mark.asyncio
+    async def test_singular(self):
+        mb = AsyncMock()
+        mb.unread_count.return_value = 1
+        executor = _make_executor(mb)
+        result = await executor.execute("unread_count", {})
+        assert "1 unread message." in result
+        assert "messages" not in result
+
+
 class TestListTasks:
     @pytest.mark.asyncio
     async def test_no_tasks(self):

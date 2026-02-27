@@ -296,6 +296,38 @@ class ToolExecutor:
         lines.append(f"\n{msg['body']}")
         return "\n".join(lines)
 
+    async def _tool_browse_feed(self, inp: dict) -> str:
+        messages = await self.mailbox.browse_feed(
+            sender=inp.get("sender"),
+            recipient=inp.get("recipient"),
+            query=inp.get("query"),
+            limit=inp.get("limit", 20),
+            offset=inp.get("offset", 0),
+        )
+        if not messages:
+            return "No messages in feed."
+        lines = []
+        for msg in messages:
+            recipients = ", ".join(msg["recipients"])
+            subj = msg["subject"] or "(no subject)"
+            body_preview = msg["body"][:100] + ("..." if len(msg["body"]) > 100 else "")
+            read_names = ", ".join(r["brother"] for r in msg.get("read_by", []))
+            entry = (
+                f"#{msg['id']} from {msg['sender']} to {recipients}: {subj}\n"
+                f"  {body_preview}\n"
+                f"  ({format_timestamp(msg['created_at'])})"
+            )
+            if read_names:
+                entry += f"\n  Read by: {read_names}"
+            lines.append(entry)
+        return "\n\n".join(lines)
+
+    async def _tool_unread_count(self, inp: dict) -> str:
+        count = await self.mailbox.unread_count()
+        if count == 0:
+            return "No unread messages."
+        return f"{count} unread message{'s' if count != 1 else ''}."
+
     # ---- Tasks ----
 
     async def _tool_list_tasks(self, inp: dict) -> str:
