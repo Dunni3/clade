@@ -80,5 +80,4 @@ claude -p "$(cat {{ prompt_path }})" --dangerously-skip-permissions{{ ' --max-tu
 EXIT_CODE=$?
 echo "$(date -Iseconds) claude exited with code $EXIT_CODE" >> "$LOGFILE"
 rm -f "{{ prompt_path }}" "$0"
-[ "$EXIT_CODE" -eq 0 ] && rm -f "$LOGFILE"
 exit $EXIT_CODE

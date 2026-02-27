@@ -168,7 +168,7 @@ An **Ember** is a lightweight HTTP server running on a worker brother's machine 
 
 **In-memory state:** `AspenRegistry` tracks all running aspens (concurrent Claude Code sessions). No DB — the Hearth is source of truth. `reap()` sweeps dead tmux sessions automatically.
 
-**Deployment:** Automated via `clade setup-ember <name>` or `clade add-brother --ember`. The CLI detects the remote user, `clade-ember` binary path, clade package directory, and Tailscale IP, then templates and deploys a systemd service. Falls back to printing manual instructions if sudo is unavailable. After a successful health check, the Ember URL is **auto-registered** with the Hearth DB via `PUT /api/v1/embers/{name}` (best-effort — failure is non-fatal). Reference service file: `deploy/ember.service`. Config fields `ember_host` and `ember_port` are stored in `BrotherEntry` in `clade.yaml`.
+**Deployment:** Automated via `clade setup-ember <name>` or `clade add-brother --ember`. The CLI detects the remote user, `clade-ember` binary path, clade package directory, and Tailscale IP, then templates and deploys a systemd service. Falls back to printing manual instructions if sudo is unavailable. After a successful health check, the Ember URL is **auto-registered** with the Hearth DB via `PUT /api/v1/embers/{name}` (best-effort — failure is non-fatal). The service file is generated dynamically by the CLI (see `ember_setup.py:SERVICE_TEMPLATE`). Config fields `ember_host` and `ember_port` are stored in `BrotherEntry` in `clade.yaml`.
 
 ## Conductor — Workflow Orchestration
 
@@ -248,7 +248,7 @@ ssh <server-ssh> sudo systemctl start conductor-tick.service  # manual trigger
 - **Card auto-sync:** When a task moves to `in_progress`, linked kanban cards in `backlog`/`todo` auto-move to `in_progress` with updated assignee.
 - **Event-driven conductor ticks:** `CONDUCTOR_TICK_CMD` env var. When set, the Hearth fires the conductor tick (fire-and-forget) on: **any** task completion/failure (not kills), messages sent to the conductor (not from itself), Task ID is passed as a positional arg; message ID is passed as `--message <id>`.
 
-See also [MAILBOX_SETUP.md](MAILBOX_SETUP.md) for deployment guide and [WEBAPP.md](WEBAPP.md) for frontend details.
+See also [HEARTH_API.md](HEARTH_API.md) for API reference and [WEBAPP.md](WEBAPP.md) for frontend details.
 
 ## Identity System
 

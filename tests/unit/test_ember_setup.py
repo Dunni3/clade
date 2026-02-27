@@ -8,6 +8,7 @@ from clade.cli.ember_setup import (
     SERVICE_TEMPLATE,
     detect_clade_dir,
     detect_clade_ember_path,
+    detect_clade_entry_point,
     detect_remote_user,
     detect_systemctl_path,
     detect_tailscale_ip,
@@ -50,6 +51,44 @@ class TestDetectCladeEmberPath:
     def test_failure(self, mock_run):
         mock_run.return_value = SSHResult(success=False, message="error")
         assert detect_clade_ember_path("ian@masuda") is None
+
+
+class TestDetectCladeEntryPointSearchOrder:
+    """Test that detect_clade_entry_point uses conditional search order."""
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_clade_ember_prefers_venv(self, mock_run):
+        """For clade-ember, ember-venv should appear first in fallback search."""
+        # First call (which) returns empty — forces fallback search
+        # Second call (search script) returns the venv path
+        mock_run.side_effect = [
+            SSHResult(success=True, stdout=""),
+            SSHResult(success=True, stdout="/home/ian/.local/ember-venv/bin/clade-ember\n"),
+        ]
+        result = detect_clade_entry_point("ian@masuda", "clade-ember")
+        assert result == "/home/ian/.local/ember-venv/bin/clade-ember"
+        # Verify the search script has ember-venv before conda paths
+        search_call = mock_run.call_args_list[1]
+        script = search_call[0][1]
+        venv_pos = script.find("ember-venv")
+        conda_pos = script.find("mambaforge")
+        assert venv_pos < conda_pos, "ember-venv should come before conda paths for clade-ember"
+
+    @patch("clade.cli.ember_setup.run_remote")
+    def test_clade_worker_prefers_conda(self, mock_run):
+        """For clade-worker, conda paths should appear first in fallback search."""
+        mock_run.side_effect = [
+            SSHResult(success=True, stdout=""),
+            SSHResult(success=True, stdout="/home/ian/miniforge3/envs/clade/bin/clade-worker\n"),
+        ]
+        result = detect_clade_entry_point("ian@masuda", "clade-worker")
+        assert result == "/home/ian/miniforge3/envs/clade/bin/clade-worker"
+        # Verify the search script has conda before ember-venv
+        search_call = mock_run.call_args_list[1]
+        script = search_call[0][1]
+        venv_pos = script.find("ember-venv")
+        conda_pos = script.find("mambaforge")
+        assert conda_pos < venv_pos, "conda paths should come before ember-venv for clade-worker"
 
 
 class TestDetectCladeDir:
@@ -339,6 +378,32 @@ class TestSetupEmberRegistration:
             assert ember_host == "100.1.2.3"
             assert port == 8100
             mock_client_cls.assert_not_called()
+
+    def test_venv_ember_uses_home_as_working_directory(self):
+        """When ember binary is in ember-venv, should use $HOME as clade_dir."""
+        patches_list = list(_detection_patches())
+        # Override detect_clade_ember_path to return ember-venv path
+        patches_list[1] = patch(
+            "clade.cli.ember_setup.detect_clade_ember_path",
+            return_value="/home/testuser/.local/ember-venv/bin/clade-ember",
+        )
+        with patches_list[0], patches_list[1], patches_list[2], patches_list[3], patches_list[4], patches_list[5]:
+            # detect_clade_dir should NOT be called when using ember-venv
+            with patch("clade.cli.ember_setup.detect_clade_dir") as mock_detect_dir:
+                mock_client_cls = MagicMock()
+                with patch("clade.communication.mailbox_client.MailboxClient", mock_client_cls):
+                    ember_host, port = setup_ember(
+                        ssh_host="masuda",
+                        name="oppy",
+                        api_key="oppy-key",
+                        port=8100,
+                        working_dir="/home/testuser/projects",
+                        server_url="https://hearth.example.com",
+                        hearth_api_key="doot-key",
+                    )
+                assert ember_host == "100.1.2.3"
+                # detect_clade_dir should NOT have been called — skipped for venv
+                mock_detect_dir.assert_not_called()
 
     def test_no_hearth_key_skips_registration(self):
         """If hearth_api_key is None, no registration attempt should be made."""

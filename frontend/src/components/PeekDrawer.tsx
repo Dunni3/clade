@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getMorsel, getTask, getTree, getCard, getMessage } from '../api/mailbox';
 import Linkify from './Linkify';
+import Markdown from './Markdown';
 import type { MorselSummary, TaskDetail, TreeNode, CardSummary, FeedMessage } from '../types/mailbox';
 import { parseGitHubPrLink } from '../utils/links';
 
@@ -86,7 +87,7 @@ function MorselPeek({ id }: { id: number }) {
           ))}
         </div>
       )}
-      <p className="text-sm text-gray-300 whitespace-pre-wrap"><Linkify>{morsel.body}</Linkify></p>
+      <Markdown className="text-sm text-gray-300">{morsel.body}</Markdown>
       {morsel.links.length > 0 && (
         <div className="border-t border-gray-800 pt-2">
           <div className="text-xs text-gray-500 mb-1">Linked objects</div>

@@ -157,6 +157,67 @@ class TestBootstrapVerifyWarnings:
         assert "NOT FOUND" in result.output
 
 
+class TestBootstrapEmberOnly:
+    @patch("clade.cli.deploy_utils.deploy_clade_to_ember_venv")
+    @patch("clade.cli.bootstrap_cmd.run_remote")
+    @patch("clade.cli.bootstrap_cmd.test_ssh")
+    def test_ember_only_success(self, mock_ssh, mock_run_remote, mock_deploy_venv):
+        mock_ssh.return_value = SSHResult(success=True)
+
+        venv_output = "CREATING_VENV:python3.11\nVENV_CREATED\nPIP:~/.local/ember-venv/bin/pip\n"
+        verify_output = (
+            "CLADE_EMBER:/home/ian/.local/ember-venv/bin/clade-ember\n"
+            "CLAUDE:yes\nTMUX:yes\nGIT:yes\nVERIFY_OK\n"
+        )
+
+        mock_run_remote.side_effect = [
+            SSHResult(success=True, stdout=venv_output),
+            SSHResult(success=True, stdout=verify_output),
+        ]
+        mock_deploy_venv.return_value = SSHResult(success=True, stdout="DEPLOY_OK\n")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["bootstrap", "--ember-only", "ian@masuda"])
+        assert result.exit_code == 0
+        assert "Bootstrap complete" in result.output
+        assert "ember venv" in result.output.lower()
+        mock_deploy_venv.assert_called_once()
+
+    @patch("clade.cli.bootstrap_cmd.run_remote")
+    @patch("clade.cli.bootstrap_cmd.test_ssh")
+    def test_ember_only_no_python(self, mock_ssh, mock_run_remote):
+        mock_ssh.return_value = SSHResult(success=True)
+
+        mock_run_remote.return_value = SSHResult(success=True, stdout="NO_PYTHON\n")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["bootstrap", "--ember-only", "ian@masuda"])
+        assert result.exit_code != 0
+
+    @patch("clade.cli.deploy_utils.deploy_clade_to_ember_venv")
+    @patch("clade.cli.bootstrap_cmd.run_remote")
+    @patch("clade.cli.bootstrap_cmd.test_ssh")
+    def test_ember_only_existing_venv(self, mock_ssh, mock_run_remote, mock_deploy_venv):
+        mock_ssh.return_value = SSHResult(success=True)
+
+        venv_output = "VENV_EXISTS\nPIP:~/.local/ember-venv/bin/pip\n"
+        verify_output = (
+            "CLADE_EMBER:/home/ian/.local/ember-venv/bin/clade-ember\n"
+            "CLAUDE:yes\nTMUX:yes\nGIT:yes\nVERIFY_OK\n"
+        )
+
+        mock_run_remote.side_effect = [
+            SSHResult(success=True, stdout=venv_output),
+            SSHResult(success=True, stdout=verify_output),
+        ]
+        mock_deploy_venv.return_value = SSHResult(success=True, stdout="DEPLOY_OK\n")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["bootstrap", "--ember-only", "ian@masuda"])
+        assert result.exit_code == 0
+        assert "already exists" in result.output
+
+
 class TestBootstrapPipPathPassthrough:
     @patch("clade.cli.deploy_utils.deploy_clade_package")
     @patch("clade.cli.bootstrap_cmd.run_remote")

@@ -362,3 +362,109 @@ cd "$CLADE_DIR"
 echo "DEPLOY_OK"
 """
     return run_remote(ssh_host, install_script, ssh_key=ssh_key, timeout=timeout)
+
+
+def deploy_clade_to_ember_venv(
+    ssh_host: str,
+    ssh_key: str | None = None,
+    venv_path: str = "~/.local/ember-venv",
+    timeout: int = 180,
+) -> SSHResult:
+    """Deploy clade into a dedicated Ember venv via tar pipe + pip install.
+
+    Three-step process:
+    1. Tar local clade project, pipe to temp staging dir on remote.
+    2. Create venv if missing (tries python3.12 down to python3).
+    3. Run pip install ".[server]" from staging dir, then clean up.
+
+    The venv is separate from any dev/conda environment so that feature
+    branch checkouts in the dev repo don't break the running Ember.
+
+    Args:
+        ssh_host: SSH host string.
+        ssh_key: Optional SSH key path.
+        venv_path: Remote venv path (default ~/.local/ember-venv).
+        timeout: Timeout in seconds.
+
+    Returns:
+        SSHResult — check for "DEPLOY_OK" in stdout for success.
+    """
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+
+    if not (project_root / "pyproject.toml").exists():
+        return SSHResult(
+            success=False,
+            message=f"Could not find clade project root (expected pyproject.toml at {project_root})",
+        )
+
+    # Step 1: Transfer files via tar pipe to staging dir
+    excludes = [
+        ".git", "node_modules", "frontend/node_modules", "frontend/dist",
+        "__pycache__", "*.egg-info", ".pytest_cache", "research_notes",
+        ".DS_Store", "docker",
+    ]
+    tar_cmd = ["tar", "-cf", "-", "-C", str(project_root.parent), project_root.name]
+    for pattern in excludes:
+        tar_cmd.insert(1, f"--exclude={pattern}")
+
+    staging_dir = "/tmp/clade-ember-stage"
+    ssh_cmd = _build_ssh_cmd(ssh_host, ssh_key)
+    ssh_cmd.append(
+        f"rm -rf {staging_dir} && mkdir -p {staging_dir} && "
+        f"tar -xf - -C {staging_dir} --strip-components=1"
+    )
+
+    try:
+        tar_proc = subprocess.Popen(
+            tar_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        ssh_proc = subprocess.Popen(
+            ssh_cmd,
+            stdin=tar_proc.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        tar_proc.stdout.close()
+        stdout, stderr = ssh_proc.communicate(timeout=timeout)
+        tar_proc.wait(timeout=5)
+
+        if ssh_proc.returncode != 0:
+            return SSHResult(
+                success=False,
+                stdout=stdout.decode(errors="replace"),
+                stderr=stderr.decode(errors="replace"),
+                message=f"File transfer failed (exit {ssh_proc.returncode})",
+            )
+    except subprocess.TimeoutExpired:
+        for p in [tar_proc, ssh_proc]:
+            try:
+                p.kill()
+            except Exception:
+                pass
+        return SSHResult(success=False, message=f"File transfer timed out after {timeout}s")
+    except Exception as e:
+        return SSHResult(success=False, message=f"File transfer error: {e}")
+
+    # Step 2+3: Create venv if needed, install package
+    install_script = f"""\
+#!/bin/bash
+set -e
+STAGING={staging_dir}
+VENV="$HOME/.local/ember-venv"
+
+if [ ! -x "$VENV/bin/python" ]; then
+    PYBIN=""
+    for py in python3.12 python3.11 python3.10 python3; do
+        command -v "$py" &>/dev/null && PYBIN="$py" && break
+    done
+    [ -z "$PYBIN" ] && echo "ERROR: No python3 found" && exit 1
+    "$PYBIN" -m venv "$VENV" 2>&1 || {{ echo "VENV_FAILED"; echo "Hint: sudo apt install python3-venv"; exit 1; }}
+fi
+
+"$VENV/bin/pip" install --upgrade pip 2>&1 | tail -1
+cd "$STAGING"
+"$VENV/bin/pip" install ".[server]" 2>&1 | tail -5
+rm -rf "$STAGING"
+echo "DEPLOY_OK"
+"""
+    return run_remote(ssh_host, install_script, ssh_key=ssh_key, timeout=timeout)

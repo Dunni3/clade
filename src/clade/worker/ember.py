@@ -6,6 +6,7 @@ launches Claude Code sessions in local tmux sessions.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import time
@@ -13,6 +14,8 @@ from dataclasses import dataclass, field
 
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from .auth import verify_token
 from .runner import (
@@ -199,6 +202,10 @@ async def execute_task(
     )
 
     if not result.success:
+        logger.error(
+            "Task launch failed (task_id=%s, session=%s): %s | stdout=%s | stderr=%s",
+            req.task_id, session_name, result.message, result.stdout, result.stderr,
+        )
         raise HTTPException(
             status_code=500,
             detail={

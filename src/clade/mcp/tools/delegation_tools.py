@@ -119,6 +119,16 @@ def create_delegation_tools(
         if ember is None:
             return f"Brother '{brother}' has no Ember configured."
 
+        # Resolve working_dir early so it's persisted on the task record.
+        # This ensures retries inherit the correct working_dir.
+        # Resolution order: explicit override > project mapping > brother default
+        wd = working_dir
+        if wd is None and project:
+            project_dirs = config.get("projects") or {}
+            wd = project_dirs.get(project)
+        if wd is None:
+            wd = config.get("working_dir")
+
         # Create task in Hearth
         try:
             task_result = await mailbox.create_task(
@@ -126,6 +136,7 @@ def create_delegation_tools(
                 prompt=prompt,
                 subject=subject,
                 parent_task_id=parent_task_id,
+                working_dir=wd,
                 metadata=metadata,
                 on_complete=on_complete,
                 blocked_by_task_id=blocked_by_task_id,
@@ -168,13 +179,6 @@ def create_delegation_tools(
             except Exception:
                 pass  # Non-fatal: proceed with original prompt
 
-        # Resolve working_dir: explicit override > project mapping > brother default
-        wd = working_dir
-        if wd is None and project:
-            project_dirs = config.get("projects") or {}
-            wd = project_dirs.get(project)
-        if wd is None:
-            wd = config.get("working_dir")
         try:
             ember_result = await ember.execute_task(
                 prompt=enriched_prompt,

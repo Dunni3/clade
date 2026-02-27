@@ -16,11 +16,11 @@ Welcome to The Clade documentation! This directory contains comprehensive guides
   - First steps
 
 ### System Setup
-- **[MAILBOX_SETUP.md](MAILBOX_SETUP.md)** - Setting up The Hearth (communication server)
-  - Server architecture
-  - Deployment guide
-  - Management & troubleshooting
-  - API reference
+- **[HEARTH_API.md](HEARTH_API.md)** - Hearth API & operations reference
+  - API endpoint reference
+  - API key management
+  - Server management & troubleshooting
+  - Monitoring & backup
 
 - **[BROTHER_SETUP.md](BROTHER_SETUP.md)** - Configuring Claude Code instances
   - Setup for Doot (local)
@@ -51,12 +51,12 @@ Welcome to The Clade documentation! This directory contains comprehensive guides
 
 ### For First-Time Setup
 1. Start with [QUICKSTART.md](QUICKSTART.md) — `clade init` + `clade add-brother`
-2. If setting up Hearth server: [MAILBOX_SETUP.md](MAILBOX_SETUP.md)
+2. If setting up Hearth server: [HEARTH_API.md](HEARTH_API.md)
 3. For advanced brother config: [BROTHER_SETUP.md](BROTHER_SETUP.md)
 4. For remote task delegation: [TASKS.md](TASKS.md)
 
 ### For Maintenance
-- Managing Hearth server → [MAILBOX_SETUP.md](MAILBOX_SETUP.md)
+- Managing Hearth server → [HEARTH_API.md](HEARTH_API.md)
 - Updating brother configuration → [BROTHER_SETUP.md](BROTHER_SETUP.md)
 - CLI commands and deployment → [operations.md](operations.md)
 
