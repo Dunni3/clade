@@ -177,16 +177,17 @@ This card is #{position} of {total} in an implementation chain: {chain_summary}.
 ### Review Instructions
 1. Update your task status to 'in_progress'.
 2. Read the project's CLAUDE.md to understand the codebase.
-3. Review the diff against the parent branch: `git diff {parent_branch}...HEAD`
-4. Check for:
+3. Fetch latest: `git fetch origin`
+4. Review the diff against the parent branch: `git diff origin/{parent_branch}...HEAD`
+5. Check for:
    - Correctness: Does the implementation match the card description?
    - Code quality: Clean, readable, well-structured code?
    - Tests: Are there appropriate tests? Do they pass?
    - No regressions: Does this break anything from the parent branch?
-5. If issues are found, fix them directly — commit and push to `{card_branch}`.
-6. Post a review comment on the PR using `gh pr review --comment -b "<your review>"`.
-7. Move card #{card_id} to 'done' when the review passes.
-8. Update your task status to 'completed' with a review summary.
+6. If issues are found, fix them directly — commit and push to `{card_branch}`.
+7. Post a review comment on the PR using `gh pr review --comment -b "<your review>"`.
+8. Move card #{card_id} to 'done' when the review passes.
+9. Update your task status to 'completed' with a review summary.
 ```
 
 Set `subject` to `Review card #{card_id}: {card_title}`.
