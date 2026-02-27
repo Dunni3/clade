@@ -407,11 +407,11 @@ def deploy_clade_to_ember_venv(
     for pattern in excludes:
         tar_cmd.insert(1, f"--exclude={pattern}")
 
-    staging_dir = "/tmp/clade-ember-stage-$$"
+    staging_dir = "/tmp/clade-ember-stage"
     ssh_cmd = _build_ssh_cmd(ssh_host, ssh_key)
     ssh_cmd.append(
-        f"STAGING={staging_dir} && mkdir -p $STAGING && "
-        f"tar -xf - -C $STAGING --strip-components=1"
+        f"rm -rf {staging_dir} && mkdir -p {staging_dir} && "
+        f"tar -xf - -C {staging_dir} --strip-components=1"
     )
 
     try:
@@ -449,7 +449,7 @@ def deploy_clade_to_ember_venv(
     install_script = f"""\
 #!/bin/bash
 set -e
-STAGING="{staging_dir}"
+STAGING={staging_dir}
 VENV="$HOME/.local/ember-venv"
 
 if [ ! -x "$VENV/bin/python" ]; then

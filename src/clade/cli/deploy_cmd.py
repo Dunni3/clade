@@ -330,11 +330,8 @@ def ember(ctx: click.Context, name: str, force: bool) -> None:
     # Step 3b: Regenerate systemd service if binary path changed
     if new_ember_path and current_exec and current_exec not in (new_ember_path, "NOSERVICE"):
         click.echo("Regenerating systemd service file...")
-        # Use $HOME as WorkingDirectory for ember-venv installs
-        if "/ember-venv/" in new_ember_path:
-            clade_dir = f"/home/{remote_user}"
-        else:
-            clade_dir = f"/home/{remote_user}"
+        # Use $HOME as WorkingDirectory — the Ember server doesn't need a specific cwd
+        clade_dir = f"/home/{remote_user}"
 
         svc_result = deploy_systemd_service(
             ssh_host=ssh_host,
