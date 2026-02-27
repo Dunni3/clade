@@ -52,22 +52,35 @@ mkdir -p "$LOG_DIR"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 LOG_FILE="${LOG_DIR}/tick_${TIMESTAMP}.log"
 
+# Determine conductor mode: "api" (Anthropic API agent) or "claude_code" (default)
+CONDUCTOR_MODE="${CONDUCTOR_MODE:-claude_code}"
+
 # Run the tick
-echo "=== Conductor tick: $(date -u +%Y-%m-%dT%H:%M:%SZ) ===" | tee "$LOG_FILE"
+echo "=== Conductor tick: $(date -u +%Y-%m-%dT%H:%M:%SZ) [mode=${CONDUCTOR_MODE}] ===" | tee "$LOG_FILE"
 if [[ -n "$TRIGGER_TASK_ID" ]]; then
     echo "  Triggered by task #${TRIGGER_TASK_ID}" | tee -a "$LOG_FILE"
 elif [[ -n "$TRIGGER_MESSAGE_ID" ]]; then
     echo "  Triggered by message #${TRIGGER_MESSAGE_ID}" | tee -a "$LOG_FILE"
 fi
 
-env ${TRIGGER_TASK_ID:+TRIGGER_TASK_ID=$TRIGGER_TASK_ID} \
-    ${TRIGGER_MESSAGE_ID:+TRIGGER_MESSAGE_ID=$TRIGGER_MESSAGE_ID} \
-    claude -p "$(cat "$TICK_PROMPT")" \
-    --dangerously-skip-permissions \
-    --mcp-config "${HOME}/.config/clade/conductor-mcp.json" \
-    2>&1 | tee -a "$LOG_FILE"
+if [[ "$CONDUCTOR_MODE" == "api" ]]; then
+    # Anthropic API mode — lightweight Python agent, no npm/node required
+    env ${TRIGGER_TASK_ID:+TRIGGER_TASK_ID=$TRIGGER_TASK_ID} \
+        ${TRIGGER_MESSAGE_ID:+TRIGGER_MESSAGE_ID=$TRIGGER_MESSAGE_ID} \
+        CONDUCTOR_TICK_PROMPT="$TICK_PROMPT" \
+        python -m clade.conductor \
+        2>&1 | tee -a "$LOG_FILE"
+else
+    # Claude Code mode (default) — full Claude Code process with MCP server
+    env ${TRIGGER_TASK_ID:+TRIGGER_TASK_ID=$TRIGGER_TASK_ID} \
+        ${TRIGGER_MESSAGE_ID:+TRIGGER_MESSAGE_ID=$TRIGGER_MESSAGE_ID} \
+        claude -p "$(cat "$TICK_PROMPT")" \
+        --dangerously-skip-permissions \
+        --mcp-config "${HOME}/.config/clade/conductor-mcp.json" \
+        2>&1 | tee -a "$LOG_FILE"
+fi
 
-echo "=== Tick complete: $(date -u +%Y-%m-%dT%H:%M:%SZ) ===" | tee -a "$LOG_FILE"
+echo "=== Tick complete: $(date -u +%Y-%m-%dT%H:%M:%SZ) [mode=${CONDUCTOR_MODE}] ===" | tee -a "$LOG_FILE"
 
 # Trim old logs (keep last 7 days)
 find "$LOG_DIR" -name "tick_*.log" -mtime +7 -delete 2>/dev/null || true
