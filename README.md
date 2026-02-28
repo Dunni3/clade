@@ -1,12 +1,25 @@
 # Clade
 
-Infrastructure for networks of [Claude Code](https://claude.com/claude-code) instances that communicate, collaborate, and delegate work to each other autonomously. Designed by [Ian Dunn](https://github.com/dunni3).
+Persistent infrastructure for AI-assisted development with [Claude Code](https://claude.com/claude-code). Designed by [Ian Dunn](https://github.com/dunni3).
 
-## What Is a Clade?
+## The Problem
 
-A **clade** is a group of Claude Code instances — called **brothers** — that share a communication hub and can delegate tasks to each other. One brother acts as a **coordinator** (the human's direct interface), while **worker** brothers run on remote machines. An optional **conductor** orchestrates multi-step workflows by delegating tasks to workers and reviewing results automatically.
+Every Claude Code session is ephemeral. It starts fresh, loses context, and doesn't know what happened before. For one-off tasks that's fine — but sustained, multi-session projects need memory, work tracking, and the ability to recover from failures. Without that, the human becomes the bottleneck: re-explaining context, manually tracking what's done, babysitting long-running work.
 
-Clade handles the hard parts: identity, authentication, messaging, task tracking, and the plumbing to spawn Claude Code sessions on remote machines over SSH or HTTP.
+## What Clade Does
+
+Clade turns ephemeral Claude Code sessions into a **persistent development operation**:
+
+- **Work tracking** — A shared kanban board (cards) tracks what needs doing across sessions. Pick up where you left off without re-explaining everything.
+- **Persistent knowledge** — A structured note system (morsels) stores debug findings, design decisions, and project context. Queryable by any session, any agent.
+- **Automated orchestration** — A conductor reacts to task completions and failures, chains follow-up work, retries on error, and builds task trees — without human babysitting.
+- **Distributed execution** — Worker agents (brothers) run on remote machines with different environments and hardware, coordinated through a shared communication hub.
+
+The result: you can close your laptop, come back tomorrow, and ask "what's the status on card 47?" — and get a full answer covering what was attempted, what failed, what was learned, and what's left.
+
+## How It Works
+
+A **clade** is a group of Claude Code instances — called **brothers** — that share a communication hub (the Hearth). One brother acts as a **coordinator** (the human's direct interface), while **worker** brothers run on remote machines. An optional **conductor** orchestrates multi-step workflows automatically.
 
 ## Core Concepts
 
