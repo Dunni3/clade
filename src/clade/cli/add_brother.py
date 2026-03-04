@@ -211,7 +211,6 @@ def add_brother(
             server_url=config.server_url,
             brother_name=name,
             api_key=api_key,
-            kp=kp,
             yes=yes,
             verify_ssl=verify_ssl,
         )
@@ -425,7 +424,6 @@ def _prompt_and_set_permissions(
     server_url: str,
     brother_name: str,
     api_key: str,
-    kp,
     yes: bool,
     verify_ssl: bool = True,
 ) -> str | BrotherPermissions | None:
@@ -460,11 +458,10 @@ def _prompt_and_set_permissions(
 
     if chosen == "custom":
         custom_flags = click.prompt("Enter permission flags (e.g. --permission-mode acceptEdits)")
-        permissions: str | BrotherPermissions | None = BrotherPermissions()
         # Store raw flags as a note — not parsed into BrotherPermissions fields
         # since the user typed them directly. We'll just write them to Hearth.
         permission_flags = custom_flags
-        permissions = None  # Don't know how to round-trip arbitrary flags to BrotherPermissions
+        permissions: str | BrotherPermissions | None = None  # Can't round-trip arbitrary flags to BrotherPermissions
     elif chosen == "skip_all":
         permissions = "skip_all"
         permission_flags = "--dangerously-skip-permissions"
@@ -473,9 +470,6 @@ def _prompt_and_set_permissions(
         permission_flags = ""
 
     # Write to Hearth
-    keys = load_keys(kp)
-    personal_key = keys.get(list(keys.keys())[0] if keys else "")
-    # Use the brother's own key (they're already registered)
     client = MailboxClient(server_url, api_key, verify_ssl=verify_ssl)
     try:
         ok = client.set_ember_permissions_sync(brother_name, permission_flags)

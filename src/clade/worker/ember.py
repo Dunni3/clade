@@ -204,7 +204,7 @@ async def get_permission_flags() -> str:
     # Hearth unreachable — use local cache
     cached = _read_permissions_cache()
     if cached:
-        logger.info("Hearth unreachable; using cached permission_flags: %s", cached or "(empty)")
+        logger.info("Hearth unreachable; using cached permission_flags: %s", cached)
     return cached
 
 app = FastAPI(title=f"Clade Ember ({_brother_name})")
@@ -269,7 +269,7 @@ async def execute_task(
         hearth_api_key=hearth_api_key,
         hearth_name=hearth_name,
         target_branch=req.target_branch,
-        permission_flags=req.permission_flags,
+        permission_flags=permission_flags,
     )
 
     if not result.success:
