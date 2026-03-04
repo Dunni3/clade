@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -36,7 +37,7 @@ def build_permission_flags(permissions: str | BrotherPermissions | None) -> str:
 
     Note: This value is embedded directly into shell scripts; it is always
     constructed from clade.yaml (user-controlled config), not from untrusted
-    input. No sanitization of user-supplied tool names is performed.
+    input. Tool names are shell-quoted to handle patterns like Bash(python*).
     """
     if permissions is None:
         return ""
@@ -47,11 +48,14 @@ def build_permission_flags(permissions: str | BrotherPermissions | None) -> str:
     if permissions.permission_mode:
         flags.append(f"--permission-mode {permissions.permission_mode}")
     if permissions.allowed_tools:
-        flags.append(f'--allowedTools {" ".join(permissions.allowed_tools)}')
+        quoted = " ".join(shlex.quote(t) for t in permissions.allowed_tools)
+        flags.append(f"--allowedTools {quoted}")
     if permissions.disallowed_tools:
-        flags.append(f'--disallowedTools {" ".join(permissions.disallowed_tools)}')
+        quoted = " ".join(shlex.quote(t) for t in permissions.disallowed_tools)
+        flags.append(f"--disallowedTools {quoted}")
     if permissions.tools:
-        flags.append(f'--tools {" ".join(permissions.tools)}')
+        quoted = " ".join(shlex.quote(t) for t in permissions.tools)
+        flags.append(f"--tools {quoted}")
     return " ".join(flags)
 
 

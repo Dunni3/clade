@@ -637,7 +637,8 @@ class TestBuildPermissionFlags:
     def test_disallowed_tools(self):
         perms = BrotherPermissions(disallowed_tools=["Bash(python*)", "Bash(pip*)"])
         result = build_permission_flags(perms)
-        assert "--disallowedTools Bash(python*) Bash(pip*)" == result
+        # Tool names with shell metacharacters must be quoted
+        assert "--disallowedTools 'Bash(python*)' 'Bash(pip*)'" == result
 
     def test_tools(self):
         perms = BrotherPermissions(tools=["Read", "Grep"])
@@ -650,7 +651,7 @@ class TestBuildPermissionFlags:
         )
         result = build_permission_flags(perms)
         assert "--permission-mode default" in result
-        assert "--disallowedTools Bash(python*)" in result
+        assert "--disallowedTools 'Bash(python*)'" in result
 
 
 class TestBrotherPermissionsRoundTrip:
