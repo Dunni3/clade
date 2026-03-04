@@ -67,7 +67,7 @@ export default function CladeSettingsPage() {
       ...prev,
       [ember.name]: {
         preset,
-        customFlags: preset === 'Custom' ? ember.permission_flags : '',
+        customFlags: ember.permission_flags,
       },
     }));
     setErrors((prev) => ({ ...prev, [ember.name]: '' }));
