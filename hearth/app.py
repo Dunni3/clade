@@ -46,6 +46,7 @@ from .models import (
     TreeSummary,
     UnreadCountResponse,
     UpdateCardRequest,
+    UpdateEmberPermissionsRequest,
     UpdateTaskRequest,
     UpsertBrotherProjectRequest,
     UpsertEmberRequest,
@@ -1034,6 +1035,31 @@ async def delete_ember(
     if not deleted:
         raise HTTPException(status_code=404, detail="Ember not found")
     return Response(status_code=204)
+
+
+@app.put("/api/v1/embers/{name}/permissions", response_model=EmberEntry)
+async def update_ember_permissions(
+    name: str,
+    req: UpdateEmberPermissionsRequest,
+    _caller: str = Depends(resolve_sender),
+):
+    """Set permission flags for a brother's Ember. The Ember fetches these on task execution."""
+    entry = await db.update_ember_permissions(name, req.permission_flags)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No ember registered for '{name}'")
+    return entry
+
+
+@app.get("/api/v1/embers/{name}/permissions")
+async def get_ember_permissions(
+    name: str,
+    _caller: str = Depends(resolve_sender),
+):
+    """Get the permission flags for a brother's Ember."""
+    entry = await db.get_ember(name)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No ember registered for '{name}'")
+    return {"name": name, "permission_flags": entry.get("permission_flags", "")}
 
 
 # ---------------------------------------------------------------------------
