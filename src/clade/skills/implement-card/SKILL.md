@@ -78,10 +78,9 @@ Status: <status>
 2. Explore the relevant code — read key files, trace data flow, understand existing patterns
 3. Write a detailed implementation plan: what to change, where, and why. Include specific file paths, function names, and any trade-offs or risks.
 4. Deposit the plan as a morsel for the audit trail: `deposit_morsel(body=<plan>, tags=["plan", "card-<card_id>"])`
-5. **Write the full plan into your task output — this is the primary handoff to the implementation task:**
-   `update_task(task_id=<your task ID from TRIGGER_TASK_ID env var>, output=<full plan text>)`
+5. **Write the full plan into your task output and mark yourself complete — this is the primary handoff to the implementation task:**
+   `update_task(task_id=<your task ID from CLAUDE_TASK_ID env var>, output=<full plan text>, status="completed")`
    The implementation task will automatically receive your plan via the predecessor context machinery.
-6. Update your task status to completed: `update_task(task_id=<your task ID>, status="completed")`
 ```
 
 Call `initiate_ember_task(brother=brother, prompt=<above>, subject="Plan card #<card_id>: <card_title>", card_id=$1, working_dir=<from step 2>)`.
@@ -120,7 +119,7 @@ Status: <status>
 ## Instructions
 
 1. Read the project's CLAUDE.md to understand the codebase
-2. Check for any planning morsels tagged "plan" and "card-<card_id>" — if found, follow the plan. Also check your task's ancestor context for a plan from the predecessor task.
+2. If a plan was prepared (check your task's ancestor context — it will appear as "Predecessor (blocking task)" context), follow it. Also check for planning morsels tagged "plan" and "card-<card_id>" as a secondary source.
 3. Create a feature branch: `card-<card_id>-<slug>` (slug = lowercase card title, spaces to hyphens, max 40 chars)
 4. Implement the feature/fix described above
 5. Run the project's test suite and fix any failures
