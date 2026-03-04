@@ -11,7 +11,9 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -144,6 +146,67 @@ _state = AspenRegistry()
 _brother_name = os.environ.get("EMBER_BROTHER_NAME", "oppy")
 _default_working_dir = os.environ.get("EMBER_WORKING_DIR")
 
+# Hearth connection for fetching own permission config
+_hearth_url = os.environ.get("HEARTH_URL") or os.environ.get("MAILBOX_URL")
+_hearth_api_key = os.environ.get("HEARTH_API_KEY") or os.environ.get("MAILBOX_API_KEY")
+
+# Local cache file for permission_flags (survives Ember restarts)
+_permissions_cache_path = Path.home() / ".config" / "clade" / "ember_permissions_cache.txt"
+
+
+async def _fetch_permissions_from_hearth() -> str | None:
+    """Fetch this Ember's permission_flags from the Hearth. Returns None on failure."""
+    if not _hearth_url or not _hearth_api_key:
+        return None
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=5.0) as client:
+            resp = await client.get(
+                f"{_hearth_url}/api/v1/embers/{_brother_name}/permissions",
+                headers={"Authorization": f"Bearer {_hearth_api_key}"},
+            )
+            if resp.status_code == 200:
+                return resp.json().get("permission_flags", "")
+            elif resp.status_code == 404:
+                # Not registered in Hearth — treat as no permissions configured
+                return ""
+    except Exception as exc:
+        logger.debug("Could not fetch permissions from Hearth: %s", exc)
+    return None
+
+
+def _read_permissions_cache() -> str:
+    """Read cached permission_flags from local file. Returns '' if not found."""
+    try:
+        return _permissions_cache_path.read_text().strip()
+    except Exception:
+        return ""
+
+
+def _write_permissions_cache(permission_flags: str) -> None:
+    """Write permission_flags to local cache file."""
+    try:
+        _permissions_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        _permissions_cache_path.write_text(permission_flags)
+    except Exception as exc:
+        logger.debug("Could not write permissions cache: %s", exc)
+
+
+async def get_permission_flags() -> str:
+    """Get this Ember's permission flags.
+
+    Fetches from the Hearth and updates local cache. Falls back to cached
+    value if Hearth is unreachable. Falls back to '' if neither is available.
+    """
+    flags = await _fetch_permissions_from_hearth()
+    if flags is not None:
+        _write_permissions_cache(flags)
+        return flags
+    # Hearth unreachable — use local cache
+    cached = _read_permissions_cache()
+    if cached:
+        logger.info("Hearth unreachable; using cached permission_flags: %s", cached or "(empty)")
+    return cached
+
 app = FastAPI(title=f"Clade Ember ({_brother_name})")
 
 
@@ -188,6 +251,12 @@ async def execute_task(
     hearth_url = req.hearth_url or os.environ.get("HEARTH_URL") or os.environ.get("MAILBOX_URL")
     hearth_api_key = req.hearth_api_key or os.environ.get("HEARTH_API_KEY") or os.environ.get("MAILBOX_API_KEY")
     hearth_name = req.hearth_name or os.environ.get("HEARTH_NAME") or os.environ.get("MAILBOX_NAME") or _brother_name
+
+    # Resolve permission_flags: explicit override in request takes precedence,
+    # otherwise fetch from Hearth (with local cache fallback).
+    permission_flags = req.permission_flags
+    if not permission_flags:
+        permission_flags = await get_permission_flags()
 
     # Launch
     result = launch_local_task(
