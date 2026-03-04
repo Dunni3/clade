@@ -6,6 +6,8 @@ import click
 
 from .clade_config import (
     BrotherEntry,
+    BrotherPermissions,
+    build_permission_flags,
     default_config_path,
     load_clade_config,
     save_clade_config,
@@ -202,6 +204,18 @@ def add_brother(
     if setup_sudoers_flag and setup_ember_flag and ember_host and ssh_result.success:
         sudoers_ok = setup_sudoers(ssh_host)
 
+    # Permission setup: prompt user for permission mode and write to Hearth
+    permissions: str | BrotherPermissions | None = None
+    if ember_host and config.server_url:
+        permissions = _prompt_and_set_permissions(
+            server_url=config.server_url,
+            brother_name=name,
+            api_key=api_key,
+            kp=kp,
+            yes=yes,
+            verify_ssl=verify_ssl,
+        )
+
     # Update config
     config.brothers[name] = BrotherEntry(
         ssh=ssh_host,
@@ -212,6 +226,7 @@ def add_brother(
         ember_port=actual_ember_port if ember_host else None,
         ember_host=ember_host,
         sudoers_configured=sudoers_ok,
+        permissions=permissions,
     )
     config_path = default_config_path(config_dir)
     save_clade_config(config, config_path)
@@ -406,3 +421,69 @@ echo "BROTHERS_CONFIG_OK"
         click.echo(click.style(f"  Warning: failed to deploy brothers config to {ssh_host}", fg="yellow"))
 
 
+def _prompt_and_set_permissions(
+    server_url: str,
+    brother_name: str,
+    api_key: str,
+    kp,
+    yes: bool,
+    verify_ssl: bool = True,
+) -> str | BrotherPermissions | None:
+    """Prompt user for permission mode and write chosen permissions to the Hearth.
+
+    Returns the chosen permissions value (for saving to clade.yaml), or None
+    if CC defaults were chosen or Hearth is unreachable.
+    """
+    from ..communication.mailbox_client import MailboxClient
+
+    CHOICES = [
+        ("CC defaults (recommended for most setups)", None),
+        ("Skip all permissions (--dangerously-skip-permissions)", "skip_all"),
+        ("Custom flags (enter manually)", "custom"),
+    ]
+
+    if yes:
+        click.echo("Permission mode: CC defaults (use --no-yes to configure)")
+        chosen = None
+    else:
+        click.echo()
+        click.echo("Permission mode for Claude Code tasks on this brother:")
+        for i, (label, _) in enumerate(CHOICES, 1):
+            click.echo(f"  {i}) {label}")
+        choice = click.prompt(
+            "Choose",
+            default="1",
+            type=click.Choice(["1", "2", "3"]),
+            show_choices=False,
+        )
+        _, chosen = CHOICES[int(choice) - 1]
+
+    if chosen == "custom":
+        custom_flags = click.prompt("Enter permission flags (e.g. --permission-mode acceptEdits)")
+        permissions: str | BrotherPermissions | None = BrotherPermissions()
+        # Store raw flags as a note — not parsed into BrotherPermissions fields
+        # since the user typed them directly. We'll just write them to Hearth.
+        permission_flags = custom_flags
+        permissions = None  # Don't know how to round-trip arbitrary flags to BrotherPermissions
+    elif chosen == "skip_all":
+        permissions = "skip_all"
+        permission_flags = "--dangerously-skip-permissions"
+    else:
+        permissions = None
+        permission_flags = ""
+
+    # Write to Hearth
+    keys = load_keys(kp)
+    personal_key = keys.get(list(keys.keys())[0] if keys else "")
+    # Use the brother's own key (they're already registered)
+    client = MailboxClient(server_url, api_key, verify_ssl=verify_ssl)
+    try:
+        ok = client.set_ember_permissions_sync(brother_name, permission_flags)
+        if ok:
+            click.echo(click.style(f"  Permissions written to Hearth for '{brother_name}'", fg="green"))
+        else:
+            click.echo(click.style("  Warning: could not write permissions to Hearth", fg="yellow"))
+    except Exception as e:
+        click.echo(click.style(f"  Warning: could not reach Hearth to set permissions: {e}", fg="yellow"))
+
+    return permissions
