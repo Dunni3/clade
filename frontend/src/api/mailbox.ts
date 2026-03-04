@@ -11,6 +11,8 @@ import type {
   TaskDetail,
   MemberActivityResponse,
   EmberStatusResponse,
+  EmberEntry,
+  UpdateEmberPermissionsRequest,
   TreeSummary,
   TreeNode,
   MorselSummary,
@@ -107,6 +109,16 @@ export async function getMemberActivity(): Promise<MemberActivityResponse> {
 
 export async function getEmberStatus(): Promise<EmberStatusResponse> {
   const { data } = await apiClient.get<EmberStatusResponse>('/embers/status');
+  return data;
+}
+
+export async function getEmbers(): Promise<EmberEntry[]> {
+  const { data } = await apiClient.get<EmberEntry[]>('/embers');
+  return data;
+}
+
+export async function updateEmberPermissions(name: string, req: UpdateEmberPermissionsRequest): Promise<EmberEntry> {
+  const { data } = await apiClient.put<EmberEntry>(`/embers/${name}/permissions`, req);
   return data;
 }
 

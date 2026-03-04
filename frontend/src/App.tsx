@@ -14,6 +14,7 @@ import MorselFeedPage from './pages/MorselFeedPage';
 import MorselDetailPage from './pages/MorselDetailPage';
 import StatusPage from './pages/StatusPage';
 import SettingsPage from './pages/SettingsPage';
+import CladeSettingsPage from './pages/CladeSettingsPage';
 import { useAuthStore } from './store/authStore';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -129,6 +130,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <ComposePage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/clade"
+            element={
+              <RequireAuth>
+                <CladeSettingsPage />
               </RequireAuth>
             }
           />
