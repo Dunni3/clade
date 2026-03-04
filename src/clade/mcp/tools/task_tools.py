@@ -59,10 +59,10 @@ def create_task_tools(
         The brother will receive the prompt, do the work, and report back via the mailbox.
         Tasks are tracked in the mailbox database.
 
-        WARNING: The remote Claude session runs with --dangerously-skip-permissions by default.
-        This gives the brother full autonomous control — it can read/write/delete files and run
-        arbitrary commands without human approval. Monitor live by attaching to the tmux session
-        on the remote host if needed.
+        The remote Claude session runs with the permission flags configured for this brother
+        in clade.yaml. By default (no permissions key), Claude Code's own defaults apply.
+        With `permissions: skip_all`, the session runs with --dangerously-skip-permissions.
+        Monitor live by attaching to the tmux session on the remote host if needed.
 
         Args:
             brother: Which brother to send the task to — "jerry" or "oppy".
@@ -115,6 +115,7 @@ def create_task_tools(
         full_prompt = wrap_prompt(prompt, brother, subject, task_id, sender)
 
         # 4. Launch via SSH (pass mailbox credentials for hook-based task logging)
+        permission_flags = bro.get("permission_flags", "")
         result: TaskResult = initiate_task(
             host=host,
             working_dir=wd,
@@ -125,6 +126,7 @@ def create_task_tools(
             task_id=task_id,
             mailbox_url=mailbox_url,
             mailbox_api_key=mailbox_api_key,
+            permission_flags=permission_flags,
         )
 
         # 5. Update task status based on result

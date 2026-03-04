@@ -179,6 +179,8 @@ def create_delegation_tools(
             except Exception:
                 pass  # Non-fatal: proceed with original prompt
 
+        permission_flags = config.get("permission_flags", "")
+
         try:
             ember_result = await ember.execute_task(
                 prompt=enriched_prompt,
@@ -191,6 +193,7 @@ def create_delegation_tools(
                 hearth_name=brother,
                 sender_name=mailbox_name,
                 target_branch=target_branch,
+                permission_flags=permission_flags,
             )
         except Exception as e:
             # Mark task as failed

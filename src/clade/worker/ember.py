@@ -131,6 +131,7 @@ class ExecuteTaskRequest(BaseModel):
     sender_name: str | None = None
     on_complete: str | None = None
     target_branch: str | None = None
+    permission_flags: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +200,7 @@ async def execute_task(
         hearth_api_key=hearth_api_key,
         hearth_name=hearth_name,
         target_branch=req.target_branch,
+        permission_flags=req.permission_flags,
     )
 
     if not result.success:

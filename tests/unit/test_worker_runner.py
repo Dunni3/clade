@@ -40,7 +40,7 @@ class TestBuildRunnerScript:
             with open(runner_path) as f:
                 content = f.read()
             assert "claude -p" in content
-            assert "--dangerously-skip-permissions" in content
+            assert "--dangerously-skip-permissions" not in content
             assert prompt_path in content
         finally:
             os.unlink(prompt_path)
@@ -90,7 +90,7 @@ class TestBuildRunnerScript:
             with open(runner_path) as f:
                 content = f.read()
             assert "--max-turns" not in content
-            assert "--dangerously-skip-permissions" in content
+            assert "--dangerously-skip-permissions" not in content
         finally:
             os.unlink(prompt_path)
             os.unlink(runner_path)
@@ -349,6 +349,51 @@ class TestBuildRunnerScript:
                 content = f.read()
             # The function checks for non-zero exit code
             assert '"$rc" -ne 0' in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_skip_all_permission_flags(self):
+        """--dangerously-skip-permissions appears when permission_flags='--dangerously-skip-permissions'."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello",
+            permission_flags="--dangerously-skip-permissions",
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "--dangerously-skip-permissions" in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_custom_permission_flags(self):
+        """Custom permission flags are rendered in the claude command."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello",
+            permission_flags="--permission-mode acceptEdits",
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            assert "--permission-mode acceptEdits" in content
+            assert "--dangerously-skip-permissions" not in content
+        finally:
+            os.unlink(prompt_path)
+            os.unlink(runner_path)
+
+    def test_empty_permission_flags_no_extra_space(self):
+        """No extra space before --max-turns when permission_flags is empty."""
+        prompt_path, runner_path = build_runner_script(
+            "sess", None, "hello", max_turns=10,
+        )
+        try:
+            with open(runner_path) as f:
+                content = f.read()
+            # Should be 'claude -p "..." --max-turns 10' not 'claude -p "..."  --max-turns 10'
+            assert "claude -p" in content
+            assert "  --max-turns" not in content
+            assert "--max-turns 10" in content
         finally:
             os.unlink(prompt_path)
             os.unlink(runner_path)

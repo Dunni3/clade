@@ -10,7 +10,7 @@
 {% if claude_started_flag %}
 _CLAUDE_STARTED=1
 {% endif %}
-claude -p "$(cat $PROMPT_FILE)" --dangerously-skip-permissions{{ ' --max-turns ' ~ max_turns if max_turns is not none else '' }}
+claude -p "$(cat $PROMPT_FILE)"{{ ' ' ~ permission_flags if permission_flags else '' }}{{ ' --max-turns ' ~ max_turns if max_turns is not none else '' }}
 {% if capture_exit %}
 EXIT_CODE=$?
 {% endif %}

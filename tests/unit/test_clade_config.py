@@ -7,8 +7,10 @@ import yaml
 
 from clade.cli.clade_config import (
     BrotherEntry,
+    BrotherPermissions,
     CladeConfig,
     build_brothers_registry,
+    build_permission_flags,
     default_config_path,
     load_brothers_registry,
     load_clade_config,
@@ -608,3 +610,167 @@ class TestLoadBrothersRegistry:
         # Should still return the brother, just with empty API keys
         assert "oppy" in registry
         assert registry["oppy"]["ember_api_key"] == ""
+
+
+class TestBuildPermissionFlags:
+    """Tests for build_permission_flags()."""
+
+    def test_none_returns_empty_string(self):
+        assert build_permission_flags(None) == ""
+
+    def test_skip_all_returns_flag(self):
+        assert build_permission_flags("skip_all") == "--dangerously-skip-permissions"
+
+    def test_empty_permissions_returns_empty(self):
+        perms = BrotherPermissions()
+        assert build_permission_flags(perms) == ""
+
+    def test_permission_mode(self):
+        perms = BrotherPermissions(permission_mode="acceptEdits")
+        assert build_permission_flags(perms) == "--permission-mode acceptEdits"
+
+    def test_allowed_tools(self):
+        perms = BrotherPermissions(allowed_tools=["Read", "Write", "Edit"])
+        result = build_permission_flags(perms)
+        assert "--allowedTools Read Write Edit" == result
+
+    def test_disallowed_tools(self):
+        perms = BrotherPermissions(disallowed_tools=["Bash(python*)", "Bash(pip*)"])
+        result = build_permission_flags(perms)
+        assert "--disallowedTools Bash(python*) Bash(pip*)" == result
+
+    def test_tools(self):
+        perms = BrotherPermissions(tools=["Read", "Grep"])
+        assert build_permission_flags(perms) == "--tools Read Grep"
+
+    def test_multiple_fields(self):
+        perms = BrotherPermissions(
+            permission_mode="default",
+            disallowed_tools=["Bash(python*)"],
+        )
+        result = build_permission_flags(perms)
+        assert "--permission-mode default" in result
+        assert "--disallowedTools Bash(python*)" in result
+
+
+class TestBrotherPermissionsRoundTrip:
+    """Test that permissions survive save_clade_config → load_clade_config."""
+
+    def test_skip_all_round_trip(self, tmp_path: Path):
+        config_file = tmp_path / "clade.yaml"
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_host="10.0.0.1",
+                    permissions="skip_all",
+                ),
+            },
+        )
+        save_clade_config(cfg, config_file)
+        loaded = load_clade_config(config_file)
+
+        assert loaded is not None
+        assert loaded.brothers["oppy"].permissions == "skip_all"
+
+    def test_granular_disallowed_tools_round_trip(self, tmp_path: Path):
+        config_file = tmp_path / "clade.yaml"
+        perms = BrotherPermissions(disallowed_tools=["Bash(python*)", "Bash(pip*)"])
+        cfg = CladeConfig(
+            brothers={
+                "gaby": BrotherEntry(ssh="gaby@server", ember_host="10.0.0.2", permissions=perms),
+            },
+        )
+        save_clade_config(cfg, config_file)
+        loaded = load_clade_config(config_file)
+
+        assert loaded is not None
+        assert isinstance(loaded.brothers["gaby"].permissions, BrotherPermissions)
+        assert loaded.brothers["gaby"].permissions.disallowed_tools == ["Bash(python*)", "Bash(pip*)"]
+        assert loaded.brothers["gaby"].permissions.permission_mode is None
+
+    def test_granular_permission_mode_round_trip(self, tmp_path: Path):
+        config_file = tmp_path / "clade.yaml"
+        perms = BrotherPermissions(permission_mode="acceptEdits", allowed_tools=["Read", "Write"])
+        cfg = CladeConfig(
+            brothers={
+                "safe": BrotherEntry(ssh="safe@host", ember_host="10.0.0.3", permissions=perms),
+            },
+        )
+        save_clade_config(cfg, config_file)
+        loaded = load_clade_config(config_file)
+
+        assert loaded is not None
+        assert isinstance(loaded.brothers["safe"].permissions, BrotherPermissions)
+        assert loaded.brothers["safe"].permissions.permission_mode == "acceptEdits"
+        assert loaded.brothers["safe"].permissions.allowed_tools == ["Read", "Write"]
+
+    def test_no_permissions_round_trip(self, tmp_path: Path):
+        config_file = tmp_path / "clade.yaml"
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(ssh="ian@masuda", ember_host="10.0.0.1"),
+            },
+        )
+        save_clade_config(cfg, config_file)
+        loaded = load_clade_config(config_file)
+
+        assert loaded is not None
+        assert loaded.brothers["oppy"].permissions is None
+
+    def test_no_permissions_not_in_yaml(self, tmp_path: Path):
+        config_file = tmp_path / "clade.yaml"
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(ssh="ian@masuda"),
+            },
+        )
+        save_clade_config(cfg, config_file)
+
+        with open(config_file) as f:
+            data = yaml.safe_load(f)
+        assert "permissions" not in data["brothers"]["oppy"]
+
+
+class TestRegistryPermissionFlags:
+    """Tests for permission_flags in build_brothers_registry output."""
+
+    def test_skip_all_produces_flag_in_registry(self):
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_host="10.0.0.1",
+                    permissions="skip_all",
+                ),
+            },
+        )
+        registry = build_brothers_registry(cfg, {"oppy": "key"})
+        assert registry["oppy"]["permission_flags"] == "--dangerously-skip-permissions"
+
+    def test_no_permissions_omits_field_from_registry(self):
+        cfg = CladeConfig(
+            brothers={
+                "oppy": BrotherEntry(
+                    ssh="ian@masuda",
+                    ember_host="10.0.0.1",
+                ),
+            },
+        )
+        registry = build_brothers_registry(cfg, {"oppy": "key"})
+        assert "permission_flags" not in registry["oppy"]
+
+    def test_granular_permissions_in_registry(self):
+        perms = BrotherPermissions(disallowed_tools=["Bash(python*)"])
+        cfg = CladeConfig(
+            brothers={
+                "gaby": BrotherEntry(
+                    ssh="gaby@server",
+                    ember_host="10.0.0.2",
+                    permissions=perms,
+                ),
+            },
+        )
+        registry = build_brothers_registry(cfg, {"gaby": "key"})
+        assert "--disallowedTools" in registry["gaby"]["permission_flags"]
+        assert "Bash(python*)" in registry["gaby"]["permission_flags"]

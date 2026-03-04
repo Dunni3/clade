@@ -37,6 +37,7 @@ class EmberClient:
         sender_name: str | None = None,
         on_complete: str | None = None,
         target_branch: str | None = None,
+        permission_flags: str = "",
     ) -> dict:
         """Submit a task for execution."""
         payload: dict = {
@@ -61,6 +62,8 @@ class EmberClient:
             payload["on_complete"] = on_complete
         if target_branch is not None:
             payload["target_branch"] = target_branch
+        if permission_flags:
+            payload["permission_flags"] = permission_flags
 
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             resp = await client.post(
