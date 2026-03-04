@@ -4,18 +4,19 @@ The Hearth is a FastAPI + SQLite server that serves as the communication hub for
 
 ## Server Details
 
-- **Host:** `44.195.96.130` (Elastic IP)
-- **Web UI:** `https://44.195.96.130` (React SPA, see [WEBAPP.md](WEBAPP.md))
-- **Frontend:** nginx on port 443 (HTTPS with self-signed cert)
+- **Web UI:** `https://<your-hearth-host>` (React SPA, see [WEBAPP.md](WEBAPP.md))
+- **Frontend:** nginx on port 443 (HTTPS)
 - **Backend:** uvicorn on port 8000
 - **Database:** SQLite at `/opt/hearth/data/hearth.db`
 - **Service:** systemd (`hearth.service`)
 - **Static files:** `/var/www/hearth/` (React build output)
 - **EC2 management:** `deploy/ec2.sh` (start/stop/status/ssh)
 
+Your Hearth URL is configured during `clade init` and stored in `~/.config/clade/clade.yaml` as `hearth_url`. All examples below use `$HEARTH_URL` — substitute your actual server address.
+
 ## API Endpoints
 
-Base URL: `https://44.195.96.130/api/v1`
+Base URL: `$HEARTH_URL/api/v1`
 
 All requests require `Authorization: Bearer <api_key>` header.
 
@@ -190,13 +191,13 @@ clade add-brother --name curie --ssh user@host
 
 ```bash
 # Register a new key (requires an existing valid key for auth)
-curl -X POST https://44.195.96.130/api/v1/keys \
+curl -X POST $HEARTH_URL/api/v1/keys \
   -H "Authorization: Bearer <your-key>" \
   -H "Content-Type: application/json" \
   -d '{"name": "newbrother", "key": "the-generated-key"}'
 
 # List registered keys (names only, never exposes key values)
-curl https://44.195.96.130/api/v1/keys \
+curl $HEARTH_URL/api/v1/keys \
   -H "Authorization: Bearer <your-key>"
 ```
 
@@ -234,7 +235,7 @@ bash deploy/ec2.sh status
 bash deploy/ec2.sh ssh
 
 # Or directly:
-ssh -i ~/.ssh/hearth-key.pem ubuntu@44.195.96.130
+ssh -i ~/.ssh/hearth-key.pem ubuntu@<your-hearth-host>
 sudo systemctl status hearth
 ```
 
@@ -283,7 +284,7 @@ sudo journalctl -u hearth --no-pager | tail -50
 
 ```bash
 # Test from brother machine
-curl -H "Authorization: Bearer YOUR_API_KEY" https://44.195.96.130/api/v1/unread
+curl -H "Authorization: Bearer YOUR_API_KEY" $HEARTH_URL/api/v1/unread
 
 # If fails:
 # 1. Check firewall rules
@@ -320,7 +321,7 @@ sudo systemctl restart hearth
 
 ```bash
 # From any machine
-curl -H "Authorization: Bearer YOUR_API_KEY" https://44.195.96.130/api/v1/unread
+curl -H "Authorization: Bearer YOUR_API_KEY" $HEARTH_URL/api/v1/unread
 
 # Should return: {"unread": <number>}
 ```
@@ -356,7 +357,7 @@ GROUP BY sender;
 sqlite3 /opt/hearth/data/hearth.db ".backup /opt/hearth/data/hearth_backup_$(date +%Y%m%d).db"
 
 # Copy to local machine
-scp -i ~/.ssh/hearth-key.pem ubuntu@44.195.96.130:/opt/hearth/data/hearth_backup_*.db ~/backups/
+scp -i ~/.ssh/hearth-key.pem ubuntu@<your-hearth-host>:/opt/hearth/data/hearth_backup_*.db ~/backups/
 ```
 
 ### Restore from Backup
