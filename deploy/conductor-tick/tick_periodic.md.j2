@@ -1,0 +1,19 @@
+{% include '_common.md.j2' %}
+
+## Your Task — Periodic Tick
+
+This is a routine timer tick. No specific trigger — do your scheduled housekeeping.
+
+1. **Check mailbox** — read any unread messages addressed to you. Respond if needed.
+2. **Scan for stuck tasks** — call `list_tasks(status="launched")`. Any task stuck in `launched` for more than 10 minutes likely had its tmux session die silently. For each stuck task:
+   - Check if the assigned worker is healthy (`check_worker_health`)
+   - If the worker is healthy, mark the stuck task as `failed` with output "tmux session died", then retry it using `retry_task(task_id)` — this automatically creates a child task with the same prompt
+   - If the worker is unreachable, mark the task as `failed` with output "worker unreachable"
+   - Deposit a morsel noting the stuck task and action taken
+3. **Scan for orphaned pending tasks** — call `list_tasks(status="pending")`. Any task stuck in `pending` for more than 5 minutes was likely created in the Hearth but never reached the Ember (e.g. the delegation call failed and the status update was lost). For each orphaned pending task:
+   - Check if the assigned worker is healthy (`check_worker_health`)
+   - If the worker is healthy, **re-delegate** by creating a new child task with the same prompt and marking the orphaned one as `failed` with output "orphaned in pending — re-delegated as task #N"
+   - If the worker is unreachable, mark the task as `failed` with output "worker unreachable — task never reached Ember"
+   - Deposit a morsel noting the orphaned task and action taken
+4. **Check worker health** — verify all workers are reachable
+5. **Deposit a morsel** if anything noteworthy happened (tagged `conductor-tick`)

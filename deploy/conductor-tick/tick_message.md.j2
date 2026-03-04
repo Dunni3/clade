@@ -1,0 +1,11 @@
+{% include '_common.md.j2' %}
+
+## Your Task — Message-Driven Tick
+
+This tick was triggered by someone sending you a message. `TRIGGER_MESSAGE_ID` is set in your environment.
+
+1. **Read the triggering message** via `read_message(TRIGGER_MESSAGE_ID)`
+2. **Respond** if appropriate via `send_message`
+3. **Act on it** — if the message requests work, delegate a task
+4. **Deposit a morsel** summarizing the interaction (tagged `conductor-tick`, note message #TRIGGER_MESSAGE_ID in the body)
+5. **Check for other unread messages** while you're here — read and respond if needed
