@@ -581,3 +581,30 @@ class MailboxClient:
         )
         return resp.status_code in (200, 201)
 
+    def set_ember_permissions_sync(self, name: str, permission_flags: str) -> bool:
+        """Set permission_flags for an Ember in the Hearth. Returns True on success.
+
+        Uses synchronous httpx since permission setup is a one-shot call
+        during CLI onboarding (which is sync).
+        """
+        resp = httpx.put(
+            self._url(f"/embers/{name}/permissions"),
+            json={"permission_flags": permission_flags},
+            headers=self.headers,
+            timeout=10,
+            verify=self.verify_ssl,
+        )
+        return resp.status_code in (200, 201)
+
+    async def set_ember_permissions(self, name: str, permission_flags: str) -> dict:
+        """Set permission_flags for an Ember in the Hearth."""
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            resp = await client.put(
+                self._url(f"/embers/{name}/permissions"),
+                json={"permission_flags": permission_flags},
+                headers=self.headers,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+

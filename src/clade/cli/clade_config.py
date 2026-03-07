@@ -4,11 +4,59 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
 import yaml
+
+
+@dataclass
+class BrotherPermissions:
+    """Permission configuration for a brother's Claude Code sessions.
+
+    All fields are optional. None means "don't pass this flag".
+    """
+
+    permission_mode: str | None = None        # --permission-mode
+    allowed_tools: list[str] | None = None    # --allowedTools
+    disallowed_tools: list[str] | None = None # --disallowedTools
+    tools: list[str] | None = None            # --tools
+
+
+def build_permission_flags(permissions: str | BrotherPermissions | None) -> str:
+    """Convert a permission config into a CLI flag string for shell templates.
+
+    Args:
+        permissions: None → CC defaults (no flags), "skip_all" →
+            --dangerously-skip-permissions, BrotherPermissions → granular flags.
+
+    Returns:
+        A string of CLI flags, or empty string for CC defaults.
+
+    Note: This value is embedded directly into shell scripts; it is always
+    constructed from clade.yaml (user-controlled config), not from untrusted
+    input. Tool names are shell-quoted to handle patterns like Bash(python*).
+    """
+    if permissions is None:
+        return ""
+    if permissions == "skip_all":
+        return "--dangerously-skip-permissions"
+    # BrotherPermissions
+    flags: list[str] = []
+    if permissions.permission_mode:
+        flags.append(f"--permission-mode {permissions.permission_mode}")
+    if permissions.allowed_tools:
+        quoted = " ".join(shlex.quote(t) for t in permissions.allowed_tools)
+        flags.append(f"--allowedTools {quoted}")
+    if permissions.disallowed_tools:
+        quoted = " ".join(shlex.quote(t) for t in permissions.disallowed_tools)
+        flags.append(f"--disallowedTools {quoted}")
+    if permissions.tools:
+        quoted = " ".join(shlex.quote(t) for t in permissions.tools)
+        flags.append(f"--tools {quoted}")
+    return " ".join(flags)
 
 
 @dataclass
@@ -24,6 +72,10 @@ class BrotherEntry:
     ember_host: str | None = None
     sudoers_configured: bool = False
     projects: dict[str, str] = field(default_factory=dict)
+    permissions: str | BrotherPermissions | None = None
+    # None → CC defaults (no --dangerously-skip-permissions)
+    # "skip_all" → --dangerously-skip-permissions
+    # BrotherPermissions → granular flags
 
 
 @dataclass
@@ -94,6 +146,9 @@ def build_brothers_registry(
             entry["working_dir"] = bro.working_dir
         if bro.projects:
             entry["projects"] = dict(bro.projects)
+        flags = build_permission_flags(bro.permissions)
+        if flags:
+            entry["permission_flags"] = flags
         registry[name] = entry
 
     return registry
@@ -168,6 +223,19 @@ def load_clade_config(path: Path | None = None) -> CladeConfig | None:
 
     brothers = {}
     for name, bro_data in brothers_sec.items():
+        raw_perms = bro_data.get("permissions")
+        if raw_perms == "skip_all":
+            permissions: str | BrotherPermissions | None = "skip_all"
+        elif isinstance(raw_perms, dict):
+            permissions = BrotherPermissions(
+                permission_mode=raw_perms.get("permission_mode"),
+                allowed_tools=raw_perms.get("allowed_tools"),
+                disallowed_tools=raw_perms.get("disallowed_tools"),
+                tools=raw_perms.get("tools"),
+            )
+        else:
+            permissions = None  # Unknown format or missing — CC defaults
+
         brothers[name] = BrotherEntry(
             ssh=bro_data.get("ssh", ""),
             working_dir=bro_data.get("working_dir"),
@@ -178,6 +246,7 @@ def load_clade_config(path: Path | None = None) -> CladeConfig | None:
             ember_host=bro_data.get("ember_host"),
             sudoers_configured=bro_data.get("sudoers_configured", False),
             projects=bro_data.get("projects") or {},
+            permissions=permissions,
         )
 
     return CladeConfig(
@@ -253,6 +322,20 @@ def save_clade_config(config: CladeConfig, path: Path | None = None) -> Path:
                 entry["sudoers_configured"] = True
             if bro.projects:
                 entry["projects"] = dict(bro.projects)
+            if bro.permissions == "skip_all":
+                entry["permissions"] = "skip_all"
+            elif isinstance(bro.permissions, BrotherPermissions):
+                perm_dict: dict = {}
+                if bro.permissions.permission_mode:
+                    perm_dict["permission_mode"] = bro.permissions.permission_mode
+                if bro.permissions.allowed_tools:
+                    perm_dict["allowed_tools"] = bro.permissions.allowed_tools
+                if bro.permissions.disallowed_tools:
+                    perm_dict["disallowed_tools"] = bro.permissions.disallowed_tools
+                if bro.permissions.tools:
+                    perm_dict["tools"] = bro.permissions.tools
+                if perm_dict:
+                    entry["permissions"] = perm_dict
             brothers_data[name] = entry
         data["brothers"] = brothers_data
 

@@ -1,7 +1,7 @@
 ---
 name: implement-card
 description: Delegate a kanban card implementation to a worker brother with automatic review task chaining.
-argument-hint: <card_id> [brother] [working_dir]
+argument-hint: <card_id> [brother] [working_dir] [--plan]
 disable-model-invocation: true
 ---
 
@@ -135,9 +135,9 @@ Call `initiate_ember_task(brother=brother, prompt=<above>, subject="Implement ca
 Otherwise:
 Call `initiate_ember_task(brother=brother, prompt=<above>, subject="Implement card #<card_id>: <card_title>", card_id=$1, working_dir=<from step 2>)`.
 
-Note the task ID from the response.
+Note the implementation task ID from the response.
 
-### 6. Delegate review task (blocked)
+### 6. Delegate review task (blocked by implementation)
 
 Build the senior review prompt (include the same context from step 1):
 
@@ -167,7 +167,7 @@ You are reviewing the implementation of kanban card #<card_id>: "<card_title>"
 8. Post a review comment on the PR using `gh pr review --comment -b "<your review>"` summarizing your findings — what looked good, what you fixed, any concerns. Do this even if everything looks good.
 ```
 
-Call `initiate_ember_task(brother=brother, prompt=<above>, subject="Review card #<card_id>: <card_title>", card_id=$1, working_dir=<from step 2>, blocked_by_task_id=<task ID from step 5>)`.
+Call `initiate_ember_task(brother=brother, prompt=<above>, subject="Review card #<card_id>: <card_title>", card_id=$1, working_dir=<from step 2>, blocked_by_task_id=<implementation task ID from step 5>)`.
 
 ### 7. Report
 

@@ -123,6 +123,7 @@ def build_remote_script(
     task_id: int | None = None,
     mailbox_url: str | None = None,
     mailbox_api_key: str | None = None,
+    permission_flags: str = "",
 ) -> str:
     """Build a bash script to run on the remote host via `ssh host bash -s`.
 
@@ -158,6 +159,7 @@ def build_remote_script(
         claude_started_flag=has_trap,
         max_turns=max_turns,
         capture_exit=has_trap,
+        permission_flags=permission_flags,
         # log_path deliberately omitted — remote runner has no LOGFILE
     )
 
@@ -187,6 +189,7 @@ def initiate_task(
     task_id: int | None = None,
     mailbox_url: str | None = None,
     mailbox_api_key: str | None = None,
+    permission_flags: str = "",
 ) -> TaskResult:
     """SSH into host and launch a Claude task in a detached tmux session.
 
@@ -196,6 +199,7 @@ def initiate_task(
     script = build_remote_script(
         session_name, working_dir, prompt_b64, max_turns, auto_pull,
         task_id=task_id, mailbox_url=mailbox_url, mailbox_api_key=mailbox_api_key,
+        permission_flags=permission_flags,
     )
 
     try:

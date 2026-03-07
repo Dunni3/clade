@@ -233,6 +233,13 @@ async def init_db() -> None:
             )
         except Exception:
             pass
+        # Migration: add permission_flags column to embers
+        try:
+            await db.execute(
+                "ALTER TABLE embers ADD COLUMN permission_flags TEXT NOT NULL DEFAULT ''"
+            )
+        except Exception:
+            pass
 
         # -- FTS5 full-text search indexes (content-sync mode) --
         await db.execute("""
@@ -1681,6 +1688,9 @@ async def get_morsels(
 # ---------------------------------------------------------------------------
 
 
+_EMBER_COLS = "name, ember_url, status, last_seen, created_at, updated_at, permission_flags"
+
+
 async def upsert_ember(name: str, ember_url: str) -> dict:
     db = await get_db()
     try:
@@ -1697,7 +1707,7 @@ async def upsert_ember(name: str, ember_url: str) -> dict:
         await db.commit()
 
         cursor = await db.execute(
-            "SELECT name, ember_url, status, last_seen, created_at, updated_at FROM embers WHERE name = ?",
+            f"SELECT {_EMBER_COLS} FROM embers WHERE name = ?",
             (name,),
         )
         row = await cursor.fetchone()
@@ -1706,11 +1716,35 @@ async def upsert_ember(name: str, ember_url: str) -> dict:
         await db.close()
 
 
+async def update_ember_permissions(name: str, permission_flags: str) -> dict | None:
+    """Update the permission_flags for a registered Ember. Returns None if not found."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """UPDATE embers
+               SET permission_flags = ?,
+                   updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+               WHERE name = ?""",
+            (permission_flags, name),
+        )
+        await db.commit()
+        if cursor.rowcount == 0:
+            return None
+        cursor = await db.execute(
+            f"SELECT {_EMBER_COLS} FROM embers WHERE name = ?",
+            (name,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await db.close()
+
+
 async def get_ember(name: str) -> dict | None:
     db = await get_db()
     try:
         cursor = await db.execute(
-            "SELECT name, ember_url, status, last_seen, created_at, updated_at FROM embers WHERE name = ?",
+            f"SELECT {_EMBER_COLS} FROM embers WHERE name = ?",
             (name,),
         )
         row = await cursor.fetchone()
@@ -1723,7 +1757,7 @@ async def get_embers() -> list[dict]:
     db = await get_db()
     try:
         cursor = await db.execute(
-            "SELECT name, ember_url, status, last_seen, created_at, updated_at FROM embers ORDER BY name"
+            f"SELECT {_EMBER_COLS} FROM embers ORDER BY name"
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
@@ -1741,7 +1775,7 @@ async def set_ember_offline(name: str) -> dict | None:
         )
         await db.commit()
         cursor = await db.execute(
-            "SELECT name, ember_url, status, last_seen, created_at, updated_at FROM embers WHERE name = ?",
+            f"SELECT {_EMBER_COLS} FROM embers WHERE name = ?",
             (name,),
         )
         row = await cursor.fetchone()

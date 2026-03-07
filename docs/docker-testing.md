@@ -4,7 +4,7 @@ A multi-container environment for testing the full `clade` CLI onboarding flow â
 
 ## Architecture
 
-Three containers on a shared Docker network, matching production topology:
+Four containers on a shared Docker network, matching production topology:
 
 | Container | Role | What it runs | Production equivalent |
 |-----------|------|-------------|----------------------|
@@ -44,7 +44,7 @@ bash scripts/test-compose.sh
 
 This will:
 1. Generate throwaway SSH keys in `test-keys/` (if not already present)
-2. Build all three container images
+2. Build all four container images
 3. Start the containers in the background
 4. Drop you into a bash shell on the `personal` container
 

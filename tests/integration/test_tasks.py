@@ -1971,6 +1971,93 @@ class TestAPIRetryTask:
         assert data["prompt"] == "Do stuff"
 
     @pytest.mark.asyncio
+    async def test_retry_forwards_max_turns(self, client):
+        """Retry should forward max_turns from the original task to the Ember call and child task."""
+        # Create a task with max_turns and fail it
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff", "subject": "Limited job", "max_turns": 5},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "failed", "output": "Something broke"},
+            headers=OPPY_HEADERS,
+        )
+
+        # Register Ember URL and API key
+        await mailbox_db.upsert_ember("oppy", "http://fake-ember:8100")
+        await mailbox_db.insert_api_key("oppy", "oppy-ember-key")
+
+        # Mock the Ember HTTP call
+        with patch("hearth.app.httpx.AsyncClient") as MockClient:
+            mock_instance = AsyncMock()
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.return_value = None
+            mock_resp.json.return_value = {"status": "accepted"}
+            mock_instance.post.return_value = mock_resp
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_instance
+
+            resp = await client.post(
+                f"/api/v1/tasks/{task_id}/retry",
+                headers=DOOT_HEADERS,
+            )
+
+            # Verify max_turns was included in the Ember payload
+            ember_call = mock_instance.post.call_args
+            ember_payload = ember_call.kwargs.get("json") or ember_call[1].get("json")
+            assert ember_payload["max_turns"] == 5
+
+        assert resp.status_code == 200
+        child_id = resp.json()["id"]
+        # Verify the child task in the DB also has max_turns set
+        child_task = await mailbox_db.get_task(child_id)
+        assert child_task["max_turns"] == 5
+
+    @pytest.mark.asyncio
+    async def test_retry_omits_max_turns_when_none(self, client):
+        """Retry should not include max_turns in the Ember payload when the original task has no max_turns."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do stuff", "subject": "Unlimited job"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+        await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "failed", "output": "Something broke"},
+            headers=OPPY_HEADERS,
+        )
+
+        await mailbox_db.upsert_ember("oppy", "http://fake-ember:8100")
+        await mailbox_db.insert_api_key("oppy", "oppy-ember-key")
+
+        with patch("hearth.app.httpx.AsyncClient") as MockClient:
+            mock_instance = AsyncMock()
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.return_value = None
+            mock_resp.json.return_value = {"status": "accepted"}
+            mock_instance.post.return_value = mock_resp
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_instance
+
+            resp = await client.post(
+                f"/api/v1/tasks/{task_id}/retry",
+                headers=DOOT_HEADERS,
+            )
+
+            # Verify max_turns was NOT included in the Ember payload
+            ember_call = mock_instance.post.call_args
+            ember_payload = ember_call.kwargs.get("json") or ember_call[1].get("json")
+            assert "max_turns" not in ember_payload
+
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
     async def test_retry_non_failed_409(self, client):
         """Cannot retry a task that isn't failed."""
         for status in ["pending", "completed", "killed"]:

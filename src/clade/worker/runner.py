@@ -33,6 +33,7 @@ def build_runner_script(
     hearth_api_key: str | None = None,
     hearth_name: str | None = None,
     target_branch: str | None = None,
+    permission_flags: str = "",
 ) -> tuple[str, str]:
     """Write prompt and runner script to temp files.
 
@@ -72,6 +73,7 @@ def build_runner_script(
         env_exports_log=", ".join(env_exports) if env_exports else "",
         log_path=log_path,
         target_branch=target_branch,
+        permission_flags=permission_flags,
     )
 
     runner_fd, runner_path = tempfile.mkstemp(
@@ -94,6 +96,7 @@ def launch_local_task(
     hearth_api_key: str | None = None,
     hearth_name: str | None = None,
     target_branch: str | None = None,
+    permission_flags: str = "",
 ) -> LocalTaskResult:
     """Launch a Claude Code session in a detached tmux session.
 
@@ -109,6 +112,7 @@ def launch_local_task(
         hearth_api_key=hearth_api_key,
         hearth_name=hearth_name,
         target_branch=target_branch,
+        permission_flags=permission_flags,
     )
 
     try:

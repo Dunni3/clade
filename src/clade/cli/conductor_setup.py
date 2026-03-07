@@ -237,14 +237,34 @@ echo "CONFIG_FILES_OK"
 
 
 def _deploy_tick_files(ssh_host: str, ssh_key: str | None = None) -> SSHResult:
-    """Copy the tick script and prompt to the remote host."""
-    # Read local deploy files
+    """Copy the tick script, prompt, and per-type rendered prompts to the remote host."""
+    import jinja2
+
     deploy_dir = Path(__file__).resolve().parent.parent.parent.parent / "deploy"
     tick_script = (deploy_dir / "conductor-tick.sh").read_text()
     tick_prompt = (deploy_dir / "conductor-tick.md").read_text()
 
+    # Render per-type prompts from Jinja2 templates
+    template_dir = deploy_dir / "conductor-tick"
+    jinja_env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(str(template_dir)),
+        trim_blocks=True,
+        lstrip_blocks=True,
+        keep_trailing_newline=True,
+    )
+    rendered: dict[str, str] = {}
+    for tick_type, template_name in [
+        ("periodic", "tick_periodic.md.j2"),
+        ("event", "tick_event.md.j2"),
+        ("message", "tick_message.md.j2"),
+    ]:
+        rendered[tick_type] = jinja_env.get_template(template_name).render()
+
     script_b64 = base64.b64encode(tick_script.encode()).decode()
     prompt_b64 = base64.b64encode(tick_prompt.encode()).decode()
+    periodic_b64 = base64.b64encode(rendered["periodic"].encode()).decode()
+    event_b64 = base64.b64encode(rendered["event"].encode()).decode()
+    message_b64 = base64.b64encode(rendered["message"].encode()).decode()
 
     script = f"""\
 #!/bin/bash
@@ -255,6 +275,9 @@ mkdir -p "$CONFIG_DIR"
 echo "{script_b64}" | base64 -d > "$CONFIG_DIR/conductor-tick.sh"
 chmod +x "$CONFIG_DIR/conductor-tick.sh"
 echo "{prompt_b64}" | base64 -d > "$CONFIG_DIR/conductor-tick.md"
+echo "{periodic_b64}" | base64 -d > "$CONFIG_DIR/conductor-tick-periodic.md"
+echo "{event_b64}" | base64 -d > "$CONFIG_DIR/conductor-tick-event.md"
+echo "{message_b64}" | base64 -d > "$CONFIG_DIR/conductor-tick-message.md"
 echo "TICK_FILES_OK"
 """
     return run_remote(ssh_host, script, ssh_key=ssh_key, timeout=15)

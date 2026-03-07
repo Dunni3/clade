@@ -272,6 +272,10 @@ class UpsertEmberRequest(BaseModel):
     ember_url: str
 
 
+class UpdateEmberPermissionsRequest(BaseModel):
+    permission_flags: str
+
+
 class EmberEntry(BaseModel):
     name: str
     ember_url: str
@@ -279,6 +283,7 @@ class EmberEntry(BaseModel):
     last_seen: str | None = None
     created_at: str
     updated_at: str
+    permission_flags: str = ""
 
 
 # -- Kanban --

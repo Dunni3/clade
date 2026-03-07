@@ -191,6 +191,8 @@ def create_delegation_tools(
                 hearth_name=brother,
                 sender_name=mailbox_name,
                 target_branch=target_branch,
+                # permission_flags intentionally omitted: the Ember fetches its own
+                # permissions from the Hearth on task execution (card #88).
             )
         except Exception as e:
             # Mark task as failed
