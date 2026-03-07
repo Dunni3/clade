@@ -8,6 +8,7 @@ from .init_cmd import init_cmd
 from .add_brother import add_brother
 from .bootstrap_cmd import bootstrap_cmd
 from .deploy_cmd import deploy
+from .migrate_cmd import migrate
 from .setup_ember_cmd import setup_ember_cmd
 from .setup_conductor_cmd import setup_conductor_cmd
 from .setup_gh_auth_cmd import setup_gh_auth_cmd
@@ -36,6 +37,7 @@ cli.add_command(init_cmd, "init")
 cli.add_command(add_brother, "add-brother")
 cli.add_command(bootstrap_cmd, "bootstrap")
 cli.add_command(deploy, "deploy")
+cli.add_command(migrate, "migrate")
 cli.add_command(setup_ember_cmd, "setup-ember")
 cli.add_command(setup_conductor_cmd, "setup-conductor")
 cli.add_command(setup_gh_auth_cmd, "setup-gh-auth")

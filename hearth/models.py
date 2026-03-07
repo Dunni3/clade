@@ -366,3 +366,28 @@ class SearchResponse(BaseModel):
     query: str
     results: list[SearchResult]
     total: int
+
+
+# -- Migrate --
+
+
+class MigrateData(BaseModel):
+    cards: list[dict] = []
+    morsels: list[dict] = []
+    tasks: list[dict] = []
+    messages: list[dict] = []
+
+
+class MigrateImportRequest(BaseModel):
+    schema_version: int
+    exported_at: str
+    source_hearth: str
+    data: MigrateData
+
+
+class MigrateImportResponse(BaseModel):
+    imported_cards: int
+    imported_morsels: int
+    imported_tasks: int
+    imported_messages: int
+    errors: list[str] = []

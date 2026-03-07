@@ -32,6 +32,8 @@ from .models import (
     MemberActivityResponse,
     MessageDetail,
     MessageSummary,
+    MigrateImportRequest,
+    MigrateImportResponse,
     MorselSummary,
     ReadByEntry,
     RegisterKeyRequest,
@@ -1392,5 +1394,117 @@ async def delete_card(
     if not deleted:
         raise HTTPException(status_code=404, detail="Card not found")
     return Response(status_code=204)
+
+
+# -- Migration --
+
+
+@app.post("/api/v1/migrate/import", response_model=MigrateImportResponse)
+async def migrate_import(
+    req: MigrateImportRequest,
+    _caller: str = Depends(resolve_sender),
+):
+    """Bulk-import Hearth data from an export file.
+
+    Inserts tasks, messages, morsels, and cards with original IDs and timestamps
+    preserved. Uses INSERT OR IGNORE, so re-importing the same data is safe.
+    Tasks and messages must be inserted before morsels/cards that reference them.
+    """
+    if req.schema_version != 1:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported schema_version: {req.schema_version}. Only version 1 is supported.",
+        )
+
+    errors: list[str] = []
+    imported_tasks = imported_messages = imported_morsels = imported_cards = 0
+
+    for task in req.data.tasks:
+        try:
+            await db.import_task(task)
+            imported_tasks += 1
+        except Exception as exc:
+            errors.append(f"task {task.get('id')}: {exc}")
+
+    for message in req.data.messages:
+        try:
+            await db.import_message(message)
+            imported_messages += 1
+        except Exception as exc:
+            errors.append(f"message {message.get('id')}: {exc}")
+
+    for morsel in req.data.morsels:
+        try:
+            await db.import_morsel(morsel)
+            imported_morsels += 1
+        except Exception as exc:
+            errors.append(f"morsel {morsel.get('id')}: {exc}")
+
+    for card in req.data.cards:
+        try:
+            await db.import_card(card)
+            imported_cards += 1
+        except Exception as exc:
+            errors.append(f"card {card.get('id')}: {exc}")
+
+    return MigrateImportResponse(
+        imported_cards=imported_cards,
+        imported_morsels=imported_morsels,
+        imported_tasks=imported_tasks,
+        imported_messages=imported_messages,
+        errors=errors,
+    )
+
+
+@app.get("/api/v1/migrate/export")
+async def migrate_export(
+    include: str = "cards,morsels",
+    _caller: str = Depends(resolve_sender),
+):
+    """Export Hearth data as a portable JSON payload.
+
+    Query param: include=cards,morsels,tasks,messages (comma-separated)
+    API keys and ember registry are never exported.
+    """
+    from datetime import timezone, datetime
+
+    tables = {t.strip() for t in include.split(",") if t.strip()}
+    data: dict = {"cards": [], "morsels": [], "tasks": [], "messages": []}
+
+    if "cards" in tables:
+        offset = 0
+        while True:
+            batch = await db.get_cards(include_archived=True, limit=200, offset=offset)
+            data["cards"].extend(batch)
+            if len(batch) < 200:
+                break
+            offset += 200
+
+    if "morsels" in tables:
+        offset = 0
+        while True:
+            batch = await db.get_morsels(limit=200, offset=offset)
+            data["morsels"].extend(batch)
+            if len(batch) < 200:
+                break
+            offset += 200
+
+    if "tasks" in tables:
+        data["tasks"] = await db.get_tasks(limit=10000)
+
+    if "messages" in tables:
+        offset = 0
+        while True:
+            batch = await db.get_feed(limit=200, offset=offset)
+            data["messages"].extend(batch)
+            if len(batch) < 200:
+                break
+            offset += 200
+
+    return {
+        "schema_version": 1,
+        "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "data": data,
+    }
 
 
