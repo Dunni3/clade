@@ -10,6 +10,14 @@
 {% if claude_started_flag %}
 _CLAUDE_STARTED=1
 {% endif %}
+{% if has_trap %}
+if [ -n "$HEARTH_URL" ] && [ -n "$HEARTH_API_KEY" ] && [ -n "$CLAUDE_TASK_ID" ]; then
+    curl -skf -X PATCH "$HEARTH_URL/api/v1/tasks/$CLAUDE_TASK_ID" \
+        -H "Authorization: Bearer $HEARTH_API_KEY" \
+        -H "Content-Type: application/json" \
+        -d '{"status":"in_progress"}' >/dev/null 2>&1 || true
+fi
+{% endif %}
 claude -p "$(cat $PROMPT_FILE)"{{ ' ' ~ permission_flags if permission_flags else '' }}{{ ' --max-turns ' ~ max_turns if max_turns is not none else '' }}
 {% if capture_exit %}
 EXIT_CODE=$?
