@@ -13,7 +13,7 @@ Delegate a kanban card to a worker brother for implementation, then chain a bloc
 - `$1` — card ID (required)
 - `$2` — brother name (default: `oppy`)
 - `$3` — working directory override (optional)
-- `--plan` — if present anywhere in the arguments, add a planning step before implementation
+- `$4` — `--plan` flag (optional): if provided, create a plan task before implementation
 
 ## Steps
 
@@ -43,16 +43,16 @@ Fetch all linked items in parallel where possible. Save their content — you'll
 
 Call `move_card($1, "in_progress")`.
 
-### 4. (If `--plan`) Delegate planning task
+### 4. Delegate plan task (conditional — only if `$4` is `--plan`)
 
-**Skip this step if `--plan` was NOT passed.**
+If `$4` is `--plan`:
 
 Set `brother` to `$2` if provided, otherwise `"oppy"`.
 
-Build the planning prompt (use the card title and description verbatim, plus gathered context):
+Build the plan prompt (include card title, description, and gathered context):
 
 ```
-You are planning the implementation of kanban card #<card_id>: "<card_title>"
+You are creating an implementation plan for kanban card #<card_id>: "<card_title>"
 
 ## Card Description
 <card_description>
@@ -75,19 +75,19 @@ Status: <status>
 ## Instructions
 
 1. Read the project's CLAUDE.md to understand the codebase
-2. Explore the relevant parts of the codebase to understand the current architecture and patterns
-3. Write a detailed implementation plan covering:
-   - Which files need to be created or modified
-   - Key design decisions and trade-offs
-   - Testing strategy
-   - Any risks or open questions
-4. Save the plan as a morsel using `deposit_morsel` with tags ["plan", "card-<card_id>"] and card_id=<card_id>
-5. Send a message to doot with a summary of the plan
+2. Explore the relevant code — read key files, trace data flow, understand existing patterns
+3. Write a detailed implementation plan: what to change, where, and why. Include specific file paths, function names, and any trade-offs or risks.
+4. Deposit the plan as a morsel for the audit trail: `deposit_morsel(body=<plan>, tags=["plan", "card-<card_id>"])`
+5. **Write the full plan into your task output and mark yourself complete — this is the primary handoff to the implementation task:**
+   `update_task(task_id=<your task ID from CLAUDE_TASK_ID env var>, output=<full plan text>, status="completed")`
+   The implementation task will automatically receive your plan via the predecessor context machinery.
 ```
 
 Call `initiate_ember_task(brother=brother, prompt=<above>, subject="Plan card #<card_id>: <card_title>", card_id=$1, working_dir=<from step 2>)`.
 
-Note the plan task ID from the response. This will be used as `blocked_by_task_id` for the implementation task.
+Note the task ID as `plan_task_id`.
+
+If `$4` is not `--plan`, skip this step entirely. Set `plan_task_id` to null/unset.
 
 ### 5. Delegate implementation task
 
@@ -119,7 +119,7 @@ Status: <status>
 ## Instructions
 
 1. Read the project's CLAUDE.md to understand the codebase
-2. Check for any planning morsels tagged "plan" and "card-<card_id>" — if found, follow the plan
+2. If a plan was prepared (check your task's ancestor context — it will appear as "Predecessor (blocking task)" context), follow it. Also check for planning morsels tagged "plan" and "card-<card_id>" as a secondary source.
 3. Create a feature branch: `card-<card_id>-<slug>` (slug = lowercase card title, spaces to hyphens, max 40 chars)
 4. Implement the feature/fix described above
 5. Run the project's test suite and fix any failures
@@ -129,9 +129,11 @@ Status: <status>
 9. Send a message to doot summarizing what you did and the PR URL
 ```
 
-If `--plan` was passed, call `initiate_ember_task(brother=brother, prompt=<above>, subject="Implement card #<card_id>: <card_title>", card_id=$1, working_dir=<from step 2>, blocked_by_task_id=<plan task ID from step 4>)`.
+If `plan_task_id` is set (i.e., `--plan` was used):
+Call `initiate_ember_task(brother=brother, prompt=<above>, subject="Implement card #<card_id>: <card_title>", card_id=$1, working_dir=<from step 2>, blocked_by_task_id=plan_task_id)`.
 
-Otherwise, call `initiate_ember_task(brother=brother, prompt=<above>, subject="Implement card #<card_id>: <card_title>", card_id=$1, working_dir=<from step 2>)`.
+Otherwise:
+Call `initiate_ember_task(brother=brother, prompt=<above>, subject="Implement card #<card_id>: <card_title>", card_id=$1, working_dir=<from step 2>)`.
 
 Note the implementation task ID from the response.
 
@@ -170,8 +172,8 @@ Call `initiate_ember_task(brother=brother, prompt=<above>, subject="Review card 
 ### 7. Report
 
 Tell the user:
-- If `--plan`: Plan task ID and that it's been delegated to `<brother>`
-- Implementation task ID (and whether it's blocked on the plan task or running immediately)
+- If `--plan` was used: plan task ID and that it's been delegated to `<brother>`
+- Implementation task ID (and that it's blocked until plan completes, if `--plan` was used)
 - Review task ID and that it's blocked until implementation completes
 - The card has been moved to in_progress
 
