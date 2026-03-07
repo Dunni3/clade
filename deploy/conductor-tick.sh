@@ -28,8 +28,24 @@ done
 
 CONFIG_DIR="${HOME}/.config/clade"
 LOG_DIR="${HOME}/.local/share/clade/conductor-logs"
-TICK_PROMPT="${CONFIG_DIR}/conductor-tick.md"
 ENV_FILE="${CONFIG_DIR}/conductor.env"
+
+# Determine tick type from arguments set above
+if [[ -n "$TRIGGER_TASK_ID" ]]; then
+    TICK_TYPE="event"
+elif [[ -n "$TRIGGER_MESSAGE_ID" ]]; then
+    TICK_TYPE="message"
+else
+    TICK_TYPE="periodic"
+fi
+
+# Select per-type prompt, falling back to monolithic prompt
+PER_TYPE_PROMPT="${CONFIG_DIR}/conductor-tick-${TICK_TYPE}.md"
+if [[ -f "$PER_TYPE_PROMPT" ]]; then
+    TICK_PROMPT="$PER_TYPE_PROMPT"
+else
+    TICK_PROMPT="${CONFIG_DIR}/conductor-tick.md"
+fi
 
 # Concurrency guard — only one tick at a time, others queue (up to 10 min)
 LOCK_FILE="${CONFIG_DIR}/conductor-tick.lock"
