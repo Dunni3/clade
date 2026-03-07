@@ -3653,3 +3653,164 @@ class TestUnblockWithContext:
             assert "## Context from prior tasks" in prompt
             assert "Installed everything" in prompt
             assert "Do the real work" in prompt
+
+    @pytest.mark.asyncio
+    async def test_unblock_sends_card_context(self):
+        """When a blocked task with a linked card is unblocked, the card context appears in the prompt."""
+        from hearth.app import _unblock_and_delegate
+
+        # Create blocker task
+        blocker_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Blocker",
+            subject="Setup step",
+        )
+
+        # Create blocked task
+        blocked_id = await mailbox_db.insert_task(
+            creator="doot", assignee="oppy", prompt="Implement the feature",
+            blocked_by_task_id=blocker_id,
+        )
+
+        # Create a card linked to the blocked task
+        await mailbox_db.insert_card(
+            creator="doot",
+            title="My Spec Card",
+            description="This card describes the feature requirements in detail.",
+            links=[{"object_type": "task", "object_id": str(blocked_id)}],
+        )
+
+        await mailbox_db.update_task(blocker_id, output="Blocker done")
+
+        await mailbox_db.upsert_ember("oppy", "http://fake-ember:8100")
+        await mailbox_db.insert_api_key("oppy", "test-key-oppy")
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("hearth.app.httpx.AsyncClient") as mock_client_cls:
+            mock_client_instance = AsyncMock()
+            mock_client_instance.post = AsyncMock(return_value=mock_response)
+            mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client_instance
+
+            await _unblock_and_delegate(blocker_id)
+
+            call_args = mock_client_instance.post.call_args
+            assert call_args is not None, "Ember was not called"
+            payload = call_args.kwargs.get("json") or call_args[1].get("json")
+            prompt = payload["prompt"]
+            assert "My Spec Card" in prompt
+            assert "This card describes the feature requirements in detail." in prompt
+            assert "## Card" in prompt
+
+
+class TestContextEndpointCardContext:
+    """Tests for card context injection in _build_ancestor_context."""
+
+    @pytest.mark.asyncio
+    async def test_context_endpoint_with_card_link(self, client):
+        """Task with linked card returns card title and description in context."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do something"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "My Feature Card",
+                "description": "Detailed spec for this feature.",
+                "col": "todo",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 201
+
+        resp = await client.get(f"/api/v1/tasks/{task_id}/context", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        context = resp.json()["context"]
+        assert "My Feature Card" in context
+        assert "Detailed spec for this feature." in context
+        assert "## Card" in context
+
+    @pytest.mark.asyncio
+    async def test_context_endpoint_card_no_description(self, client):
+        """Task linked to card with no description returns empty context."""
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Do something"},
+            headers=DOOT_HEADERS,
+        )
+        task_id = resp.json()["id"]
+
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Card Without Description",
+                "col": "todo",
+                "links": [{"object_type": "task", "object_id": str(task_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 201
+
+        resp = await client.get(f"/api/v1/tasks/{task_id}/context", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        assert resp.json()["context"] == ""
+
+    @pytest.mark.asyncio
+    async def test_context_endpoint_card_and_parent(self, client):
+        """Task with linked card AND parent with output includes both sections."""
+        # Create parent with output
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Parent task", "subject": "Parent step"},
+            headers=DOOT_HEADERS,
+        )
+        parent_id = resp.json()["id"]
+        await client.patch(
+            f"/api/v1/tasks/{parent_id}",
+            json={"status": "in_progress"},
+            headers=OPPY_HEADERS,
+        )
+        with patch("hearth.app._maybe_trigger_conductor_tick"):
+            await client.patch(
+                f"/api/v1/tasks/{parent_id}",
+                json={"status": "completed", "output": "Parent finished"},
+                headers=OPPY_HEADERS,
+            )
+
+        # Create child task
+        resp = await client.post(
+            "/api/v1/tasks",
+            json={"assignee": "oppy", "prompt": "Child task", "parent_task_id": parent_id},
+            headers=DOOT_HEADERS,
+        )
+        child_id = resp.json()["id"]
+
+        # Link child task to a card with description
+        resp = await client.post(
+            "/api/v1/kanban/cards",
+            json={
+                "title": "Spec Card",
+                "description": "The card spec text.",
+                "col": "todo",
+                "links": [{"object_type": "task", "object_id": str(child_id)}],
+            },
+            headers=DOOT_HEADERS,
+        )
+        assert resp.status_code == 201
+
+        resp = await client.get(f"/api/v1/tasks/{child_id}/context", headers=DOOT_HEADERS)
+        assert resp.status_code == 200
+        context = resp.json()["context"]
+        # Card section should appear
+        assert "Spec Card" in context
+        assert "The card spec text." in context
+        # Ancestor context should also appear
+        assert "Parent finished" in context
+        assert "Parent step" in context

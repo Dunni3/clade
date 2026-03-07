@@ -165,6 +165,7 @@ async def _build_ancestor_context(task_id: int, max_levels: int = 3) -> str:
 
     Collects output summaries from parent tasks (up to max_levels) and the
     blocked_by task, then formats them as a preamble to prepend to the prompt.
+    Also prepends the linked kanban card's title and description if present.
     """
     task = await db.get_task(task_id)
     if not task:
@@ -195,10 +196,26 @@ async def _build_ancestor_context(task_id: int, max_levels: int = 3) -> str:
         seen.add(current_id)
         current_id = ancestor.get("parent_task_id")
 
-    if not sections:
+    # Check for a linked kanban card on the target task
+    card_section = ""
+    card_map = await db.get_cards_for_objects("task", [str(task_id)])
+    task_cards = card_map.get(str(task_id), [])
+    if task_cards:
+        card = await db.get_card(task_cards[0]["id"])
+        if card and card.get("description"):
+            title = card.get("title") or "(untitled)"
+            card_id = card["id"]
+            card_section = f"## Card #{card_id} — \"{title}\"\n\n{card['description']}\n\n---\n\n"
+
+    if not sections and not card_section:
         return ""
 
-    return "## Context from prior tasks\n\n" + "\n\n".join(sections) + "\n\n---\n\n"
+    parts = []
+    if card_section:
+        parts.append(card_section)
+    if sections:
+        parts.append("## Context from prior tasks\n\n" + "\n\n".join(sections) + "\n\n---\n\n")
+    return "".join(parts)
 
 
 async def _cascade_failure(failed_task_id: int) -> None:
