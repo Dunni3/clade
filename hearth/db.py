@@ -2265,3 +2265,148 @@ async def search(
         return results[:limit]
     finally:
         await db.close()
+
+
+# -- Migration import --
+
+
+async def import_morsel(morsel: dict) -> None:
+    """Insert a morsel with original id and created_at preserved.
+
+    Uses INSERT OR IGNORE so re-importing is safe on a clean target.
+    """
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO morsels (id, creator, body, created_at) VALUES (?, ?, ?, ?)",
+            (morsel["id"], morsel.get("creator", ""), morsel.get("body", ""), morsel.get("created_at")),
+        )
+        morsel_id = morsel["id"]
+        for tag in morsel.get("tags", []):
+            await db.execute(
+                "INSERT OR IGNORE INTO morsel_tags (morsel_id, tag) VALUES (?, ?)",
+                (morsel_id, tag),
+            )
+        for link in morsel.get("links", []):
+            await db.execute(
+                "INSERT OR IGNORE INTO morsel_links (morsel_id, object_type, object_id) VALUES (?, ?, ?)",
+                (morsel_id, link["object_type"], link["object_id"]),
+            )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def import_card(card: dict) -> None:
+    """Insert a card with original id and timestamps preserved.
+
+    Uses INSERT OR IGNORE so re-importing is safe on a clean target.
+    """
+    db = await get_db()
+    try:
+        await db.execute(
+            """INSERT OR IGNORE INTO kanban_cards
+               (id, creator, title, description, col, priority, assignee, project, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                card["id"],
+                card.get("creator", ""),
+                card.get("title", ""),
+                card.get("description", ""),
+                card.get("col", "backlog"),
+                card.get("priority", "normal"),
+                card.get("assignee"),
+                card.get("project"),
+                card.get("created_at"),
+                card.get("updated_at"),
+            ),
+        )
+        card_id = card["id"]
+        for label in card.get("labels", []):
+            await db.execute(
+                "INSERT OR IGNORE INTO kanban_card_labels (card_id, label) VALUES (?, ?)",
+                (card_id, label),
+            )
+        for link in card.get("links", []):
+            await db.execute(
+                "INSERT OR IGNORE INTO kanban_card_links (card_id, object_type, object_id) VALUES (?, ?, ?)",
+                (card_id, link["object_type"], link["object_id"]),
+            )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def import_task(task: dict) -> None:
+    """Insert a task with original id and timestamps preserved.
+
+    Uses INSERT OR IGNORE so re-importing is safe on a clean target.
+    """
+    db = await get_db()
+    try:
+        metadata = task.get("metadata")
+        if metadata is not None and not isinstance(metadata, str):
+            metadata = json.dumps(metadata)
+        await db.execute(
+            """INSERT OR IGNORE INTO tasks
+               (id, creator, assignee, subject, prompt, status, session_name, host,
+                working_dir, created_at, started_at, completed_at, output, metadata,
+                depth, parent_task_id, root_task_id, blocked_by_task_id, on_complete,
+                max_turns, project)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                task["id"],
+                task.get("creator", ""),
+                task.get("assignee", ""),
+                task.get("subject", ""),
+                task.get("prompt", ""),
+                task.get("status", "completed"),
+                task.get("session_name"),
+                task.get("host"),
+                task.get("working_dir"),
+                task.get("created_at"),
+                task.get("started_at"),
+                task.get("completed_at"),
+                task.get("output"),
+                metadata,
+                task.get("depth", 0),
+                task.get("parent_task_id"),
+                task.get("root_task_id"),
+                task.get("blocked_by_task_id"),
+                task.get("on_complete"),
+                task.get("max_turns"),
+                task.get("project"),
+            ),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def import_message(message: dict) -> None:
+    """Insert a message with original id and timestamps preserved.
+
+    Uses INSERT OR IGNORE so re-importing is safe on a clean target.
+    """
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO messages (id, sender, subject, body, created_at, task_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                message["id"],
+                message.get("sender", ""),
+                message.get("subject", ""),
+                message.get("body", ""),
+                message.get("created_at"),
+                message.get("task_id"),
+            ),
+        )
+        msg_id = message["id"]
+        for recipient in message.get("recipients", []):
+            await db.execute(
+                "INSERT OR IGNORE INTO message_recipients (message_id, recipient, is_read) VALUES (?, ?, 0)",
+                (msg_id, recipient),
+            )
+        await db.commit()
+    finally:
+        await db.close()
