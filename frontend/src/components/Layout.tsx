@@ -13,6 +13,7 @@ const navItems = [
   { to: '/board', label: 'Board' },
   { to: '/morsels', label: 'Morsels' },
   { to: '/status', label: 'Status' },
+  { to: '/clade', label: 'Clade' },
   { to: '/compose', label: 'Compose' },
   { to: '/settings', label: 'Settings' },
 ];

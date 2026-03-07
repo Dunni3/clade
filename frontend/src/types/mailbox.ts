@@ -126,6 +126,20 @@ export interface EmberStatusResponse {
   embers: Record<string, EmberInfo>;
 }
 
+export interface EmberEntry {
+  name: string;
+  ember_url: string;
+  status: string;
+  last_seen: string | null;
+  created_at: string;
+  updated_at: string;
+  permission_flags: string;
+}
+
+export interface UpdateEmberPermissionsRequest {
+  permission_flags: string;
+}
+
 export interface TreeSummary {
   root_task_id: number;
   subject: string;
