@@ -14,6 +14,7 @@ from .setup_gh_auth_cmd import setup_gh_auth_cmd
 from .setup_github_cmd import setup_github_cmd
 from .status_cmd import status_cmd
 from .doctor import doctor
+from .sync_permissions_cmd import sync_permissions
 
 
 @click.group()
@@ -41,6 +42,7 @@ cli.add_command(setup_gh_auth_cmd, "setup-gh-auth")
 cli.add_command(setup_github_cmd, "setup-github")
 cli.add_command(status_cmd, "status")
 cli.add_command(doctor, "doctor")
+cli.add_command(sync_permissions, "sync-permissions")
 
 
 if __name__ == "__main__":
